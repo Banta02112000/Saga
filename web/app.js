@@ -1201,7 +1201,7 @@
     return `<section class="stack"><h2>Home-screen widgets</h2>
       <label class="switch"><input type="checkbox" data-feature="widget" ${feat("widget") ? "checked" : ""}><span>Keep widgets up to date</span></label>
       <p class="small muted">Long-press your home screen › Widgets › Saga. Six to choose from: Up next, Next episodes (with a Mark watched button), Coming up, Games, Reading and Your year. They refresh whenever Saga changes something.</p>
-      <label class="field"><span>Background opacity: <b id="walphaV">${esc(db.get("widget_alpha", "95"))}%</b></span><input type="range" min="0" max="100" step="5" value="${esc(db.get("widget_alpha", "95"))}" data-setting="widget_alpha" aria-label="Widget background opacity" oninput="document.getElementById('walphaV').textContent=this.value+'%'"></label>
+      <label class="field"><span>Background opacity: <b id="walphaV">${esc(db.get("widget_alpha", "95"))}%</b></span><input type="range" min="0" max="100" step="5" value="${esc(db.get("widget_alpha", "95"))}" data-setting="widget_alpha" aria-label="Widget background opacity"></label>
       <label class="field"><span>Look</span><select data-setting="widget_look">${[["dark", "Dark background, light text"], ["light", "Light background, dark text"]].map(([v, l]) => `<option value="${v}" ${db.get("widget_look", "dark") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <label class="field"><span>Text size</span><select data-setting="widget_size">${[["12", "Small"], ["14", "Normal"], ["16", "Large"], ["18", "Extra large"]].map(([v, l]) => `<option value="${v}" ${db.get("widget_size", "14") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <p class="small muted">At low opacity, pick the look that reads best on your wallpaper: light text for dark wallpapers, dark text for light ones.</p></section>`;
@@ -2833,6 +2833,9 @@
     if (feat("trakt") && db.get("trakt_push") === "1" && db.get("token") && d.medium !== "Video Game")
       traktDo({ title: d.title, year: d.year ? parseInt(d.year, 10) : null, medium: d.medium, imdb: d.imdb || null }, "history");
   }
+
+  // live number next to a slider (inline handlers are blocked by the content security policy)
+  document.addEventListener("input", e => { const el = e.target; if (el && el.dataset && el.dataset.setting === "widget_alpha") { const v = document.getElementById("walphaV"); if (v) v.textContent = el.value + "%"; } });
 
   document.addEventListener("click", e => {
     const el = e.target.closest("[data-action]");
