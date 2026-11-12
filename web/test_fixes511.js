@@ -1,6 +1,11 @@
 const assert = require("assert");
 const C = require("./core.js"), L = require("./library.js"), I = require("./imports.js");
 (async () => {
+  // Paused: out of Up next; a new episode tick resumes it
+  { const lb = new L.Library(null); const it = lb.add({ type: "show", title: "On Hold", year: 2020 }, "watching").item;
+    it.epl = [[1, 1, "2020-01-01"], [1, 2, "2020-01-08"], [1, 3, "2020-01-15"]]; lb.toggleEp(it, 1, 1);
+    assert.strictEqual(lb.upNext().length, 1); lb.setStatus(it, "paused"); assert.strictEqual(lb.upNext().length, 0);
+    lb.toggleEp(it, 1, 2); assert.strictEqual(it.status, "watching"); }
   // episodes ticked in bulk are remembered as such (stats leave them out); a single tick isn't
   { const lb = new L.Library(null); const it = lb.add({ type: "show", title: "Bulk Show", year: 2020 }, "watching").item;
     it.epl = [[1, 1, "2020-01-01"], [1, 2, "2020-01-08"], [1, 3, "2020-01-15"], [1, 4, "2020-01-22"]];

@@ -4,8 +4,8 @@
    The UI part registers itself in Kit.mods.games. GamesCore also runs in Node for the tests. */
 (function (root) {
   "use strict";
-  const STATUSES = ["playing", "backlog", "done", "wishlist", "dropped"];
-  const LABEL = { playing: "Playing", backlog: "Backlog", done: "Finished", wishlist: "Wishlist", dropped: "Dropped" };
+  const STATUSES = ["playing", "paused", "backlog", "done", "wishlist", "dropped"];
+  const LABEL = { playing: "Playing", paused: "Paused", backlog: "Backlog", done: "Finished", wishlist: "Wishlist", dropped: "Dropped" };
   const today = () => new Date().toISOString().slice(0, 10);
   const norm = t => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/&/g, "and").replace(/[™®©]/g, "").replace(/^the\s+/, "").replace(/[^a-z0-9]/g, "");
   const NA = v => v == null || v === "" || /^(n\/?a|tba|tbd|-)$/i.test(String(v).trim());
@@ -79,7 +79,7 @@
     remove(id) { const g = this.get(id); if (g) this.removed[norm(g.title)] = 1; this.games = this.games.filter(x => x.id !== id); }
     visible() { return this.games.filter(g => !g.hidden); }
     counts() {
-      const c = { all: 0, playing: 0, backlog: 0, done: 0, wishlist: 0, dropped: 0, next: 0, upcoming: 0, plays: 0 };
+      const c = { all: 0, playing: 0, paused: 0, backlog: 0, done: 0, wishlist: 0, dropped: 0, next: 0, upcoming: 0, plays: 0 };
       const t = today();
       for (const g of this.visible()) { c.all++; c[g.status]++; if (g.next) c.next++; if (g.date && g.date > t) c.upcoming++; c.plays += g.plays.length; }
       return c;
@@ -111,7 +111,7 @@
       return out.sort((a, b) => b.date.localeCompare(a.date)).slice(0, limit);
     }
   }
-  const rank = s => ({ wishlist: 0, backlog: 1, dropped: 2, playing: 3, done: 4 }[s] || 0);
+  const rank = s => ({ wishlist: 0, backlog: 1, dropped: 2, paused: 2, playing: 3, done: 4 }[s] || 0);
   function setStatus(g, st, date) {
     if (!STATUSES.includes(st)) return g;
     const prev = g.status;
@@ -279,7 +279,7 @@
     let added = 0, updated = 0;
     for (const r of rows) {
       if (!r || !r.title || lib.removed[norm(r.title)]) continue;
-      const st = { done: "done", playing: "playing", backlog: "backlog", wishlist: "wishlist", dropped: "dropped" }[r.status] || "backlog";
+      const st = { done: "done", playing: "playing", paused: "paused", backlog: "backlog", wishlist: "wishlist", dropped: "dropped" }[r.status] || "backlog";
       const { game, existed } = lib.add({ title: r.title, platform: r.platform || "", steam: r.steam || null, owned: r.owned || (st !== "wishlist" ? r.platform || "" : ""), src: kind }, st);
       if (existed) updated++; else added++;
       if (r.date && st === "done" && !game.plays.includes(r.date)) { game.plays = game.plays.filter(d => d !== today() || r.date === today()); game.plays.push(r.date); game.plays.sort(); }

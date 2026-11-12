@@ -4,8 +4,8 @@
    into the sync store (source "app") so the franchise canon counts them too. Works in Node for the tests. */
 (function (root) {
   "use strict";
-  const STATUSES = ["watchlist", "watching", "watched", "dropped"];
-  const LABEL = { watchlist: "Watchlist", watching: "Watching", watched: "Watched", dropped: "Dropped" };
+  const STATUSES = ["watchlist", "watching", "paused", "watched", "dropped"];
+  const LABEL = { watchlist: "Watchlist", watching: "Watching", paused: "Paused", watched: "Watched", dropped: "Dropped" };
   const today = () => new Date().toISOString().slice(0, 10);
   const norm = t => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/&/g, "and").replace(/^(the|a|an|il|lo|la|i|gli|le)\s+/, "").replace(/[^a-z0-9]/g, "");
   const yearOf = d => { const m = String(d || "").match(/(18|19|20)\d\d/); return m ? +m[0] : null; };
@@ -151,7 +151,7 @@ const epKey = (s, e) => `${s}:${e}`;
     }
     afterEps(it) {
       const n = Object.keys(it.eps).length;
-      if (n && (it.status === "watchlist")) it.status = "watching";
+      if (n && (it.status === "watchlist" || it.status === "paused")) it.status = "watching"; // a new tick resumes a paused series
       settleShow(it);
       it.updated = Date.now();
     }
@@ -178,7 +178,7 @@ const epKey = (s, e) => `${s}:${e}`;
     upNext(t = today()) {
       const out = [];
       for (const it of this.all()) {
-        if (it.type !== "show" || it.status === "dropped" || !Object.keys(it.eps).length) continue;
+        if (it.type !== "show" || it.status === "dropped" || it.status === "paused" || !Object.keys(it.eps).length) continue;
         const n = this.nextEp(it, t);
         if (!n || n.upcoming) continue;
         out.push(Object.assign({ item: it, last: lastEpDay(it) }, n));

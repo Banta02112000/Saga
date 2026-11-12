@@ -1254,12 +1254,25 @@
       try { JSON.parse(baseText); } catch (e) { return null; }
       // inflight: "load more" requests still running; the page isn't finished while any are pending.
       // tpl: the page's own "next page" request, replayed with the next cursor so we don't depend on buttons or scrolling.
-      S = window.__cs = { chunks: [baseText], stable: 0, last: -1, polls: 0, inflight: 0, total: 0, next: undefined, tpl: null, asked: {} };
+      // Each answer is read into the merged list as it arrives and then dropped: no pile of raw pages to walk at the end
+      // (that last walk, on the browser engine the app shares, froze the app's own screen for seconds).
+      S = window.__cs = { chunks: 0, stable: 0, last: -1, polls: 0, inflight: 0, total: 0, next: undefined, tpl: null, asked: {}, out: {}, order: [] };
+      S.add = function (t) {
+        S.chunks++;
+        var got = extract([t]);
+        for (var gi = 0; gi < got.length; gi++) {
+          var x = got[gi], p = S.out[x.i];
+          if (!p) { p = S.out[x.i] = { i: x.i }; S.order.push(x.i); }
+          for (var f in x) if (f !== "i" && f !== "r" && x[f] !== undefined) p[f] = x[f];
+          if (x.r && !p.r) p.r = x.r;
+        }
+      };
+      S.add(baseText);
       var bi = info(baseText); S.total = bi.total; S.next = bi.next; S.gql = 0; S.ops = {};
       var isGql = function (u) { return /graphql/i.test(String(u || "")); };
       var keep = function (t, req) {
         if (!t || t.length <= 50) return;
-        S.chunks.push(t);
+        S.add(t);
         var ii = info(t);
         if (!S.total && ii.total) S.total = ii.total;
         // only a response that carries titles moves the cursor on
@@ -1336,15 +1349,18 @@
       return true;
     };
     var replayed = S.inflight <= 0 && (replay() || direct());
+    // Once the next pages come straight from IMDb's API (replay or direct), the page itself is left alone: no
+    // scrolling and no buttons, so it doesn't keep drawing thousands of new rows on the engine the app shares.
+    var apiMode = !!S.tpl || (/\/list\/ls\d+/.test(String(location.pathname)) && !S.directErr && S.next !== undefined);
     // Move up a couple of screens, then back to the bottom: infinite-scroll watchers only react to a change,
     // so jumping to the same bottom position every time can leave them stuck.
-    try {
+    if (!apiMode) try {
       var bottom = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
       window.scrollTo(0, Math.max(0, bottom - 2.5 * (window.innerHeight || 800)));
       setTimeout(function () { window.scrollTo(0, Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)); }, 200);
     } catch (e) { /* ignore */ }
     // "250 more", "Altri 250", "Load more"... (English or Italian), or IMDb's own see-more button; never links elsewhere.
-    if (!replayed) {
+    if (!replayed && !apiMode) {
       var btns = document.querySelectorAll("button");
       for (var b2 = 0; b2 < btns.length; b2++) {
         var bt = btns[b2], txt = (bt.textContent || "").replace(/\s+/g, " ").trim();
@@ -1353,21 +1369,25 @@
         if (looks || /see-more|load-more|pagination/.test(bt.className || "")) { S.btn = txt; try { bt.click(); } catch (e) { /* ignore */ } }
       }
     }
-    var ids = {}, links = document.querySelectorAll('a[href*="/title/tt"]');
-    for (var j = 0; j < links.length; j++) {
-      var m = (links[j].getAttribute("href") || "").match(/tt\d{7,9}/);
-      if (m) ids[m[0]] = 1;
+    var nLinks = 0;
+    if (!apiMode) {
+      var ids = {}, links = document.querySelectorAll('a[href*="/title/tt"]');
+      for (var j = 0; j < links.length; j++) {
+        var m = (links[j].getAttribute("href") || "").match(/tt\d{7,9}/);
+        if (m) ids[m[0]] = 1;
+      }
+      nLinks = Object.keys(ids).length;
     }
-    var size = Object.keys(ids).length * 1000 + S.chunks.length;
+    var size = nLinks * 1000000 + S.order.length * 1000 + S.chunks;
     if (size === S.last && S.inflight <= 0 && !replayed) S.stable++; else { S.stable = 0; S.last = size; }
     var more = S.next && !S.asked[S.next] && (S.tpl || (/\/list\/ls\d+/.test(String(location.pathname)) && !S.directErr));
     if ((S.stable < 4 || S.polls < 3 || more) && S.polls < maxPolls) return null;
-    var items = extract(S.chunks);
+    var items = S.order.map(function (id) { return S.out[id]; });
     var capped = S.stable < 4 || (S.total > 0 && items.length < S.total * 0.98);
     // when it stops short, say what the page offered, so the next report shows why
     var dbg = capped ? "button " + (S.btn ? "'" + S.btn + "' pressed" : "not found") + ", " + S.gql + " data requests seen" + (Object.keys(S.ops).length ? " (" + Object.keys(S.ops).slice(0, 4).join(", ") + ")" : "") +
       ", next page " + (S.next ? "known" : S.next === null ? "none" : "unknown") + (S.directErr ? ", " + S.directErr : "") : "";
-    return JSON.stringify({ items: items, loads: S.chunks.length - 1, polls: S.polls, total: S.total, capped: capped, dbg: dbg });
+    return JSON.stringify({ items: items, loads: S.chunks - 1, polls: S.polls, total: S.total, capped: capped, dbg: dbg });
   }
 
   const probeFor = timeoutMs => `(${pageProbe.toString()})(${pageExtract.toString()}, ${Math.max(5, Math.floor(timeoutMs / 1000) - 8)})`;

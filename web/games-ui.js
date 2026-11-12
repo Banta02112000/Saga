@@ -49,7 +49,7 @@
         <button class="btn" data-action="go" data-sec="settings" data-scroll="importhub">${K.icon("upload")}Import</button></div></div>`;
     }
     const playing = L.nextUp(12);
-    const f = [["all", "All", c.all], ["playing", "Playing", c.playing], ["next", "Next", c.next], ["backlog", "Backlog", c.backlog], ["done", "Finished", c.done],
+    const f = [["all", "All", c.all], ["playing", "Playing", c.playing], ["paused", "Paused", c.paused], ["next", "Next", c.next], ["backlog", "Backlog", c.backlog], ["done", "Finished", c.done],
       ["wishlist", "Wishlist", c.wishlist], ["upcoming", "Upcoming", c.upcoming], ["owned", "Owned, to play", null], ["sale", "On sale", null], ["remakes", "Has a remake", null], ["dropped", "Dropped", c.dropped]];
     const list = ui.view === "grid" ? listFor() : [];
     return `${playing.length && ui.f === "all" && !ui.q ? `<section>${K.head("Playing and up next", "", playing.length)}${K.rail(playing.map(tileOf))}</section>` : ""}
@@ -87,7 +87,7 @@
       ["Franchise", g.franchise], ["Multiverse", g.multiverse !== g.franchise ? g.multiverse : ""]].filter(x => x[1]);
     const pr = g.price;
     return `${K.sheetHero({ title: g.title, img: cover(g), kind: "game" }, `<div class="small muted">${esc([G.yearOf(g), g.platform, g.franchise].filter(Boolean).join(" · "))}</div>`)}
-      <div class="seg2" style="grid-template-columns:repeat(5,1fr);margin:6px 0 12px">${G.STATUSES.map(s => `<button data-action="gst" data-v="${s}" aria-pressed="${g.status === s}">${G.LABEL[s]}</button>`).join("")}</div>
+      <div class="seg2" style="grid-template-columns:repeat(3,1fr);margin:6px 0 12px">${G.STATUSES.map(s => `<button data-action="gst" data-v="${s}" aria-pressed="${g.status === s}">${G.LABEL[s]}</button>`).join("")}</div>
       <div class="row" style="margin-bottom:6px"><span class="small muted grow">Your rating</span>${K.stars(g.rating, "grate")}</div>
       <label class="switch"><input type="checkbox" data-gnext="1" ${g.next ? "checked" : ""}><span>Next up<small class="muted" style="display:block">Shows on Home and at the top of Games</small></span></label>
       <h4>Playthroughs <span class="muted small">${g.plays.length ? `· ${g.plays.length}×` : ""}</span></h4>
@@ -99,7 +99,7 @@
       <h4>Details</h4><div class="listcard">${facts.map(([k, v]) => `<div class="row small" style="min-height:38px;border-bottom:1px solid var(--line)"><span class="muted" style="width:42%">${esc(k)}</span><span class="grow">${esc(v)}</span></div>`).join("")}</div>
       <label class="field" style="margin-top:12px"><span>Notes</span><textarea rows="2" data-gnotes="1" placeholder="Difficulty, mods, who you played with…">${esc(g.notes)}</textarea></label>
       <h4>Where to get it</h4>${G.storeLinks(g).map(([n, u]) => `<button class="sheetbtn" data-action="open" data-url="${esc(u)}">${K.icon("open")}${esc(n)}</button>`).join("")}
-      <div style="margin-top:8px"><button class="sheetbtn" data-action="gsync1">${K.icon("sync")}Sync this game (Steam details, date, store prices)</button>
+      <div style="margin-top:8px"><button class="sheetbtn" data-action="mlistadd" data-k="game:${esc(g.id)}">${K.icon("plus")}Add to a list</button><button class="sheetbtn" data-action="gsync1">${K.icon("sync")}Sync this game (Steam details, date, store prices)</button>
       <button class="sheetbtn" data-action="gedit">${K.icon("edit")}Edit details</button>
       ${g.steam ? "" : `<button class="sheetbtn" data-action="glink">${K.icon("sync")}Find on Steam (cover, price, date)</button>`}
       <button class="sheetbtn" data-action="gremove">${K.icon("notcanon")}Remove from your games</button></div>`;

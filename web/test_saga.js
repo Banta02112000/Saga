@@ -266,7 +266,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.5.4.5", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.5.4.6", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();
@@ -411,6 +411,19 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   await pg.waitForTimeout(300);
   await pg.screenshot({ path: `${OUT}/s-game-wide.png` });
   ok(!errors.length, "page errors:\n" + errors.join("\n"));
+  // 0.5.4.6: your own lists across films, series, games and books; smart lists; Paused
+  { const r = await A(() => { const it = __app.lib.all()[0], g = __app.games.games[0], b = __app.books.books[0];
+      __app.go("watch"); document.body.insertAdjacentHTML("beforeend", `<button id="t1" data-action="mlistnew"></button>`); document.getElementById("t1").click();
+      document.getElementById("mlistname").value = "Weekend"; document.querySelector('[data-action="mlistnewadd"]').click();
+      for (const k of ["lib:" + it.id, "game:" + g.id, "book:" + b.id]) { const x = document.createElement("button"); x.dataset.action = "mlistput"; x.dataset.k = k; x.dataset.l = JSON.parse(__app.db.get("my_lists"))[0].id; document.body.appendChild(x); x.click(); x.remove(); }
+      document.getElementById("t1").remove(); window.Saga.close();
+      __app.lib.setStatus(it, "paused"); __app.go("home");
+      const home = document.querySelector("#view").textContent;
+      const l = JSON.parse(__app.db.get("my_lists"))[0];
+      const op = document.querySelector(`[data-action="mlistopen"][data-l="${l.id}"]`); if (op) op.click();
+      const sheetN = document.querySelectorAll("#overlay .poster").length; window.Saga.close();
+      return { items: l.items.length, home: /Your lists/.test(home) && /Weekend/.test(home) && /Paused, anything/.test(home), sheetN }; });
+    ok(r.items === 3 && r.home && r.sheetN === 3, "your lists and smart lists: " + JSON.stringify(r)); }
   // accessibility: every visible control has a name a screen reader can say
   { const miss = await A(async () => { const out = {}; const scan = tag => { for (const b of document.querySelectorAll("button, [role=button], a, input, select, textarea")) { if (b.offsetParent === null) continue; const tc = (() => { const c = b.cloneNode(true); c.querySelectorAll("svg").forEach(x => x.remove()); return c.textContent; })(); const name = (b.getAttribute("aria-label") || tc || b.getAttribute("title") || "").trim() || (b.labels && b.labels[0] && b.labels[0].textContent.trim()) || b.getAttribute("placeholder") || ""; if (!name) { const k = tag + " " + b.outerHTML.slice(0, 140); out[k] = 1; } } };
       for (const t of ["home", "watch", "missing", "games", "books", "sync", "settings", "stats"]) { try { __app.go(t); scan(t); } catch (e) {} }

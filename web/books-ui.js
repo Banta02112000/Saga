@@ -46,7 +46,7 @@
     return `<div class="toolbar"><input type="search" data-input="bq" data-bq="1" value="${esc(ui.q)}" placeholder="Filter by title, author, series, genre" autocomplete="off">
         <select data-bsort="1" aria-label="Sort">${[["recent", "Recent"], ["title", "Title"], ["author", "Author"], ["rating", "Rating"]].map(([k, l]) => `<option value="${k}" ${ui.sort === k ? "selected" : ""}>${l}</option>`).join("")}</select>
         <button class="iconbtn" data-action="bfind" ${manga ? 'data-manga="1"' : ""} aria-label="${manga ? "Find a manga" : "Find a book"}">${K.icon("plus")}</button></div>
-      <div class="chips" style="margin-bottom:14px">${[["all", "All"], ["reading", "Reading"], ["want", "Want to read"], ["read", "Read"], ["dnf", "Did not finish"]].map(([k, l]) => `<button class="chip" data-action="bfilter" data-v="${k}" aria-pressed="${ui.f === k}">${l} <span class="muted">${counts[k] || 0}</span></button>`).join("")}</div>
+      <div class="chips" style="margin-bottom:14px">${[["all", "All"], ["reading", "Reading"], ["paused", "Paused"], ["want", "Want to read"], ["read", "Read"], ["dnf", "Did not finish"]].map(([k, l]) => `<button class="chip" data-action="bfilter" data-v="${k}" aria-pressed="${ui.f === k}">${l} <span class="muted">${counts[k] || 0}</span></button>`).join("")}</div>
       ${list.length ? K.grid(list.slice(0, ui.lim).map(tileOf)) : `<p class="muted">Nothing matches.</p>`}
       ${list.length > ui.lim ? `<button class="btn block" style="margin-top:16px" data-action="bmore">Show more (${list.length - ui.lim})</button>` : ""}`;
   }
@@ -93,7 +93,7 @@
     const facts = [["Pages", b.pages || ""], ["Published", [b.publisher, b.published].filter(Boolean).join(", ")], ["Series", b.series ? `${b.series}${b.seriesNum ? " #" + b.seriesNum : ""}` : ""],
       ["ISBN", B.bookIsbn(b)], ["Format", b.format], ["Genres", b.categories.slice(0, 4).join(", ")], ["Where", b.location]].filter(x => x[1]);
     return `${K.sheetHero({ title: b.title, img: (b.cover || "").replace(/^http:/, "https:"), kind: "book" }, `<div class="small">${b.authors.map(a => `<button class="linkbtn" data-action="bauthor" data-a="${esc(a)}">${esc(a)}</button>`).join(", ") || "Unknown author"}</div>`)}
-      <div class="seg2" style="margin:6px 0 12px">${[["want", "Want"], ["reading", "Reading"], ["read", "Read"], ["dnf", "DNF"]].map(([s, l]) => `<button data-action="bst" data-v="${s}" aria-pressed="${b.status === s}">${l}</button>`).join("")}</div>
+      <div class="seg2" style="grid-template-columns:repeat(5,1fr);margin:6px 0 12px">${[["want", "Want"], ["reading", "Reading"], ["paused", "Paused"], ["read", "Read"], ["dnf", "DNF"]].map(([s, l]) => `<button data-action="bst" data-v="${s}" aria-pressed="${b.status === s}">${l}</button>`).join("")}</div>
       <div class="row" style="margin-bottom:8px"><span class="small muted grow">Your rating</span>${K.stars(b.rating, "brate")}</div>
       ${B.isManga(b) && b.status !== "read" ? `<div class="nextbox"><div class="grow"><div class="kicker">Chapter</div><b>${b.chapter || 0}${b.chapters ? ` of ${b.chapters}` : ""}</b><div class="small muted">${b.volumes ? `${b.volume || 0} of ${b.volumes} volumes` : b.ongoing ? "still publishing" : ""}</div></div>
         <input type="number" inputmode="numeric" data-bch="1" value="${b.chapter || ""}" placeholder="ch." style="width:72px"><input type="number" inputmode="numeric" data-bvol="1" value="${b.volume || ""}" placeholder="vol." style="width:64px">
@@ -113,7 +113,7 @@
       ${b.description ? `<details class="report"><summary>Description (may contain spoilers)</summary><p class="small">${esc(b.description)}</p></details>` : ""}
       <label class="field" style="margin-top:12px"><span>Notes</span><textarea rows="2" data-bnotes="1" placeholder="Thoughts, quotes, who recommended it…">${esc(b.notes)}</textarea></label>
       <h4>Where to get it</h4>${B.storeLinks(b).map(([n, u]) => `<button class="sheetbtn" data-action="open" data-url="${esc(u)}">${K.icon("open")}${esc(n)}</button>`).join("")}
-      <div style="margin-top:8px"><button class="sheetbtn" data-action="bsync1">${K.icon("sync")}Sync this book (missing details, cover, price)</button><button class="sheetbtn" data-action="bedit">${K.icon("edit")}Edit details</button><button class="sheetbtn" data-action="bremove">${K.icon("notcanon")}Remove from your books</button></div>`;
+      <div style="margin-top:8px"><button class="sheetbtn" data-action="mlistadd" data-k="book:${esc(b.id)}">${K.icon("plus")}Add to a list</button><button class="sheetbtn" data-action="bsync1">${K.icon("sync")}Sync this book (missing details, cover, price)</button><button class="sheetbtn" data-action="bedit">${K.icon("edit")}Edit details</button><button class="sheetbtn" data-action="bremove">${K.icon("notcanon")}Remove from your books</button></div>`;
   }
   function open(id) { const b = lib().get(id); if (!b) return; ui.open = id; Saga.sheet(sheetHtml(b), "bsheet", id); }
   function editHtml(b, isNew) {
