@@ -1,0 +1,416 @@
+// Saga 5 end to end: one page with Home, Watch, Games, Books and the Doctor Who timeline. Moving the old data over
+// (old Games storage, the Doctor Who snapshot, books.json), sync with failing and partial sources, the Sync screen,
+// library posters and episodes, games (Steam add, playthroughs), books (author), timeline marks, year in review,
+// share to Saga, notification actions, backup round-trip, Italian, foldable widths. Fake phone bridge throughout.
+const { chromium } = require("playwright");
+const http = require("http"), fs = require("fs"), path = require("path");
+const OUT = process.argv[2] || "/tmp/shots";
+fs.mkdirSync(OUT, { recursive: true });
+const srv = http.createServer((q, r) => { const u = decodeURIComponent(q.url.split("?")[0]); const f = path.join(__dirname, u);
+  if (!fs.existsSync(f) || fs.statSync(f).isDirectory()) { r.writeHead(404); return r.end(); }
+  r.writeHead(200, { "Content-Type": { ".html": "text/html", ".js": "application/javascript", ".css": "text/css" }[path.extname(f)] || "application/octet-stream" }); fs.createReadStream(f).pipe(r); }).listen(0);
+const BASE = () => `http://127.0.0.1:${srv.address().port}`;
+
+const mock = (seed) => {
+  const LS = localStorage;
+  if (!LS.getItem("__seeded")) { LS.setItem("__seeded", "1"); for (const [k, v] of Object.entries(seed.ls || {})) LS.setItem(k, v); for (const [k, v] of Object.entries(seed.files || {})) LS.setItem("f:" + k, v); }
+  const push = (k, v) => { const a = JSON.parse(LS.getItem(k) || "[]"); a.push(v); LS.setItem(k, JSON.stringify(a)); };
+  const results = {};
+  window.__http = [];
+  const reply = (m, url, body) => {
+    const J = (o, st) => ({ status: st || 200, body: JSON.stringify(o) });
+    if (/api\.trakt\.tv\/users\/banta\/watched\/movies/.test(url)) return J([{ movie: { title: "Heat", year: 1995, ids: { imdb: "tt0113277", tmdb: 949 } }, last_watched_at: "2024-03-01T20:00:00Z" }]);
+    if (/api\.trakt\.tv\/users\/banta\/watched\/shows/.test(url)) return J([{ show: { title: "Severance", year: 2022, ids: { imdb: "tt11280740", tmdb: 95396 } }, last_watched_at: "2025-01-20T21:00:00Z", seasons: [{ number: 1, episodes: [{ number: 1, plays: 1, last_watched_at: "2024-12-01T21:00:00Z" }, { number: 2, plays: 1, last_watched_at: "2024-12-02T21:00:00Z" }] }] }]);
+    if (/api\.trakt\.tv\/users\/banta\/ratings/.test(url)) return J([]);
+    if (/api\.trakt\.tv\/users\/banta\/watchlist/.test(url)) return J([{ type: "movie", movie: { title: "Dune: Part Two", year: 2024, ids: { imdb: "tt15239678" } } }]);
+    if (/api\.trakt\.tv\/users\/banta\/lists$|api\.trakt\.tv\/users\/banta\/lists\?/.test(url)) return J([]);
+    if (/api\.trakt\.tv\/sync\/history/.test(url)) { window.__pushed = (window.__pushed || []).concat([JSON.parse(body)]); return J({ added: { movies: 1, episodes: 2 } }, 201); }
+    if (/api\.trakt\.tv\/sync\/ratings/.test(url)) return J({ added: { movies: 1 } }, 201);
+    if (/www\.imdb\.com|m\.imdb\.com|graphql\.imdb/.test(url)) return { status: 0, body: "", error: "java.net.SocketTimeoutException" };
+    if (/tvmaze\.com\/lookup\/shows\?imdb=tt11280740/.test(url)) return J({ id: 44933 });
+    if (/tvmaze\.com\/shows\/44933/.test(url)) return J({ id: 44933, name: "Severance", premiered: "2022-02-18", status: "Running", externals: { imdb: "tt11280740" }, image: { medium: "" }, _embedded: { episodes: [1, 2, 3, 4].map(e => ({ season: 1, number: e, airdate: `2022-02-${10 + e}`, name: "Episode " + e })) } });
+    if (/tvmaze\.com\/search\/shows/.test(url)) return J([{ show: { id: 44933, name: "Severance", premiered: "2022-02-18", status: "Running", externals: { imdb: "tt11280740" } } }]);
+    if (/tvmaze\.com\/singlesearch/.test(url)) return J({ id: 1, premiered: "1995-01-01" });
+    if (/itunes\.apple\.com/.test(url)) return J({ results: [{ trackId: 7, trackName: "Alien", releaseDate: "1979-05-25T00:00:00Z", trackTimeMillis: 7020000 }] });
+    if (/api\.trakt\.tv\/sync\/last_activities/.test(url)) return J({ all: "2026-11-11T10:00:00.000Z" });
+    if (/jikan\.moe\/v4\/anime\?q=/.test(url)) return J({ data: [{ mal_id: 52991, title: "Sousou no Frieren", title_english: "Frieren", type: "TV", episodes: 3, status: "Finished Airing", year: 2023, images: { jpg: { large_image_url: "" } } }] });
+    if (/jikan\.moe\/v4\/anime\/52991\/episodes/.test(url)) return J({ data: [1, 2, 3].map(e => ({ mal_id: e, title: "E" + e, aired: "2023-10-0" + e + "T00:00:00+00:00" })), pagination: { has_next_page: false } });
+    if (/jikan\.moe\/v4\/anime\/52991/.test(url)) return J({ data: { mal_id: 52991, title: "Sousou no Frieren", title_english: "Frieren", type: "TV", episodes: 3, status: "Finished Airing" } });
+    if (/jikan\.moe\/v4\/manga\?q=/.test(url)) return J({ data: [{ mal_id: 2, title: "Berserk", type: "Manga", chapters: 380, volumes: 42, status: "Publishing", authors: [{ name: "Miura, Kentarou" }], images: { jpg: { large_image_url: "" } } }] });
+    if (/storesearch/.test(url)) return J({ items: [{ id: 1145360, name: "Hades", price: { final: 2450, initial: 2450 } }] });
+    if (/appdetails\?appids=1145360&cc=IT&l=/.test(url)) return J({ 1145360: { success: true, data: { release_date: { coming_soon: false, date: "17 Sep, 2020" } } } });
+    if (/appdetails/.test(url)) return J({});
+    if (/media-imdb\.com\/suggestion\/x\/tt0078748/.test(url)) return J({ d: [{ id: "tt0078748", l: "Alien", y: 1979, q: "feature", i: { imageUrl: "" } }] });
+    { const m = url.match(/media-imdb\.com\/suggestion\/x\/(tt\d+)\.json/); if (m) return J({ d: [{ id: m[1], l: "X", i: { imageUrl: `https://m.media-amazon.com/images/M/${m[1]}._V1_.jpg` } }] }); }
+    if (/openlibrary\.org\/search\.json\?author=/.test(url)) return J({ docs: [{ key: "/works/A", title: "Dune Messiah", author_name: ["Frank Herbert"], first_publish_year: 1969 }] });
+    return { status: 404, body: "" };
+  };
+  const file = n => LS.getItem("f:" + n) || "";
+  window.Banta = { app: () => "canon", read: n => file(n), write: (n, t) => { LS.setItem("f:" + n, String(t)); return true; }, remove: n => { LS.removeItem("f:" + n); return true; },
+    stamp: n => file(n).length + ":" + file(n).slice(-16), post: () => {}, take: () => "", busy: () => {}, paste: () => "", shareTo: () => true, notify: () => {}, widget: () => {} };
+  window.Android = { load: file, save: (n, t) => { LS.setItem("f:" + n, t); return true; }, stamp: n => file(n).length + ":" + file(n).slice(-16), take: id => { const r = results[id]; delete results[id]; return r || ""; },
+    http: (id, m, url, h, body) => { window.__http.push(url); setTimeout(() => { results[id] = JSON.stringify(Object.assign({ headers: {} }, reply(m, url, body))); window.__httpDone(id); }, 3); },
+    browse: (id) => setTimeout(() => { results[id] = JSON.stringify({ status: 0, value: "NETERR:Web page not available", error: "x" }); window.__httpDone(id); }, 3),
+    pick: id => setTimeout(() => { results[id] = JSON.stringify(window.__nextPick || []); window.__pickDone(id); }, 3),
+    saveAs: (id, name, text) => { window.__saved = { name, text }; setTimeout(() => { results[id] = "true"; window.__saveDone(id); }, 3); },
+    writeUri: (u, t) => { window.__backupFile = t; return true; }, pickBackupFile: () => setTimeout(() => window.__backupPicked("content://drive/saga-backup.json"), 3),
+    openApp: () => {}, openUrl: u => push("log", "OPEN " + u), copy: t => { window.__copied = t; }, notify: (i, t, x) => push("log", `NOTIFY ${t} | ${x}`), status: () => {}, clearStatus: () => {},
+    setBackground: () => true, requestNotifications: () => {}, isBackground: () => false, sha256url: s => s, randomUrl: n => "v".repeat(n), version: () => "5.0", openInApp: () => {},
+    // stands in for the Keystore-encrypted secrets.json
+    secretsLoad: () => LS.getItem("secrets") || "", secretsSave: t => { LS.setItem("secrets", t); return true; } };
+};
+const ok = (c, m) => { if (!c) throw new Error(m); };
+
+(async () => {
+  const OLD_GAMES = [{ t: "Hades", od: "September 17, 2020", op: "PC", rn: "N/A", rd: "N/A", rp: "N/A", ow: "Steam", h: "22", hb: "N/A", r: "8.6", f: "Hades", m: "Hades", n: 0 },
+    { t: "Outer Wilds", od: "May 28, 2019", op: "PC", rn: "N/A", rd: "N/A", rp: "N/A", ow: "N/A", h: "17", hb: "N/A", r: "8.9", f: "Outer Wilds", m: "Outer Wilds", n: 1 },
+    { t: "Mass Effect", od: "November 20, 2007", op: "X360", rn: "Mass Effect Legendary Edition", rd: "May 14, 2021", rp: "PC", ow: "PC", h: "17", hb: "N/A", r: "8.3", f: "Mass Effect", m: "Mass Effect", n: 0 }];
+  const seed = {
+    ls: { gc_base: JSON.stringify(OLD_GAMES), gc_done: JSON.stringify({ "Hades|September 17, 2020": Date.parse("2021-02-02") }), gc_ov: JSON.stringify({ "Hades|September 17, 2020": { plays: ["2021-02-02", "2023-06-06"] } }), gc_acm: JSON.stringify({ "Hades|September 17, 2020": { ir: 10 } }), gc_mine: "1" },
+    files: { "canonsync.json": JSON.stringify({ v: 1, settings: { auto_sync: "0", preset_v1: "1", bg_enabled: "0", notif_asked: "1", username: "banta", client_id: "cid", imdb_user: "ur1", token: "tok" }, items: [] }),
+      "snap_dw.json": JSON.stringify({ app: "dwcanon", v: 1, state: { works: { "thethreepaths|short|@t1": { done: true, rating: 4 }, "reportontermswork|short|": { done: true, rating: 7 } } } }),
+      "books.json": JSON.stringify({ app: "books", v: 1, books: [{ id: "b1", title: "Dune", authors: ["Frank Herbert"], status: "read", finished: Date.parse("2026-03-03"), started: Date.parse("2026-02-01"), pages: 600, rating: 9 }], goal: { year: 2026, n: 20 } }),
+      "features.json": JSON.stringify({ dw: 1 }) },
+  };
+  const browser = await chromium.launch();
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2 });
+  await ctx.addInitScript(mock, seed);
+  const errors = [];
+  const pg = await ctx.newPage();
+  pg.on("pageerror", e => errors.push(String(e))); pg.on("dialog", d => d.dismiss());
+  // 0.5.4.4: the page runs under a Content-Security-Policy; anything it blocks is a bug
+  pg.on("console", m => { if (/Content Security Policy|Refused to/i.test(m.text())) errors.push("CSP: " + m.text().slice(0, 200)); });
+  await pg.goto(BASE() + "/index.html");
+  await pg.waitForFunction(() => window.__app && window.__app.db.get("saga5_migrated"), null, { timeout: 8000 });
+  const A = (f, arg) => pg.evaluate(f, arg);
+  // ---- migration
+  const mig = await A(() => ({ games: __app.games.games.map(g => [g.title, g.status, g.plays.length, g.rating, g.next, !!g.remake]), books: __app.books.books.length, dw: JSON.parse(localStorage.getItem("f:dw.json")).works }));
+  ok(mig.games.length === 3, "3 games moved over: " + JSON.stringify(mig));
+  ok(JSON.stringify(mig.games.find(g => g[0] === "Hades")) === JSON.stringify(["Hades", "done", 2, 10, false, false]), "Hades: finished twice, rated 10: " + JSON.stringify(mig.games));
+  ok(mig.games.find(g => g[0] === "Outer Wilds")[4] === true && mig.games.find(g => g[0] === "Mass Effect")[5] === true, "next mark and remake kept");
+  ok(mig.books === 1 && mig.dw["thethreepaths|short|@t1"].rating === 4, "books stay, DW marks moved");
+  await pg.screenshot({ path: `${OUT}/s-home-start.png`, fullPage: true });
+
+  await A(() => { Core.CONFIG.retryDelayMs = 20; Core.CONFIG.imdbGapMs = 0; });
+  // ---- sync: Trakt OK, IMDb unreachable → FAIL, nothing hangs, library gets episodes with dates, Trakt push works
+  await pg.click("#syncTop");
+  await pg.waitForFunction(() => !__app.ui.job && __app.db.get("stage_report"), null, { timeout: 30000 });
+  const rep = await A(() => __app.ui.report + "\n" + __app.db.get("stage_report"));
+  ok(/OK  Trakt account/.test(rep) && /FAIL IMDb ratings: couldn't reach IMDb/.test(rep), "report: " + rep);
+  ok(/OK   Library/.test(rep) && /OK   Episodes/.test(rep) && /OK   Games/.test(rep), "later steps ran: " + rep);
+  const sev = await A(() => { const it = __app.lib.all().find(x => x.title === "Severance"); return it && { eps: it.eps, n: __app.lib.nextEp(it), epl: (it.epl || []).length }; });
+  ok(sev && sev.eps["1:1"] === "2024-12-01" && sev.eps["1:2"] === "2024-12-02" && sev.n.e === 3 && sev.epl === 4, "Trakt episodes with their dates, next is E3: " + JSON.stringify(sev));
+  ok(await A(() => /Sync/.test(document.querySelector("#title").textContent) && document.querySelectorAll(".srcrow .st.fail").length >= 1 && document.querySelectorAll(".srcrow .st.ok").length >= 1), "Sync screen shows OK and failed sources");
+  await pg.screenshot({ path: `${OUT}/s-sync.png`, fullPage: true }); console.log("BG", await A(() => [...document.querySelectorAll("#view > section")].map(s => getComputedStyle(s).backgroundColor + " " + s.className).join(" / ")));
+  await pg.click('[data-action="copydiag"]');
+  ok(await A(() => /Saga .* sync report/.test(window.__copied) && /trakt\.tv/.test(window.__copied) && !/tok\b/.test(window.__copied.replace(/token=…/g, ""))), "report and log copied");
+
+  // ---- artwork from IMDb for titles that came without it; watchlist hides what's finished; "Streaming for me" works
+  await pg.waitForFunction(() => __app.lib.all().some(x => /media-amazon/.test(x.poster || "")), null, { timeout: 8000 });
+  ok(await A(() => /_V1_UX\d+_\.jpg$/.test(__app.lib.all().find(x => /media-amazon/.test(x.poster)).poster)), "IMDb poster, resized");
+  await A(() => { const L = __app.lib; const d = L.add({ type: "movie", title: "Heat", year: 1995, imdb: "tt0113277" }, "watchlist").item; __app.go("library"); __app.ui.libF = "watchlist"; __app.render(); });
+  ok(!(await pg.textContent("#view")).includes("Heat") || await A(() => __app.lib.all().find(x => x.title === "Heat").status === "watched"), "watched film not on the watchlist");
+  await A(() => { __app.ui.libF = "services"; __app.render(); });
+  ok(!errors.length, "Streaming for me: " + errors.join(" "));
+  await A(() => { __app.ui.libF = null; });
+  // ---- Home
+  await pg.click('nav#tabs [data-sec="home"]');
+  const home = await pg.textContent("#view"); console.log("HOME:", home.replace(/\s+/g, " ").slice(0, 600));
+  ok(/Next episode/.test(home) && /Severance/.test(home) && /Continue/.test(home) && /Recently watched/.test(home), "Home: hero, continue, recent");
+  ok(/Outer Wilds/.test(home) && /Dune/.test(home), "Home mixes games and books");
+  await pg.screenshot({ path: `${OUT}/s-home.png`, fullPage: true });
+  // tick the next episode from the hero → queued for Trakt
+  await pg.click('.hero2 [data-action="libnext"]');
+  ok(await A(() => __app.lib.outbox.some(e => e.op === "ep" && e.e === 3)), "ticked episode queued for Trakt");
+
+  // ---- Watch › Library poster grid, search, film watched twice
+  await pg.click('nav#tabs [data-sec="watch"]');
+  ok(await A(() => document.querySelectorAll("#view .grid .poster").length >= 2), "library posters");
+  await pg.fill('[data-input="libQ"]', "Alien"); await pg.press('[data-input="libQ"]', "Enter");
+  await pg.waitForFunction(() => document.querySelectorAll('[data-action="libpeek"]').length);
+  await pg.click('[data-action="libpeek"]');
+  await pg.click('[data-action="libaddas"][data-v="watched"]');
+  await pg.fill("#libDate", "2021-10-31"); await pg.click('[data-action="libwatch"]');
+  ok(/Watch 2/.test(await pg.textContent(".sheet")), "film watched twice");
+  await pg.waitForTimeout(300);
+  await pg.screenshot({ path: `${OUT}/s-film.png` });
+  await pg.click('.sheet [data-action="librate"][data-v="4"]');
+  await A(() => __app.ui.libRes = null); await pg.click("#overlay .scrim", { position: { x: 5, y: 5 } }).catch(() => {});
+  await A(() => { document.querySelector("#overlay").innerHTML = ""; __app.render(); });
+  await pg.screenshot({ path: `${OUT}/s-library.png`, fullPage: true });
+
+  // ---- Games: grid, open, playthrough, add from Steam
+  await pg.click('nav#tabs [data-sec="games"]');
+  ok(await A(() => document.body.dataset.sec === "games" && document.querySelectorAll("#view .poster").length >= 3), "games grid");
+  await pg.selectOption("[data-gsort]", "remake");
+  ok(await A(() => /Remake 2021/.test(document.querySelector("#view .grid").textContent)), "sort by remake release");
+  await pg.selectOption("[data-gsort]", "release");
+  await pg.screenshot({ path: `${OUT}/s-games.png`, fullPage: true });
+  await A(() => Kit.mods.games.open(__app.games.games.find(g => g.title === "Outer Wilds").id));
+  await pg.fill("#gDate", "2026-01-05"); await pg.click('[data-action="gplay"]');
+  ok(await A(() => { const g = __app.games.games.find(g => g.title === "Outer Wilds"); return g.status === "done" && g.plays[0] === "2026-01-05"; }), "playthrough logged");
+  await pg.waitForTimeout(300);
+  await pg.screenshot({ path: `${OUT}/s-game.png` });
+  await A(() => { document.querySelector("#overlay").innerHTML = ""; });
+  await A(() => __app.games.remove(__app.games.games.find(g => g.title === "Hades").id));
+  await pg.click('[data-action="gadd"]');
+  await pg.fill("[data-gsq]", "Hades"); await pg.press("[data-gsq]", "Enter");
+  await pg.waitForFunction(() => document.querySelectorAll('[data-action="gpeek"]').length);
+  await pg.click('[data-action="gpeek"]'); await pg.click('[data-action="gaddas"][data-v="playing"]');
+  await pg.waitForFunction(() => { const g = __app.games.games.find(g => g.title === "Hades"); return g && g.steam === 1145360 && g.date === "2020-09-17"; }, null, { timeout: 5000 });
+
+  // ---- Books: shelf, author page
+  await A(() => { document.querySelector("#overlay").innerHTML = ""; });
+  await pg.click('nav#tabs [data-sec="books"]');
+  await A(() => Kit.mods.books.open("b1"));
+  await pg.click('.sheet [data-action="bauthor"]');
+  await pg.waitForFunction(() => /Dune Messiah/.test(document.querySelector(".sheet").textContent));
+  await pg.click('[data-action="bworkadd"]');
+  ok(await A(() => __app.books.books.some(b => b.title === "Dune Messiah" && b.status === "want")), "author's book added");
+  await A(() => { document.querySelector("#overlay").innerHTML = ""; __app.render(); });
+  await pg.screenshot({ path: `${OUT}/s-books.png`, fullPage: true });
+
+  // ---- Anime: its own tab, MyAnimeList search, episodes; not in Library
+  await A(() => __app.go("anime"));
+  await pg.fill('[data-input="libQ"]', "Frieren"); await pg.press('[data-input="libQ"]', "Enter");
+  await pg.waitForFunction(() => document.querySelectorAll('[data-action="libpeek"]').length);
+  await pg.click('[data-action="libpeek"]'); await pg.click('[data-action="libaddas"][data-v="watching"]');
+  await pg.waitForFunction(() => { const it = __app.lib.all().find(x => x.mal === 52991); return it && it.anime && (it.epl || []).length === 3; }, null, { timeout: 6000 });
+  await A(() => { document.querySelector("#overlay").innerHTML = ""; __app.ui.libRes = null; __app.render(); });
+  ok(/Frieren/.test(await pg.textContent("#view")), "anime in the Anime tab");
+  await pg.screenshot({ path: `${OUT}/s-anime.png` });
+  await A(() => __app.go("library"));
+  ok(!/Frieren/.test(await pg.textContent("#view")), "anime not in Library");
+  // ---- Manga in Books: search, add, chapters
+  await A(() => { __app.go("books"); Kit.mods.books.ui.view = "manga"; __app.render(); });
+  await pg.fill("[data-bsq]", "Berserk"); await pg.press("[data-bsq]", "Enter");
+  await pg.waitForFunction(() => document.querySelectorAll('[data-action="bpeek"]').length);
+  await pg.click('[data-action="bpeek"]'); await pg.click('[data-action="baddas"][data-v="reading"]');
+  await pg.click('[data-action="bch"]');
+  ok(await A(() => { const b = __app.books.books.find(x => x.title === "Berserk"); return b && b.manga && b.chapter === 1 && b.chapters === 380 && b.authors[0] === "Kentarou Miura"; }), "manga with chapters");
+  await pg.waitForTimeout(300);
+  await pg.screenshot({ path: `${OUT}/s-manga-sheet.png` });
+  await A(() => { document.querySelector("#overlay").innerHTML = ""; Kit.mods.books.ui.res = null; Kit.mods.books.ui.mangaSearch = false; __app.render(); });
+  ok(/Berserk/.test(await pg.textContent("#view")), "manga in the Manga tab");
+  await A(() => { Kit.mods.books.ui.view = "shelf"; __app.render(); });
+  ok(!/Berserk/.test(await pg.textContent("#view")), "manga not on the book shelf");
+  // ---- a picture that fails moves on to the next source
+  const bro = await A(() => { const it = __app.lib.all().find(x => x.poster) || (() => { const x = __app.lib.all()[0]; x.poster = "https://m.media-amazon.com/images/M/z._V1_UX400_.jpg"; return x; })(); window.__imgBroken("lib:" + it.id, it.poster); return it.id; });
+  ok(await A(id => { const st = JSON.parse(__app.db.get("img_state"))["lib:" + id]; return !__app.lib.get(id).poster && st.skip.includes("imdbId"); }, bro), "broken picture: cleared, next source next time");
+  // ---- live sync: the episode ticked on Home went to Trakt by itself
+  await pg.waitForFunction(() => (window.__pushed || []).some(b => JSON.stringify(b).includes('"number":3')), null, { timeout: 15000 });
+  ok(await A(() => !__app.lib.outbox.length), "outbox emptied by live sync");
+  await A(() => __app.go("sync"));
+  ok(/Live sync with Trakt/.test(await pg.textContent("#view")) && /within seconds/.test(await pg.textContent("#view")), "live sync shown");
+  await pg.click('[data-action="nettest"]');
+  await pg.waitForFunction(() => /reachable|blocked:/.test(document.querySelector("#view").textContent), null, { timeout: 20000 });
+  ok(/Trakt/.test(await pg.textContent("#view")) && /Wikipedia/.test(await pg.textContent("#view")), "connection test lists the sources");
+  ok(await A(() => { __app.db.set("imdb_eps", JSON.stringify({ tt7777777: { t: "Rated Episodes Show", y: 2020, eps: { "1:1": "2021-03-04", "1:2": 1 } } })); __app.libAdopt();
+    const it = __app.lib.all().find(x => x.imdb === "tt7777777"); return it && it.status === "watching" && it.eps["1:1"] === "2021-03-04" && !!it.eps["1:2"]; }), "episodes rated on IMDb tick the series");
+  { const wf = await A(() => __app.widgetFiles());
+    ok(Object.keys(wf).length === 6 && /^Next episodes/.test(wf["widget_episodes.txt"]) && /\n@@✓ .+\t\{"op":"ep"/.test(wf["widget_episodes.txt"]) && /so far\n@@\n/.test(wf["widget_year.txt"]) && /^Reading/.test(wf["widget_books.txt"]), "six widget files: " + JSON.stringify(wf).slice(0, 600)); }
+  // 5.4: undo, tags, calendar file, picks, error log
+  { const r = await A(() => { const it = __app.lib.all().find(x => x.title === "Severance"); const before = JSON.stringify(it.eps);
+      __app.go("home"); const b = document.querySelector('[data-action="libnext"]'); b.click();
+      const mid = Object.keys(__app.lib.all().find(x => x.title === "Severance").eps).length, hasUndo = !!document.querySelector('#toast [data-action="undo"]');
+      document.querySelector('#toast [data-action="undo"]').click();
+      return { mid, hasUndo, same: JSON.stringify(__app.lib.all().find(x => x.title === "Severance").eps) === before, n: Object.keys(JSON.parse(before)).length }; });
+    ok(r.hasUndo && r.mid === r.n + 1 && r.same, "undo puts an episode tick back: " + JSON.stringify(r));
+    const rm = await A(() => { const it = __app.lib.all().find(x => x.title === "Heat"); const id = it.id; __app.go("watch");
+      const sheetOpen = document.createElement("button"); sheetOpen.dataset.action = "libopen"; sheetOpen.dataset.id = id; document.body.appendChild(sheetOpen); sheetOpen.click(); sheetOpen.remove();
+      document.getElementById("libTag").value = "Heist nights"; document.querySelector('[data-action="libtagadd"]').click();
+      const tagged = (__app.lib.get(id).tags || []).join();
+      const b = document.querySelector('[data-action="libremove"]'); b.click(); document.querySelector('[data-action="libremove"]').click();
+      const gone = !__app.lib.get(id); document.querySelector('#toast [data-action="undo"]').click();
+      return { tagged, gone, back: !!__app.lib.get(id) && (__app.lib.get(id).tags || []).join() }; });
+    ok(rm.tagged === "Heist nights" && rm.gone && rm.back === "Heist nights", "tag, remove, undo: " + JSON.stringify(rm));
+    ok(await A(() => { __app.ui.libTag = "Heist nights"; __app.ui.libF = "watching"; __app.go("watch"); __app.render(); const t = document.querySelector("#view").textContent; __app.ui.libTag = ""; return /Heist nights/.test(t) && /Heat/.test(t); }), "a tag filters the library like a list");
+    const ics = await A(() => { const it = __app.lib.all().find(x => x.title === "Severance"); const d = new Date(Date.now() + 5 * 864e5).toISOString().slice(0, 10); it.epl.push([1, 9, d, "Finale; part, one"]); return __app.icsText(); });
+    ok(ics.n >= 1 && /BEGIN:VCALENDAR\r\n/.test(ics.text) && /SUMMARY:Severance S1 E9\r\n/.test(ics.text) && /DESCRIPTION:Finale\\; part\\, one/.test(ics.text) && /DTSTART;VALUE=DATE:\d{8}\r\n/.test(ics.text), "calendar file: " + ics.text.slice(0, 300));
+    const fy = await A(() => { const G = [["Crime", 9], ["Crime", 10], ["Crime", 9], ["Crime", 9], ["Romance", 3], ["Romance", 2], ["Romance", 4], ["Romance", 3]];
+      G.forEach(([g, r], i) => { const it = __app.lib.add({ type: "movie", title: "Rated " + i, year: 1990 + i, genres: [g] }, "watched").item; it.rating = r; });
+      __app.lib.add({ type: "movie", title: "Pick Crime", year: 2001, genres: ["Crime"] }, "watchlist"); __app.lib.add({ type: "movie", title: "Pick Romance", year: 2002, genres: ["Romance"] }, "watchlist");
+      return __app.forYou().map(x => x.it.title); });
+    ok(fy.includes("Pick Crime") && !fy.includes("Pick Romance"), "picks follow your genre ratings: " + fy);
+    ok(await A(() => { __app.logError("job", "Sync failed: test"); __app.ui.setGroup = "data"; __app.go("settings"); const t = document.querySelector("#view").textContent; return /Error log/.test(t) && /Sync failed: test/.test(t) && !!document.querySelector('[data-action="errcopy"]'); }), "error log shown in Settings");
+    await A(() => { document.querySelector('[data-action="errcopy"]').click(); });
+    ok(/Sync failed: test/.test(await A(() => window.__copied || "")), "error log copied"); }
+  // audit fix: backup files leave keys and sign-ins out; a restore keeps the phone's own
+  { const r = await A(() => { __app.db.set("gemini_key", "AIzaTEST"); __app.db.set("token", "tok123"); __app.db.set("imdb_user", "ur1");
+      const b = JSON.parse(__app.bundle()); const st = JSON.parse(JSON.stringify(b.canon.settings));
+      const withK = JSON.parse(__app.bundle(true)).canon.settings;
+      __app.applyBackup(b); return { out: !("gemini_key" in st) && !("token" in st) && st.imdb_user === "ur1", inWith: withK.gemini_key === "AIzaTEST", kept: __app.db.get("gemini_key") === "AIzaTEST" && __app.db.get("token") === "tok123" }; });
+    ok(r.out && r.inWith && r.kept, "backup secrets: " + JSON.stringify(r));
+    const f = await A(() => { __app.db.flush(); return { file: /AIzaTEST|tok123/.test(localStorage.getItem("f:canonsync.json")), sec: /AIzaTEST/.test(localStorage.getItem("secrets") || "") }; });
+    ok(!f.file && f.sec, "keys live in the encrypted store, not in canonsync.json: " + JSON.stringify(f)); }
+  // 0.5.4.4: password-locked backups, and undo for a restore
+  { const r = await A(async () => {
+      const plain = __app.bundle(); const locked = await __app.sealBackup(plain, "pw1"); const j = JSON.parse(locked);
+      const back = await __app.openBackup(j, "pw1"); let wrong = "";
+      try { await __app.openBackup(j, "nope"); } catch (e) { wrong = e.message; }
+      __app.db.set("backup_password", "pw1"); const out = await __app.bundleOut(); __app.db.set("backup_password", "");
+      return { app: j.app, same: back === plain, noPlain: !/canonsync-all/.test(locked), wrong, outLocked: JSON.parse(out).app === "saga-locked" }; });
+    ok(r.app === "saga-locked" && r.same && r.noPlain && /Wrong password/.test(r.wrong) && r.outLocked, "locked backups: " + JSON.stringify(r)); }
+  { const before = await A(() => __app.lib.all().length);
+    await A(() => { const b = JSON.parse(__app.bundle()); b.library = { items: {} }; __app.restoreFrom(JSON.stringify(b)); });
+    await pg.click("#dlgOk");
+    const after = await A(() => ({ n: __app.lib.all().length, undo: !!__app.db.get("restore_undo_at") }));
+    await A(() => __app.undoRestore()); await pg.click("#dlgOk");
+    const undone = await A(() => ({ n: __app.lib.all().length, undo: !!__app.db.get("restore_undo_at") }));
+    ok(before > 0 && after.n === 0 && after.undo && undone.n === before && !undone.undo, `undo restore: ${before} → ${JSON.stringify(after)} → ${JSON.stringify(undone)}`); }
+  // 0.5.4.2: themes, what's new, Doctor Who editing
+  { const th = await A(() => { __app.ui.setGroup = "general"; __app.go("settings"); document.querySelector('[data-action="theme"][data-v="light"]').click();
+      const sel = document.querySelector('[data-accent]'); sel.value = "teal"; sel.dispatchEvent(new Event("change", { bubbles: true }));
+      const cs = getComputedStyle(document.body); return { theme: document.documentElement.dataset.theme, accent: document.documentElement.dataset.accent, bg: cs.getPropertyValue("--night").trim(), acc: cs.getPropertyValue("--accent").trim(), stored: localStorage.getItem("saga_theme") }; });
+    ok(th.theme === "light" && th.bg === "#F5F2EC" && th.accent === "teal" && th.acc === "#0B8577" && th.stored === "light", "light theme and accent: " + JSON.stringify(th));
+    await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
+    await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
+    const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
+    ok(wn.t && wn.seen === "0.5.4.4", "what's new after an update: " + JSON.stringify(wn));
+    ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
+    const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
+      tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();
+      document.getElementById("tlNewTitle").value = "My Missing Audio"; document.querySelector('[data-action="tladdsave"]').click();
+      const keys = [...document.querySelectorAll('[data-action="tlopen"]')].map(b => b.dataset.k), i = keys.indexOf(k0);
+      const added = document.querySelectorAll('[data-action="tlopen"]')[i + 1].textContent;
+      tl.openStory(k0); document.getElementById("tlEdTitle").value = "Renamed Story"; document.querySelector('[data-action="tledsave"]').click(); window.Saga.close();
+      const renamed = /Renamed Story/.test(document.querySelector("#view").textContent);
+      tl.openStory(k0); document.querySelector('[data-action="tlhide"]').click();
+      const hidden = !/Renamed Story/.test(document.querySelector("#view").textContent);
+      const saved = JSON.parse(Android.load("dw.json")); const st = tl.state(); delete st.custom; delete st.edits; Android.save("dw.json", JSON.stringify(st)); return { added, renamed, hidden, custom: (saved.custom || []).length, after: (saved.custom || [])[0].after === k0 }; });
+    ok(/My Missing Audio/.test(dw.added) && dw.renamed && dw.hidden && dw.custom === 1 && dw.after, "Doctor Who: add after, rename, hide: " + JSON.stringify(dw)); }
+  // 0.5.4.2: lists into the library, later changes still applied, title lookup
+  { const r = await A(() => {
+      __app.db.addItems([{ title: "Tokyo Revengers", year: 2021, imdb: "tt13976192", medium: "TV Series" }, { title: "Miranda", year: 2009, imdb: "tt1325113", medium: "TV Series" }], "trakt", "list", "Anime");
+      __app.db.addItems([{ title: "Gift Film", year: 2020, imdb: "tt0000777", medium: "Movie" }], "trakt", "list", "x Mamma");
+      __app.db.addItems([{ title: "asdfmovie", year: 2008, imdb: "tt1240920", medium: "Special" }], "imdb", "watchlist", "");
+      __app.libAdopt();
+      const has = t => !!__app.lib.all().find(x => x.title === t);
+      const first = { tr: has("Tokyo Revengers"), mir: has("Miranda"), gift: has("Gift Film"), asdf: __app.lib.all().find(x => x.title === "asdfmovie").status };
+      // later: rated on IMDb (watched) with a rating, and a changed rating
+      __app.db.addItems([{ title: "asdfmovie", year: 2008, imdb: "tt1240920", medium: "Special", rating: 9 }], "imdb", "rated", "");
+      __app.libAdopt();
+      const a0 = __app.lib.all().find(x => x.title === "asdfmovie"), a1 = { status: a0.status, rating: a0.rating };
+      __app.db.addItems([{ title: "asdfmovie", year: 2008, imdb: "tt1240920", medium: "Special", rating: 7 }], "imdb", "rated", "");
+      __app.libAdopt();
+      const a2 = __app.lib.all().find(x => x.title === "asdfmovie").rating;
+      __app.lib.rate(__app.lib.all().find(x => x.title === "asdfmovie"), 10);
+      __app.db.addItems([{ title: "asdfmovie", year: 2008, imdb: "tt1240920", medium: "Special", rating: 5 }], "imdb", "rated", ""); __app.libAdopt();
+      return Object.assign(first, { st: a1.status, r1: a1.rating, r2: a2, mine: __app.lib.all().find(x => x.title === "asdfmovie").rating }); });
+    ok(r.tr && r.mir && !r.gift && r.asdf === "watchlist" && r.st === "watched" && r.r1 === 9 && r.r2 === 7 && r.mine === 10, "lists, status and rating updates: " + JSON.stringify(r));
+    const lk = await A(() => { __app.ui.setGroup = "data"; __app.ui.lookupQ = "gift film"; __app.go("settings"); return document.querySelector("#view").textContent; });
+    ok(/isn't switched on for the library/.test(lk), "lookup explains the switched-off list");
+    await A(() => document.querySelector('[data-action="listlib"][data-on="1"]').click());
+    ok(await A(() => !!__app.lib.all().find(x => x.title === "Gift Film") && /in the library as/.test(document.querySelector("#view").textContent)), "switching the list on from the lookup brings it in");
+    const rm = await A(() => { const it = __app.lib.all().find(x => x.title === "Miranda"); __app.lib.remove(it.id); __app.libAdopt(); __app.ui.lookupQ = "miranda"; __app.render();
+      const t = document.querySelector("#view").textContent; document.querySelector('[data-action="lookback"]').click(); return { removed: /you removed it/.test(t), back: !!__app.lib.all().find(x => x.title === "Miranda") }; });
+    ok(rm.removed && rm.back, "lookup: removed title explained and brought back " + JSON.stringify(rm));
+    await A(() => { __app.ui.lookupQ = ""; __app.ui.setGroup = ""; }); }
+  // 5.4.1: episode ratings arrive from Trakt and from the IMDb CSV (matched by episode name), and can be set in the app
+  { const r = await A(() => { const it = __app.lib.all().find(x => x.title === "Severance"); it.epl = it.epl.filter(x => x[3] !== "Named One"); it.epl.push([2, 1, "2025-01-17", "Named One"]);
+      __app.db.set("ep_ratings", JSON.stringify({ x: { t: "Severance", y: 2022, imdb: it.imdb, tmdb: it.tmdb, r: { "1:1": 9 } } }));
+      __app.db.addItems([{ title: "Severance: Named One", imdb: "tt9999001", medium: "Episode", rating: 7, year: 2025 }], "imdb", "rated", "");
+      __app.libAdopt(); const x = __app.lib.get(it.id); return { er: x.er, ticked: !!x.eps["2:1"] }; });
+    ok(r.er && r.er["1:1"] === 9 && r.er["2:1"] === 7 && r.ticked, "episode ratings adopted: " + JSON.stringify(r));
+    const set = await A(() => { const it = __app.lib.all().find(x => x.title === "Severance"); __app.go("watch");
+      const o = document.createElement("button"); o.dataset.action = "libopen"; o.dataset.id = it.id; document.body.appendChild(o); o.click(); o.remove();
+      const shown = /★ 9/.test(document.querySelector("#overlay").textContent);
+      if (!document.querySelector('[data-action="libeprate"][data-s="1"][data-e="1"]')) return { dbg: document.querySelector("#overlay").innerHTML.slice(0, 1500), epl: JSON.stringify(it.epl).slice(0, 300) };
+      document.querySelector('[data-action="libeprate"][data-s="1"][data-e="1"]').click();
+      if (!document.querySelector('[data-action="libepset"][data-v="6"]')) return { dbg2: __app.ui.epRate, open: __app.ui.libOpen, html: (document.querySelector("#overlay").innerHTML.match(/class="ep[^]{0,900}/) || [""])[0] };
+      document.querySelector('[data-action="libepset"][data-v="6"]').click();
+      const v = __app.lib.get(it.id).er["1:1"]; __app.libAdopt(); window.Saga.close();
+      return { shown, v, kept: __app.lib.get(it.id).er["1:1"] }; });
+    ok(set.shown && set.v === 6 && set.kept === 6, "episode rating shown, changed in the app, and kept on the next sync: " + JSON.stringify(set)); }
+  // 5.3 Settings: front page with groups, a group, search, back
+  { const front = await A(() => { __app.ui.setGroup = ""; __app.ui.setQ = ""; __app.go("settings"); return [...document.querySelectorAll(".setrow b")].map(b => b.textContent); });
+    ok(front.length === 8 && front[0] === "Accounts and sync" && !(await A(() => !!document.querySelector('[data-setting="client_id"]'))), "settings front page lists groups only: " + front);
+    await pg.click('.setrow[data-v="accounts"]');
+    ok(await A(() => !!document.querySelector('[data-setting="client_id"]') && !!document.querySelector('[data-setting="steam_profile"]') && !document.querySelector('[data-setting="gemini_key"]')), "Accounts group: Trakt, IMDb, Steam only");
+    ok(await A(() => window.__back() && !__app.ui.setGroup && !!document.querySelector(".setrow")), "back leaves the group first");
+    await pg.fill("#setQ", "gemini");
+    await pg.waitForFunction(() => /Gemini \(free\)/.test(document.querySelector("#view").textContent) && /Canon finder and AI/.test(document.querySelector("#view").textContent), null, { timeout: 3000 });
+    await pg.click('.setrow[data-v="ai"]');
+    ok(await A(() => !!document.querySelector('[data-setting="gemini_key"]')), "search result opens the AI group");
+    await A(() => { __app.ui.sec = "home"; __app.render(); });
+    await A(() => { const b = document.createElement("button"); b.dataset.action = "go"; b.dataset.sec = "settings"; b.dataset.scroll = "importhub"; document.body.appendChild(b); b.click(); b.remove(); });
+    ok(await A(() => __app.ui.setGroup === "imports" && !!document.querySelector('[data-action="hubpick"]')), "old Import links open the Import group");
+    ok(await A(() => { __app.ui.setGroup = "alerts"; __app.render(); return /Home-screen widgets/.test(document.querySelector("#view").textContent); }), "widgets explained under Notifications");
+    await pg.screenshot({ path: `${OUT}/s-settings-groups.png`, fullPage: true });
+    await A(() => { __app.ui.setGroup = ""; __app.render(); });
+    await pg.screenshot({ path: `${OUT}/s-settings-front.png`, fullPage: true }); }
+  ok(/Steam profile link/.test(await A(() => { (__app.ui.setGroup = "*", __app.go("settings")); return document.querySelector("#view").textContent; })), "Steam profile in Settings");
+
+  // ---- Timeline
+  await pg.click('nav#tabs [data-sec="timeline"]');
+  ok(/2 of [\d,]+ stories/.test(await pg.textContent("#view")), "timeline counts moved marks");
+  await pg.click(".tl .tli:not(.on)");
+  await pg.click('[data-action="tldone"]');
+  ok(/3 of [\d,]+ stories/.test(await pg.textContent("#view")), "story marked");
+  await pg.screenshot({ path: `${OUT}/s-timeline.png` });
+
+  // ---- Year, multiverse-free, search, share, notification action
+  await A(() => __app.go("year"));
+  ok(/films/.test(await pg.textContent("#view")), "year in review");
+  await pg.screenshot({ path: `${OUT}/s-year.png`, fullPage: true });
+  await A(() => window.__shared("Look at this https://www.imdb.com/title/tt0078748/"));
+  await pg.waitForTimeout(200);
+  await A(() => window.__shared("https://store.steampowered.com/app/1145360/Hades/"));
+  await pg.waitForTimeout(200);
+  ok(await A(() => __app.ui.sec === "games"), "Steam link opens Games search");
+  await A(() => { const it = __app.lib.all().find(x => x.title === "Severance"); localStorage.setItem("f:pending_actions.json", JSON.stringify([{ op: "ep", id: it.id, s: 1, e: 4, at: "2026-11-11" }])); window.__resumed(); });
+  ok(await A(() => __app.lib.all().find(x => x.title === "Severance").eps["1:4"] === "2026-11-11"), "Mark watched from a notification");
+  await A(() => { document.querySelector("#overlay").innerHTML = ""; });
+  ok(await A(() => __app.lib.all().some(x => x.title === "Alien" && x.imdb === "tt0078748")), "shared IMDb link added the film");
+  await pg.click('[data-action="search"]');
+  await pg.fill('[data-input="allQ"]', "sev");
+  await pg.waitForTimeout(300);
+  ok(/Severance/.test(await pg.textContent(".sheet")), "search finds library titles");
+  await A(() => { document.querySelector("#overlay").innerHTML = ""; });
+
+  // ---- import hub: Letterboxd → library, HowLongToBeat → Games, Goodreads → Books, all at once
+  await A(() => { window.__nextPick = [
+    { name: "letterboxd.zip", zip: { "diary.csv": "Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date\n2024-01-02,Heat,1995,https://boxd.it/x,4.5,,,2024-01-01\n" }, zipOther: [] },
+    { name: "HLTB.csv", text: "Title,Platform,Playing,Backlog,Replay,Custom,Completed,Retired,Review,Completion Date\nZzz Imported Quest,PC,0,0,0,0,1,0,80,2024-05-05\n" },
+    { name: "goodreads_library_export.csv", text: "Book Id,Title,Author,ISBN13,My Rating,Exclusive Shelf,Date Read\n1,Hyperion,Dan Simmons,,5,read,2020/01/02\n" }]; (__app.ui.setGroup = "*", __app.go("settings")); });
+  await pg.click('[data-action="hubpick"]');
+  await pg.waitForFunction(() => !__app.ui.job && /Library:/.test(__app.db.get("hub_last") || ""), null, { timeout: 8000 });
+  ok(await A(() => __app.games.games.some(g => g.title === "Zzz Imported Quest" && g.status === "done" && g.plays[0] === "2024-05-05") && __app.books.books.some(b => b.title === "Hyperion") && __app.lib.all().find(x => x.title === "Heat").watches.includes("2024-01-01")), "hub put each file in the right section: " + await A(() => __app.db.get("hub_last")));
+
+  // ---- backup: file, round trip
+  await A(() => (__app.ui.setGroup = "*", __app.go("settings")));
+  await pg.click('[data-action="backupfile"]');
+  await pg.waitForFunction(() => window.__backupFile);
+  const bk = await A(() => JSON.parse(window.__backupFile));
+  ok(bk.v === 2 && bk.games.games.length >= 3 && bk.books.books.length >= 2 && bk.library.items && bk.dw.works, "backup has everything");
+  await A(() => { __app.games.games = []; __app.games.save(); __app.applyBackup(__app.readBackup2(window.__backupFile)); });
+  ok(await A(() => __app.games.games.length >= 3), "restore brings games back");
+  await pg.click('[data-action="export"][data-v="letterboxd"]');
+  await pg.waitForFunction(() => window.__saved && /letterboxd/.test(window.__saved.name));
+  ok(await A(() => /Alien,1979,,2021-10-31,,false/.test(window.__saved.text) || /Alien,1979/.test(window.__saved.text)), "Letterboxd export");
+  await pg.screenshot({ path: `${OUT}/s-settings.png` });
+
+  // ---- Italian, then widths
+  await A(() => { BantaShell.setLang("it"); __app.go("home"); });
+  await pg.waitForTimeout(200);
+  const it = await pg.textContent("body");
+  ok(/Continua|Prossimo episodio|Visti di recente/.test(it), "Italian Home");
+  await pg.screenshot({ path: `${OUT}/s-home-it.png`, fullPage: true });
+  await A(() => BantaShell.setLang("en"));
+  await pg.waitForLoadState("load"); await pg.waitForTimeout(700);
+  for (const [w, h, name] of [[884, 1104, "fold"], [344, 882, "cover"], [1200, 800, "wide"]]) {
+    await pg.setViewportSize({ width: w, height: h });
+    for (const s of ["home", "watch", "games", "books", "timeline", "sync", "settings"]) {
+      await A(s => __app.go(s), s);
+      ok(!(await A(() => document.documentElement.scrollWidth > innerWidth + 1)), `no sideways scroll: ${s} at ${w}px`);
+    }
+    await A(() => __app.go("home"));
+    await pg.screenshot({ path: `${OUT}/s-home-${name}.png` });
+  }
+  await A(() => __app.go("games")); await A(() => Kit.mods.games.open(__app.games.games[0].id));
+  await pg.waitForTimeout(300);
+  await pg.screenshot({ path: `${OUT}/s-game-wide.png` });
+  ok(!errors.length, "page errors:\n" + errors.join("\n"));
+  console.log("SAGA 5 UI TESTS PASSED");
+  await browser.close(); srv.close();
+})().catch(e => { console.error(e); process.exit(1); });

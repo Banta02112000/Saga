@@ -1,0 +1,147 @@
+/* Doctor Who as a fixed timeline: groups (Doctor Who, Companions, UNIT…) → eras → stories in reading/watching order,
+   with done, a 1–10 rating and notes per story. The built-in order never changes; your marks, the entries you add and your
+   edits are saved on top of it (dw.json).
+   Marks move over once from the old Doctor Who tab's snapshot, or from the built-in copy in your own edition. */
+(function () {
+  "use strict";
+  const K = window.Kit, esc = K.esc;
+  const ui = { g: 0, t: 0, type: "all", state: "all", q: "", open: null };
+  let st = null;
+  const D = () => window.DW_DATA || { groups: [], types: [], works: {} };
+  const load = () => { if (st) return st; try { st = JSON.parse(Saga.Native.load("dw.json") || "null"); } catch (e) { st = null; } st = st || { works: {} }; st.works = st.works || {}; return st; };
+  const save = () => { Saga.Native.save("dw.json", JSON.stringify(st)); Saga.changed("timeline"); };
+  // one-time move: snap_dw.json (old tab) or DW_MINE (own edition), only into an empty timeline
+  function migrate(snapText, mine) {
+    const s = load();
+    if (Object.keys(s.works).length || s.migrated) return 0;
+    let works = null;
+    try { const j = snapText ? JSON.parse(snapText) : null; if (j && j.state && j.state.works) works = j.state.works; } catch (e) { /* ignore */ }
+    if (!works && mine && mine.works) works = mine.works;
+    s.migrated = 1;
+    if (!works) { save(); return 0; }
+    for (const [k, v] of Object.entries(works)) if (v && (v.done || v.rating || v.notes)) s.works[k] = { done: !!v.done, rating: v.rating || null, notes: v.notes || "" };
+    save();
+    return Object.keys(s.works).length;
+  }
+  const typeOf = id => (D().types || []).find(t => t.id === id) || { label: id, color: "#999" };
+  // Your own changes to the fixed order, kept in dw.json with your marks: entries you added (s.custom, placed after
+  // another entry) and edits to existing ones (s.edits: title, type, note, hidden). The built-in order is never rewritten.
+  const customOf = k => (load().custom || []).find(c => c.k === k);
+  const workOf = it => {
+    const c = customOf(it.k), w = c || (D().works || {})[it.k] || {}, e = (load().edits || {})[it.k] || {};
+    return { title: e.title || w.title || it.raw || it.k, type: e.type || w.type || (it.k.split("|")[1] || ""), sub: e.sub != null ? e.sub : (c ? c.sub : it.sub) || "", hidden: !!e.hidden, mine: !!c, me: load().works[it.k] || {} };
+  };
+  // a tab's entries with yours put in place, hidden ones left out unless asked for
+  function itemsOf(g, tab, withHidden) {
+    const out = tab.items.filter(it => !it.ref).slice();
+    for (const c of (load().custom || []).filter(c => c.g === g.name && c.t === tab.name)) {
+      const i = c.after ? out.findIndex(x => x.k === c.after) : -1;
+      const it = { k: c.k, raw: c.title, sub: c.sub };
+      if (i >= 0) out.splice(i + 1, 0, it); else out.push(it);
+    }
+    return withHidden ? out : out.filter(it => !((load().edits || {})[it.k] || {}).hidden);
+  }
+  function tabStats(tab, g) { let n = 0, d = 0; for (const it of g ? itemsOf(g, tab) : tab.items.filter(x => !x.ref)) { n++; if ((load().works[it.k] || {}).done) d++; } return { n, d }; }
+  const where = k => { for (const g of D().groups) for (const t of g.tabs) if (itemsOf(g, t, true).some(x => x.k === k)) return { g, t }; return null; };
+  function render() {
+    const d = D();
+    if (!d.groups.length) return `<p class="muted">The timeline data isn't in this build.</p>`;
+    const g = d.groups[ui.g] || d.groups[0], tab = g.tabs[ui.t] || g.tabs[0];
+    const q = ui.q.toLowerCase();
+    let all = 0, done = 0;
+    for (const gg of d.groups) for (const t of gg.tabs) { const s = tabStats(t, gg); all += s.n; done += s.d; }
+    let nextSeen = false;
+    const items = itemsOf(g, tab, ui.hidden).map(it => ({ it, w: workOf(it) })).filter(({ w }) => (ui.type === "all" || w.type === ui.type) &&
+      (ui.state === "all" || (ui.state === "done") === !!w.me.done) && (!q || w.title.toLowerCase().includes(q)));
+    const s = tabStats(tab, g);
+    return `<section><div class="kicker">${done.toLocaleString()} of ${all.toLocaleString()} stories</div>
+        <div class="chips" style="margin:12px 0">${d.groups.map((gg, i) => `<button class="chip" data-action="tlg" data-v="${i}" aria-pressed="${i === ui.g}">${esc(gg.name)}</button>`).join("")}</div>
+        <div class="subnav">${g.tabs.map((t, i) => { const x = tabStats(t, g); return `<button data-action="tlt" data-v="${i}" ${i === ui.t ? 'aria-current="page"' : ""}>${esc(t.name)}${x.n && x.d === x.n ? " ✓" : ""}</button>`; }).join("")}</div>
+        <div class="toolbar"><input type="search" data-input="tlq" data-tlq="1" value="${esc(ui.q)}" placeholder="Find a story" autocomplete="off">
+          <select data-tltype="1" aria-label="Type"><option value="all">All types</option>${(d.types || []).map(t => `<option value="${t.id}" ${ui.type === t.id ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select></div>
+        <div class="chips" style="margin-bottom:12px">${[["all", "All"], ["todo", "To do"], ["done", "Done"]].map(([k, l]) => `<button class="chip" data-action="tlstate" data-v="${k}" aria-pressed="${ui.state === k}">${l}</button>`).join("")}<span class="small muted" style="align-self:center">${s.d}/${s.n} in ${esc(tab.name)}</span></div>
+        <div class="row wrap" style="margin-bottom:10px"><button class="btn small" data-action="tladd" data-after="">${K.icon("plus")}Add an entry to ${esc(tab.name)}</button>
+          ${Object.values(load().edits || {}).some(e => e.hidden) ? `<button class="btn quiet small" data-action="tlhidden">${ui.hidden ? "Leave hidden entries out" : "Show hidden entries"}</button>` : ""}</div>
+        <div class="tl">${items.map(({ it, w }) => { const isNext = !nextSeen && !w.me.done && (nextSeen = true); const ty = typeOf(w.type);
+          return `<div class="tli${w.me.done ? " on" : ""}" style="--tc:${esc(ty.color)}" data-action="tlopen" data-k="${esc(it.k)}">
+            <div class="grow"><div class="tc">${esc(ty.label)}${isNext ? ' · <span style="color:var(--accent)">next</span>' : ""}</div><b>${esc(w.title)}</b>${w.mine ? ' <span class="small muted">· added by you</span>' : ""}${w.hidden ? ' <span class="small muted">· hidden</span>' : ""}${w.sub ? `<div class="small muted">${esc(w.sub)}</div>` : ""}</div>
+            ${w.me.rating ? `<span class="pct">★ ${w.me.rating}</span>` : ""}</div>`; }).join("") || `<p class="muted">Nothing here.</p>`}</div></section>`;
+  }
+  const typeSelect = (id, cur) => `<select id="${id}">${(D().types || []).map(t => `<option value="${t.id}" ${t.id === cur ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select>`;
+  // a form to add an entry (after another one, or at the end of the open tab)
+  function openAdd(after) {
+    const at = after ? where(after) : null, d = D(), g = at ? at.g : d.groups[ui.g] || d.groups[0], t = at ? at.t : g.tabs[ui.t] || g.tabs[0];
+    ui.addAt = { g: g.name, t: t.name, after: after || (itemsOf(g, t, true).slice(-1)[0] || {}).k || "" };
+    Saga.sheet(`<div class="kicker">${esc(g.name)} › ${esc(t.name)}</div><h3 style="font:800 24px/1.1 var(--display);margin:6px 0 14px">Add an entry</h3>
+      <p class="small muted">${after ? `It goes right after “${esc(workOf({ k: after }).title)}”.` : "It goes at the end of this part of the timeline."} Use this when the TARDIS wiki sync misses something.</p>
+      <label class="field"><span>Title</span><input type="text" id="tlNewTitle" autocomplete="off"></label>
+      <label class="field"><span>Type</span>${typeSelect("tlNewType", "audio")}</label>
+      <label class="field"><span>Note (range, series, release), optional</span><input type="text" id="tlNewSub" autocomplete="off"></label>
+      <button class="btn primary block" data-action="tladdsave">${K.icon("plus")}Add to the timeline</button>`, "tlsheet", "add");
+  }
+  function openStory(k) {
+    const w = workOf({ k }), me = load().works[k] || {}, ty = typeOf(w.type);
+    ui.open = k;
+    Saga.sheet(`<div class="kicker" style="color:${esc(ty.color)}">${esc(ty.label)}</div><h3 style="font:800 26px/1.1 var(--display);margin:6px 0 14px">${esc(w.title)}</h3>
+      <button class="btn ${me.done ? "" : "primary"} block" data-action="tldone">${K.icon("check")}${me.done ? "Done: tap to undo" : "Mark as done"}</button>
+      <h4>Your rating</h4><div class="chips">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => `<button class="chip" data-action="tlrate" data-v="${n}" aria-pressed="${me.rating === n}">${n}</button>`).join("")}</div>
+      <label class="field" style="margin-top:12px"><span>Notes</span><textarea rows="3" data-tlnotes="1">${esc(me.notes || "")}</textarea></label>
+      <button class="sheetbtn" data-action="open" data-url="https://tardis.fandom.com/wiki/Special:Search?query=${encodeURIComponent(w.title)}">${K.icon("open")}Look it up on the TARDIS wiki</button>
+      <button class="sheetbtn" data-action="tladd" data-after="${esc(k)}">${K.icon("plus")}Add an entry right after this one</button>
+      <details class="report" style="margin-top:12px"><summary>Edit this entry</summary>
+        <label class="field"><span>Title</span><input type="text" id="tlEdTitle" value="${esc(w.title)}" autocomplete="off"></label>
+        <label class="field"><span>Type</span>${typeSelect("tlEdType", w.type)}</label>
+        <label class="field"><span>Note</span><input type="text" id="tlEdSub" value="${esc(w.sub)}" autocomplete="off"></label>
+        <div class="row wrap"><button class="btn primary small" data-action="tledsave">Save changes</button>
+          ${w.mine ? `<button class="btn small" data-action="tldel">Delete this entry</button>` : `<button class="btn small" data-action="tlhide">${w.hidden ? "Show it again" : "Hide it from the timeline"}</button>
+          ${(load().edits || {})[k] ? `<button class="btn quiet small" data-action="tlreset">Undo my edits</button>` : ""}`}</div></details>`, "tlsheet", k);
+  }
+  function act(a, el) {
+    const s = load();
+    switch (a) {
+      case "tlg": ui.g = +el.dataset.v; ui.t = 0; Saga.render(); return true;
+      case "tlt": ui.t = +el.dataset.v; Saga.render(); window.scrollTo(0, 0); return true;
+      case "tlstate": ui.state = el.dataset.v === "todo" ? "todo" : el.dataset.v; Saga.render(); return true;
+      case "tlopen": openStory(el.dataset.k); return true;
+      case "tldone": { const m = s.works[ui.open] = s.works[ui.open] || {}; m.done = !m.done; if (m.done) m.at = new Date().toISOString().slice(0, 10); save(); Saga.close(); Saga.render(); return true; }
+      case "tladd": openAdd(el.dataset.after || ""); return true;
+      case "tlhidden": ui.hidden = !ui.hidden; Saga.render(); return true;
+      case "tladdsave": {
+        const title = ((document.getElementById("tlNewTitle") || {}).value || "").trim();
+        if (!title) { K.toast("Type a title first"); return true; }
+        s.custom = s.custom || [];
+        const k = "u|" + Date.now().toString(36);
+        s.custom.push({ k, g: ui.addAt.g, t: ui.addAt.t, after: ui.addAt.after, title, type: document.getElementById("tlNewType").value, sub: (document.getElementById("tlNewSub").value || "").trim() });
+        save(); Saga.close(); Saga.render(); K.toast(`Added ${title}`); return true;
+      }
+      case "tledsave": {
+        const k = ui.open, w = workOf({ k }), c = customOf(k);
+        const title = document.getElementById("tlEdTitle").value.trim() || w.title, type = document.getElementById("tlEdType").value, sub = document.getElementById("tlEdSub").value.trim();
+        if (c) Object.assign(c, { title, type, sub });
+        else { s.edits = s.edits || {}; s.edits[k] = Object.assign(s.edits[k] || {}, { title, type, sub }); }
+        save(); openStory(k); Saga.render(); K.toast("Saved"); return true;
+      }
+      case "tlhide": { const k = ui.open; s.edits = s.edits || {}; const e = s.edits[k] = s.edits[k] || {}; e.hidden = !e.hidden; save(); Saga.close(); Saga.render(); K.toast(e.hidden ? "Hidden. Show hidden entries brings it back." : "Shown again"); return true; }
+      case "tlreset": { delete (s.edits || {})[ui.open]; save(); openStory(ui.open); Saga.render(); return true; }
+      case "tldel": { const k = ui.open, c = customOf(k); s.custom = (s.custom || []).filter(x => x.k !== k);
+        for (const x of s.custom) if (x.after === k) x.after = c.after; // what came after it moves up
+        save(); Saga.close(); Saga.render(); K.toast(`Deleted ${c.title}`, () => { s.custom.push(c); save(); Saga.render(); }); return true; }
+      case "tlrate": { const m = s.works[ui.open] = s.works[ui.open] || {}; m.rating = m.rating === +el.dataset.v ? null : +el.dataset.v; save(); openStory(ui.open); Saga.render(); return true; }
+    }
+    return false;
+  }
+  function change(el) {
+    if (el.dataset.tltype) { ui.type = el.value; Saga.render(); return true; }
+    if (el.dataset.tlnotes && ui.open) { const s = load(); const m = s.works[ui.open] = s.works[ui.open] || {}; m.notes = el.value.trim(); save(); return true; }
+    return false;
+  }
+  function input(el) { if (el.dataset.tlq) { ui.q = el.value; return true; } return false; }
+  // the next story to read or watch, for Home
+  function next() {
+    for (const g of D().groups) { if (/skipped|not canon/i.test(g.name)) continue; for (const t of g.tabs) for (const it of itemsOf(g, t)) if (!(load().works[it.k] || {}).done) return { k: it.k, title: workOf(it).title, era: t.name, group: g.name, type: workOf(it).type }; }
+    return null;
+  }
+  function recent(limit = 10) { return Object.entries(load().works).filter(([, v]) => v.done && v.at).map(([k, v]) => ({ k, t: workOf({ k }).title, date: v.at })).sort((a, b) => b.date.localeCompare(a.date)).slice(0, limit); }
+  const statesFor = () => load();
+  K.mods.timeline = { title: "Doctor Who", render, act, change, input, migrate, next, recent, openStory, state: statesFor, reset: () => { st = null; } };
+})();

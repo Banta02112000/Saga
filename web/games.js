@@ -1,0 +1,309 @@
+/* Games, rebuilt on the same base as the rest of Saga. Your list lives in games.json (a real file, in the backup).
+   GamesCore: the model, the one-time move from the old Games tab (its browser storage and its saved snapshot), Steam
+   (search, linking for covers, prices and release dates, library import) and games from your IMDb ratings.
+   The UI part registers itself in Kit.mods.games. GamesCore also runs in Node for the tests. */
+(function (root) {
+  "use strict";
+  const STATUSES = ["playing", "backlog", "done", "wishlist", "dropped"];
+  const LABEL = { playing: "Playing", backlog: "Backlog", done: "Finished", wishlist: "Wishlist", dropped: "Dropped" };
+  const today = () => new Date().toISOString().slice(0, 10);
+  const norm = t => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/&/g, "and").replace(/[™®©]/g, "").replace(/^the\s+/, "").replace(/[^a-z0-9]/g, "");
+  const NA = v => v == null || v === "" || /^(n\/?a|tba|tbd|-)$/i.test(String(v).trim());
+  const num = v => { const n = parseFloat(String(v == null ? "" : v).replace(",", ".")); return isFinite(n) ? n : null; };
+  function isoOf(v) {
+    if (NA(v)) return "";
+    if (typeof v === "number") return new Date(v).toISOString().slice(0, 10);
+    const s = String(v).trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    if (/^\d{4}$/.test(s)) return s + "-12-31";
+    const t = Date.parse(s.replace(/(\d+)(st|nd|rd|th)/, "$1"));
+    return isNaN(t) ? "" : new Date(t + 12 * 36e5).toISOString().slice(0, 10);
+  }
+  const yearOf = g => (g.date ? +g.date.slice(0, 4) : (String(g.dateText || "").match(/(19|20)\d\d/) || [])[0] | 0 || null);
+  let seq = 0;
+  const newId = () => "g" + Date.now().toString(36) + (seq++).toString(36) + Math.random().toString(36).slice(2, 5);
+
+  function blank(o) {
+    return Object.assign({ id: newId(), title: "", date: "", dateText: "", platform: "", franchise: "", multiverse: "", owned: "", remake: null,
+      imdbR: null, hours: null, hoursRemake: null, status: "backlog", next: false, plays: [], rating: 0, notes: "", steam: null, imdb: null,
+      hidden: false, added: Date.now(), src: "", price: null, target: null, cover: "", oldId: "" }, o || {});
+  }
+
+  class Games {
+    constructor(persist) {
+      this.persist = persist || null;
+      this.games = []; this.removed = {}; this.settings = { region: "IT", dropPct: 20 }; this.meta = {}; this.ver = 0;
+      if (persist) { try { const t = persist.load(); if (t) this.fromJSON(JSON.parse(t)); } catch (e) { /* unreadable: start empty */ } }
+    }
+    fromJSON(j) { this.games = (j.games || []).map(blank); this.removed = j.removed || {}; this.settings = Object.assign(this.settings, j.settings || {}); this.meta = j.meta || {}; }
+    toJSON() { return { app: "games", v: 1, games: this.games, removed: this.removed, settings: this.settings, meta: this.meta }; }
+    save() { this.ver++; this._idx = null; if (this.persist) this.persist.save(JSON.stringify(this.toJSON())); }
+    get(id) { return this.games.find(g => g.id === id) || null; }
+    find(o) {
+      const n = norm(o.title), y = o.year || (o.date ? +o.date.slice(0, 4) : null);
+      return this.games.find(g => (o.steam && g.steam === o.steam) || (o.imdb && g.imdb === o.imdb) ||
+        (norm(g.title) === n && n && (!y || !yearOf(g) || Math.abs(yearOf(g) - y) <= 1))) || null;
+    }
+    add(o, status) {
+      const have = this.find(o);
+      if (have) {
+        for (const k of ["steam", "imdb", "date", "platform", "franchise", "multiverse", "cover", "hours", "imdbR"]) if (!have[k] && o[k]) have[k] = o[k];
+        if (status && rank(status) > rank(have.status)) setStatus(have, status);
+        return { game: have, existed: true };
+      }
+      const g = blank(Object.assign({}, o, { id: newId(), added: Date.now() }));
+      if (!g.franchise) g.franchise = franchiseGuess(g.title);
+      if (!g.multiverse) g.multiverse = g.franchise;
+      setStatus(g, status || o.status || "backlog");
+      this.games.unshift(g);
+      return { game: g, existed: false };
+    }
+    remove(id) { const g = this.get(id); if (g) this.removed[norm(g.title)] = 1; this.games = this.games.filter(x => x.id !== id); }
+    visible() { return this.games.filter(g => !g.hidden); }
+    counts() {
+      const c = { all: 0, playing: 0, backlog: 0, done: 0, wishlist: 0, dropped: 0, next: 0, upcoming: 0, plays: 0 };
+      const t = today();
+      for (const g of this.visible()) { c.all++; c[g.status]++; if (g.next) c.next++; if (g.date && g.date > t) c.upcoming++; c.plays += g.plays.length; }
+      return c;
+    }
+    // Multiverse → franchise → games, release order, with progress.
+    multiverses() {
+      const m = new Map();
+      for (const g of this.visible()) {
+        const mv = g.multiverse || g.franchise || "Other", fr = g.franchise || mv;
+        if (!m.has(mv)) m.set(mv, { name: mv, franchises: new Map(), total: 0, done: 0 });
+        const x = m.get(mv);
+        if (!x.franchises.has(fr)) x.franchises.set(fr, []);
+        x.franchises.get(fr).push(g); x.total++; if (g.status === "done") x.done++;
+      }
+      return [...m.values()].map(x => ({ name: x.name, total: x.total, done: x.done,
+        franchises: [...x.franchises.entries()].map(([name, gs]) => ({ name, games: gs.sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999")) })) }))
+        .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+    }
+    nextUp(limit = 10) {
+      const t = today();
+      return this.visible().filter(g => g.status === "playing" || (g.next && g.status !== "done"))
+        .concat(this.visible().filter(g => g.status === "backlog" && g.owned && !NA(g.owned) && (!g.date || g.date <= t) && !g.next).sort((a, b) => (a.hours || 99) - (b.hours || 99)).slice(0, 4))
+        .filter((g, i, a) => a.indexOf(g) === i).slice(0, limit);
+    }
+    upcoming(t = today()) { return this.visible().filter(g => g.date && g.date > t && g.status !== "done").sort((a, b) => a.date.localeCompare(b.date)); }
+    recent(limit = 20) {
+      const out = [];
+      for (const g of this.visible()) g.plays.forEach((d, i) => d && out.push({ id: g.id, t: g.title, f: g.franchise, date: d, n: i + 1 }));
+      return out.sort((a, b) => b.date.localeCompare(a.date)).slice(0, limit);
+    }
+  }
+  const rank = s => ({ wishlist: 0, backlog: 1, dropped: 2, playing: 3, done: 4 }[s] || 0);
+  function setStatus(g, st, date) {
+    if (!STATUSES.includes(st)) return g;
+    const prev = g.status;
+    g.status = st;
+    if (st === "done" && !g.plays.length) g.plays.push(isoOf(date) || today());
+    if (st === "done") g.next = false;
+    if ((st === "backlog" || st === "wishlist") && prev === "done") g.plays = [];
+    return g;
+  }
+  function logPlay(g, date) { g.plays.push(isoOf(date) || today()); g.plays.sort(); if (g.status !== "done") { g.status = "done"; g.next = false; } return g.plays.length; }
+  function removePlay(g, i) { g.plays.splice(i, 1); if (!g.plays.length && g.status === "done") g.status = "backlog"; }
+  function franchiseGuess(t) {
+    let s = String(t || "").split(/\s*[:–—]\s+|\s+-\s+/)[0];
+    s = s.replace(/\s+(Remastered|Remake|HD|Deluxe|Edition|Definitive Edition|GOTY|Reloaded)$/i, "").replace(/\s+(\d+|[IVX]{1,4})$/i, "").trim();
+    return s || String(t || "");
+  }
+
+  // ------------------------------------------------------------------ moving over from the old Games tab
+  // ls: an object with the old tab's storage (gc_base, gc_done, gc_ov, gc_ex, gc_live, gc_acm), or a snapshot from
+  // snap_games.json ({base, state:{…}} or the same keys). mine: the built-in list (own edition) when there's no base.
+  function fromOld(ls, mine) {
+    const P = k => { const v = ls["gc_" + k] != null ? ls["gc_" + k] : ls[k]; if (v == null) return null; if (typeof v !== "string") return v; try { return JSON.parse(v); } catch (e) { return null; } };
+    const D = P("base") || mine || [];
+    const done = P("done") || {}, ov = P("ov") || {}, ex = P("ex") || [], live = P("live") || {}, acm = P("acm") || {};
+    // the old tab's ids: "title|date", with the platform added for duplicates
+    const seen = new Set();
+    const rows = [];
+    for (const b of D) {
+      let id = b.t + "|" + b.od;
+      if (seen.has(id)) id += "#" + b.op;
+      let k = 2; while (seen.has(id)) id = b.t + "|" + b.od + "#" + (k++);
+      seen.add(id);
+      rows.push([id, b, false]);
+    }
+    for (const b of ex) rows.push([b.id, b, true]);
+    const out = [];
+    for (const [id, b, custom] of rows) {
+      const o = ov[id] || {}, lv = live[id] || {}, a = acm[id] || {};
+      const v = k => (o[k] !== undefined ? o[k] : b[k]);
+      const remake = !NA(v("rn")) ? { title: v("rn"), date: isoOf(lv.relRm || v("rd")), platform: NA(v("rp")) ? "" : v("rp") } : null;
+      const g = blank({
+        oldId: id, title: v("t"), date: isoOf(lv.rel || v("od")), dateText: NA(v("od")) ? "" : String(v("od")), platform: NA(v("op")) ? "" : v("op"),
+        franchise: v("f") || "", multiverse: v("m") || v("f") || "", owned: NA(v("ow")) ? "" : v("ow"), remake: remake && (remake.title !== v("t") || remake.date !== isoOf(v("od"))) ? remake : null,
+        imdbR: num(o.r) != null ? num(o.r) : lv.imdbR != null ? lv.imdbR : num(b.r), hours: num(o.h) != null ? num(o.h) : lv.hm != null ? lv.hm : num(b.h),
+        hoursRemake: num(o.hb) != null ? num(o.hb) : lv.hb != null ? lv.hb : num(b.hb), notes: v("no") || "", hidden: !!(o.hid || v("hid")),
+        next: !!(+v("n") > 0), steam: +lv.steam || null, imdb: lv.imdb || null, src: custom ? (b.src || "added") : "list",
+        rating: a.ir != null ? Math.round(a.ir) : (o.myR != null ? Math.round(+o.myR) : (a.hs ? Math.round(a.hs / 10) : 0)),
+        target: o.target != null ? +o.target : (o.tp != null ? +o.tp : null), added: b.addedTs || 0,
+        price: lv.eur != null ? { eur: lv.eur, disc: lv.disc || 0, at: lv.priceTs || 0 } : null,
+      });
+      const plays = (o.plays || []).map(isoOf).filter(Boolean);
+      if (done[id]) { g.status = "done"; g.plays = plays.length ? plays : [isoOf(done[id]) || today()]; g.next = false; }
+      else if (plays.length) { g.status = "done"; g.plays = plays; }
+      out.push(g);
+    }
+    return out;
+  }
+  // own edition, new phone: true when the old tab has data in this browser storage
+  const hasOld = ls => !!(ls.gc_base || ls.gc_done || ls.gc_ex || ls.gc_ov);
+
+  // ------------------------------------------------------------------ Steam
+  const COVER = id => `https://cdn.cloudflare.steamstatic.com/steam/apps/${id}/library_600x900.jpg`;
+  const HEADER = id => `https://cdn.cloudflare.steamstatic.com/steam/apps/${id}/header.jpg`;
+  async function getJson(http, url) {
+    const r = await http("GET", url, { headers: { Accept: "application/json" } });
+    if (r.status !== 200) throw new Error(`Steam: HTTP ${r.status || r.error || "error"}`);
+    try { return JSON.parse(r.body); } catch (e) { throw new Error("Steam sent something unreadable"); }
+  }
+  async function steamSearch(http, q, cc = "IT", lang = "english") {
+    const j = await getJson(http, `https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(q)}&cc=${cc}&l=${lang}`);
+    return ((j && j.items) || []).map(x => ({ steam: x.id, title: x.name, platform: "PC", price: x.price && x.price.final != null ? { eur: x.price.final / 100, retail: (x.price.initial || x.price.final) / 100, disc: x.price.initial ? Math.round((1 - x.price.final / x.price.initial) * 100) : 0, at: Date.now() } : null }));
+  }
+  // Finds the Steam app for games that have none yet (one search each, spaced out). Returns how many were linked.
+  async function linkSteam(lib, http, budget = 12, gap = 1100, sleep = ms => new Promise(r => setTimeout(r, ms))) {
+    const todo = lib.visible().filter(g => !g.steam && !(lib.meta.noSteam || {})[g.id] && (!g.platform || /pc|windows|steam|multi/i.test(g.platform + " " + g.owned) || g.status !== "done")).slice(0, budget);
+    let linked = 0;
+    lib.meta.noSteam = lib.meta.noSteam || {};
+    for (const g of todo) {
+      let hits = [];
+      try { hits = await steamSearch(http, g.title, lib.settings.region || "IT"); } catch (e) { if (/HTTP 429|HTTP 403/.test(e.message)) break; continue; }
+      const n = norm(g.title);
+      const hit = hits.find(h => norm(h.title) === n) || hits.find(h => norm(h.title).startsWith(n) && norm(h.title).length - n.length <= 4);
+      if (hit) { g.steam = hit.steam; if (hit.price) g.price = hit.price; linked++; } else lib.meta.noSteam[g.id] = Date.now();
+      if (gap) await sleep(gap);
+    }
+    return linked;
+  }
+  // Prices for linked games you don't own yet, 50 per request. Returns games whose price dropped to an alert.
+  async function steamPrices(lib, http, cc = "IT") {
+    const ids = lib.visible().filter(g => g.steam && g.status !== "done" && (!g.owned || g.status === "wishlist")).map(g => g.steam);
+    const alerts = [];
+    for (let i = 0; i < ids.length; i += 50) {
+      const chunk = ids.slice(i, i + 50);
+      let j;
+      try { j = await getJson(http, `https://store.steampowered.com/api/appdetails?appids=${chunk.join(",")}&cc=${cc}&filters=price_overview`); } catch (e) { continue; }
+      for (const id of chunk) {
+        const po = j && j[id] && j[id].success && j[id].data && j[id].data.price_overview;
+        if (!po) continue;
+        for (const g of lib.games.filter(x => x.steam === id)) {
+          const before = g.price ? g.price.eur : null;
+          g.price = { eur: po.final / 100, retail: po.initial / 100, disc: po.discount_percent || 0, at: Date.now(), low: Math.min(po.final / 100, (g.price && g.price.low) || Infinity) };
+          const hitTarget = g.target != null && g.price.eur <= g.target && (before == null || before > g.target);
+          const bigSale = g.price.disc >= (lib.settings.dropPct || 20) && (before == null || g.price.eur < before - 0.009);
+          if (hitTarget || bigSale) alerts.push({ g, why: hitTarget ? "target" : "sale" });
+        }
+      }
+    }
+    return alerts;
+  }
+  // Prices across stores. IsThereAnyDeal (free key from isthereanydeal.com › Settings › API) gives euro prices from
+  // Steam, GOG, Epic, Humble, Fanatical, GamesPlanet, GMG and many more, plus the all-time low. Without a key, CheapShark
+  // (no key, US dollar prices, PC stores only). Saved on the game as g.stores, cheapest first.
+  async function storePrices(g, http, opt = {}) {
+    if (opt.itadKey) {
+      const key = encodeURIComponent(opt.itadKey), cc = opt.country || "IT";
+      const look = await getJson(http, `https://api.isthereanydeal.com/games/lookup/v1?key=${key}&${g.steam ? `appid=${g.steam}` : `title=${encodeURIComponent(g.title)}`}`);
+      const id = look && look.found && look.game && look.game.id;
+      if (!id) { g.stores = []; g.storesAt = Date.now(); g.storesSrc = "IsThereAnyDeal: not found"; return g.stores; }
+      const r = await http("POST", `https://api.isthereanydeal.com/games/prices/v3?key=${key}&country=${cc}&nondeals=true&vouchers=false`, { headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify([id]) });
+      if (r.status === 401 || r.status === 403) throw new Error("IsThereAnyDeal refused the API key");
+      if (r.status !== 200) throw new Error(`IsThereAnyDeal: HTTP ${r.status || "network error"}`);
+      const j = JSON.parse(r.body || "[]")[0] || {};
+      g.stores = (j.deals || []).map(d => ({ shop: (d.shop || {}).name || "?", price: (d.price || {}).amount, regular: (d.regular || {}).amount, cut: d.cut || 0, cur: (d.price || {}).currency || "EUR", url: d.url || "" }))
+        .filter(x => x.price != null).sort((a, b) => a.price - b.price);
+      const low = j.historyLow && (j.historyLow.all || j.historyLow.y1);
+      g.storesLow = low ? { price: low.amount, cur: low.currency } : null;
+      g.storesSrc = "IsThereAnyDeal"; g.storesAt = Date.now();
+      return g.stores;
+    }
+    const list = await getJson(http, g.steam ? `https://www.cheapshark.com/api/1.0/games?steamAppID=${g.steam}` : `https://www.cheapshark.com/api/1.0/games?title=${encodeURIComponent(g.title)}&limit=5&exact=0`);
+    const hit = Array.isArray(list) ? (list.find(x => norm(x.external) === norm(g.title)) || list[0]) : null;
+    if (!hit) { g.stores = []; g.storesAt = Date.now(); g.storesSrc = "CheapShark: not found"; return g.stores; }
+    const [d, shops] = await Promise.all([getJson(http, `https://www.cheapshark.com/api/1.0/games?id=${hit.gameID}`), storeNames(http)]);
+    g.stores = ((d && d.deals) || []).map(x => ({ shop: shops[x.storeID] || `Store ${x.storeID}`, price: +x.price, regular: +x.retailPrice, cut: Math.round(+x.savings || 0), cur: "USD", url: `https://www.cheapshark.com/redirect?dealID=${encodeURIComponent(x.dealID)}` }))
+      .sort((a, b) => a.price - b.price);
+    g.storesLow = d && d.cheapestPriceEver ? { price: +d.cheapestPriceEver.price, cur: "USD" } : null;
+    g.storesSrc = "CheapShark (US prices)"; g.storesAt = Date.now();
+    return g.stores;
+  }
+  let shopCache = null;
+  async function storeNames(http) {
+    if (shopCache) return shopCache;
+    try { const a = await getJson(http, "https://www.cheapshark.com/api/1.0/stores"); shopCache = {}; for (const x of a || []) shopCache[x.storeID] = x.storeName; } catch (e) { shopCache = {}; }
+    return shopCache;
+  }
+  // Release dates for upcoming or undated linked games (one request each, a few per run).
+  async function steamDates(lib, http, budget = 8) {
+    const t = today();
+    const todo = lib.visible().filter(g => g.steam && (!g.date || g.date > t)).slice(0, budget);
+    let n = 0;
+    for (const g of todo) {
+      try {
+        const j = await getJson(http, `https://store.steampowered.com/api/appdetails?appids=${g.steam}&cc=${lib.settings.region || "IT"}&l=english`);
+        const d = j && j[g.steam] && j[g.steam].data;
+        if (!d || !d.release_date) continue;
+        const iso = isoOf(d.release_date.date);
+        if (iso && iso !== g.date) { g.date = iso; g.dateText = d.release_date.date; n++; }
+        else if (!iso && d.release_date.coming_soon && d.release_date.date) g.dateText = d.release_date.date;
+      } catch (e) { /* next run */ }
+    }
+    return n;
+  }
+  // Rows from imports (Steam library, HowLongToBeat, Grouvee, Backloggd, CSV): {title, platform, status, date, rating, hours, steam, owned}
+  function importRows(lib, rows, kind) {
+    let added = 0, updated = 0;
+    for (const r of rows) {
+      if (!r || !r.title || lib.removed[norm(r.title)]) continue;
+      const st = { done: "done", playing: "playing", backlog: "backlog", wishlist: "wishlist", dropped: "dropped" }[r.status] || "backlog";
+      const { game, existed } = lib.add({ title: r.title, platform: r.platform || "", steam: r.steam || null, owned: r.owned || (st !== "wishlist" ? r.platform || "" : ""), src: kind }, st);
+      if (existed) updated++; else added++;
+      if (r.date && st === "done" && !game.plays.includes(r.date)) { game.plays = game.plays.filter(d => d !== today() || r.date === today()); game.plays.push(r.date); game.plays.sort(); }
+      if (r.rating && !game.rating) game.rating = Math.round(r.rating);
+      if (r.hours && !game.hours && kind !== "Steam library") game.hours = r.hours; // Steam gives hours played, not time to beat
+      if (r.owned && !game.owned) game.owned = r.owned;
+    }
+    return { added, updated };
+  }
+  // Video games from your IMDb ratings and lists (the Watch sync reads them): rated = finished, listed = wishlist.
+  function fromImdb(lib, rows) {
+    let added = 0, rated = 0;
+    for (const r of rows) {
+      if (r.medium !== "Video Game" || !r.title) continue;
+      if (lib.removed[norm(r.title)]) continue;
+      const isRated = r.kind === "rated" || r.kind === "watched";
+      const before = lib.find({ title: r.title, imdb: r.imdb, year: r.year });
+      if (!before && !isRated && lib.settings.imdbLists === "0") continue;
+      const { game, existed } = lib.add({ title: r.title, imdb: r.imdb || null, date: r.year ? r.year + "-12-31" : "", dateText: r.year ? String(r.year) : "", src: "imdb" }, isRated ? "done" : "wishlist");
+      if (!game.imdb && r.imdb) game.imdb = r.imdb;
+      if (r.rating && !game.rating) { game.rating = +r.rating; rated++; }
+      if (!existed) added++;
+    }
+    return { added, rated };
+  }
+  function storeLinks(g) {
+    const q = encodeURIComponent(g.title);
+    return [g.steam ? ["Steam", `https://store.steampowered.com/app/${g.steam}/`] : ["Steam", `https://store.steampowered.com/search/?term=${q}`],
+      ["GOG", `https://www.gog.com/en/games?query=${q}`], ["Epic Games Store", `https://store.epicgames.com/it/browse?q=${q}`],
+      ["Compare prices (GG.deals)", `https://gg.deals/search/?title=${q}`], ["PlayStation Store", `https://store.playstation.com/it-it/search/${q}`],
+      ["Nintendo eShop", `https://www.nintendo.com/it-it/Cerca/Cerca-299117.html?q=${q}`], ["Xbox / Game Pass", `https://www.xbox.com/it-IT/search/results/games?q=${q}`],
+      ["HowLongToBeat", `https://howlongtobeat.com/?q=${q}`], ["IMDb", g.imdb ? `https://www.imdb.com/title/${g.imdb}/` : `https://www.imdb.com/find/?q=${q}&s=tt&ttype=vg`]];
+  }
+  function indexFor(lib) {
+    const t = today();
+    return { ts: Date.now(), next: lib.nextUp(8).map(g => ({ id: g.id, t: g.title, f: g.franchise, date: g.date })), recent: lib.recent(20),
+      upcoming: lib.upcoming(t).slice(0, 60).map(g => ({ id: g.id, t: g.title, date: g.date, f: g.franchise })),
+      games: lib.visible().map(g => ({ id: g.id, t: g.title, f: g.franchise, m: g.multiverse, done: g.status === "done", date: g.date })) };
+  }
+
+  const API = { STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, franchiseGuess, fromOld, hasOld, COVER, HEADER,
+    steamSearch, linkSteam, steamPrices, storePrices, steamDates, importRows, fromImdb, storeLinks, indexFor, yearOf, NA };
+  if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
+  root.GamesCore = API;
+})(typeof window !== "undefined" ? window : globalThis);

@@ -1,0 +1,24 @@
+# signing keys and secrets
+*.jks
+*.keystore
+private/
+*.env
+# build output
+out/
+app/
+classes/
+dexout/
+tools/
+*.apk
+*.idsig
+# never commit the private source archive
+*source*.zip
+# personal data files
+web/gc-mine.js
+web/dw-mine.js
+legacy/assets/gc/mine.js
+legacy/assets/dw/mine.js
+# misc
+node_modules/
+__pycache__/
+*.pyc

@@ -1,0 +1,26 @@
+/* Doctor Who tab: CanonSync palette and type on top of DW Canon's own styles. */
+body { padding-top: var(--strip-h) !important; font-family: var(--b-body); }
+header { top: var(--strip-h) !important; }
+.toolbar { top: calc(var(--hh, 100px) + var(--strip-h)); }
+.brand b, .panel h2, .panel h3, .sheet h3, h2, h3 { font-family: var(--b-display); font-weight: 600; }
+.brand b { font-size: 19px; font-weight: 800; letter-spacing: -0.02em; }
+.chip.on, .btn.pri, .grid10 button.on, .uptag { color: var(--b-action-ink); }
+.btn { font-weight: 700; border-radius: 12px; }
+.panel { border-color: transparent; background: #211A3A; border-radius: 20px; }
+.panel.hero { background: radial-gradient(120% 140% at 100% 0%, rgba(63, 211, 194, .14), transparent 55%), #2A2249; }
+.item { border-radius: 14px; }
+.sheet { max-height: calc(100vh - var(--strip-h) - 8px); background: #2A2249; }
+.toast { background: var(--b-ink); color: var(--b-night); border: 0; font-weight: 700; }
+.toast button { color: #8A5A00; }
+.dwx .wrap .btn.pri { flex: 1; justify-content: center; }
+@media (min-width: 840px) {
+  .side { top: var(--strip-h); height: calc(100vh - var(--strip-h)); }
+  .side .t.on { background: var(--b-raised); color: var(--b-ink); box-shadow: inset 3px 0 0 var(--b-dw); }
+  main { max-width: 1200px; padding-left: 20px; padding-right: 20px; }
+  .sheet { left: 50%; right: auto; width: min(720px, calc(100% - 48px)); transform: translateX(-50%); bottom: 24px; border-radius: 22px; max-height: calc(100vh - var(--strip-h) - 48px); }
+}
+@media (orientation: landscape) and (max-height: 540px) {
+  :root { --strip-h: 42px; }
+  .top { padding-top: 6px; }
+}
+@media (max-width: 359px) { main { padding-left: 8px; padding-right: 8px; } .item .n { display: none; } }

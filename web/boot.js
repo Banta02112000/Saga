@@ -1,0 +1,2 @@
+/* Applies the saved theme before the first paint (was an inline script; the page's security policy forbids those). */
+try { var t = localStorage.getItem("saga_theme"), a = localStorage.getItem("saga_accent"), x = localStorage.getItem("saga_text"); if (t) document.documentElement.dataset.theme = t; if (a) document.documentElement.dataset.accent = a; if (x) document.documentElement.dataset.text = x; } catch (e) {}

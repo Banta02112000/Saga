@@ -1,0 +1,46 @@
+/* Games tab: CanonSync palette and type on top of GameCheck's own styles. */
+body { padding-top: var(--strip-h) !important; font-family: var(--b-body); }
+.top { top: var(--strip-h) !important; }
+.h1, .sh h2, h1, h2, .sec h3 { font-family: var(--b-display); }
+.h1 { font-weight: 800; letter-spacing: -0.02em; }
+.sec h3 { font-weight: 600; text-transform: none; letter-spacing: 0; font-size: 15px; color: var(--t); }
+.badge, .btn.pr, .fab { color: var(--b-action-ink); }
+.fab svg { stroke: var(--b-action-ink); }
+.fab { box-shadow: 0 10px 28px rgba(245, 184, 65, .3); }
+.sw.on::after { background: var(--b-action-ink); }
+.ck svg { stroke: var(--b-night); }
+.btn { font-weight: 700; }
+.panel { border-color: transparent; background: #211A3A; border-radius: 20px; }
+.chip.on { background: var(--b-action); border-color: var(--b-action); color: var(--b-action-ink); }
+nav { background: rgba(34, 27, 59, .97); }
+.toast { background: var(--b-ink); color: var(--b-night); font-weight: 700; }
+.sh .pn { max-height: calc(100% - var(--strip-h) - 8px); background: #2A2249; }
+@media (min-width: 720px) {
+  .sh .pn { left: 50%; right: auto; width: min(680px, calc(100% - 48px)); transform: translateX(-50%); bottom: 24px; border-radius: 22px; max-height: calc(100% - var(--strip-h) - 48px); animation: none; }
+  .view { padding-left: 24px; padding-right: 24px; }
+  .top { margin: 0 -24px; padding-left: 24px; padding-right: 24px; }
+  .chips { margin: 0 -24px; padding-left: 24px; padding-right: 24px; }
+  nav { padding-left: 24px; padding-right: 24px; }
+}
+@media (min-width: 1100px) { .view { max-width: 1400px; } }
+@media (orientation: landscape) and (max-height: 540px) {
+  :root { --strip-h: 42px; }
+  .top { padding-top: 8px; padding-bottom: 6px; }
+  nav button { padding: 2px 0; }
+  nav button .ic { height: 26px; }
+}
+@media (max-width: 359px) {
+  .view { padding-left: 10px; padding-right: 10px; }
+  .top, .chips { margin-left: -10px; margin-right: -10px; padding-left: 10px; padding-right: 10px; }
+  .h1 { font-size: 19px; }
+}
+.tag.sub { background: rgba(143, 162, 255, .16); color: #B9C4FF; }
+.gcx-subs { margin-top: 10px; display: grid; gap: 4px; }
+.gcx-subs summary { cursor: pointer; padding: 6px 0; list-style: none; font-size: 13.5px; color: var(--t2); }
+.gcx-subs summary::-webkit-details-marker { display: none; }
+.gcx-row { padding: 7px 10px; border-radius: 10px; background: var(--s2); margin: 3px 0; font-size: 13.5px; cursor: pointer; }
+.gcx-row:active { background: var(--s3); }
+.gcx-play { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.gcx-play > span, .gcx-play > input { flex: 1; min-width: 0; }
+.gcx-play input { background: var(--b-night); color: var(--b-ink); border: 1px solid var(--b-line); border-radius: 10px; padding: 8px 10px; font: inherit; }
+#gcxSteamRes .offer { cursor: pointer; }

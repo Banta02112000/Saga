@@ -1,0 +1,784 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DW Canon</title>
+<style>
+:root{
+  --bg:#070e1a; --bg2:#0c1729; --card:#111f35; --card2:#172a46; --line:#1f3352; --line2:#2a4570;
+  --ink:#e8eef7; --mute:#8699b5; --acc:#4f8df5; --acc2:#2c63b8; --good:#3ccf7a; --warn:#f2b43a; --bad:#ff5a5a;
+  --r:14px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+button:disabled{opacity:.4}
+a{color:var(--acc)}
+.app{display:flex;min-height:100vh}
+.side{display:none}
+.content{flex:1;min-width:0}
+header{position:sticky;top:0;z-index:20;background:rgba(9,18,33,.96);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.top{display:flex;align-items:center;gap:10px;padding:12px 14px 4px}
+.brand{flex:1;min-width:0}
+.brand b{font-size:17px;letter-spacing:.2px}
+.brand small{display:block;color:var(--mute);font-size:12px;margin-top:1px}
+.iconbtn{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:var(--card);border:1px solid var(--line);font-size:17px}
+.chips{display:flex;gap:6px;overflow-x:auto;padding:6px 12px 8px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;padding:7px 13px;border-radius:999px;background:var(--card);border:1px solid var(--line);color:var(--mute);font-size:13px;white-space:nowrap}
+.chip.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.tabs .chip{border-radius:9px;font-size:12.5px;padding:6px 10px}
+.tabs .chip.on{background:var(--acc2);border-color:#3a74cf}
+.pct{opacity:.65;font-size:11px;margin-left:3px}
+main{max-width:1000px;margin:0 auto;padding:12px 12px 60px}
+.panel{background:var(--bg2);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:12px}
+.panel h2{margin:0;font-size:20px}
+.panel h3{margin:0 0 8px;font-size:15px}
+.row{display:flex;align-items:center;gap:10px}
+.meta{color:var(--mute);font-size:12.5px}
+.prog{height:7px;background:#08121f;border-radius:9px;overflow:hidden;margin:10px 0}
+.prog i{display:block;height:100%;background:linear-gradient(90deg,#2fb86a,#3ccf7a)}
+.avgs{display:flex;flex-wrap:wrap;gap:6px}
+.avg{display:flex;align-items:center;gap:6px;padding:5px 9px;border-radius:9px;background:var(--card);font-size:12.5px;border:1px solid var(--line)}
+.avg b{font-size:14px}
+.avg.all{background:#173158;border-color:var(--acc2)}
+.dot{width:9px;height:9px;border-radius:50%;flex:none;display:inline-block}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:10px;background:var(--card2);border:1px solid var(--line2);font-size:13px;text-decoration:none;color:var(--ink)}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+.btn.ok{background:#1d6a41;border-color:#2a8a57}
+.btn.no{background:#5a1f26;border-color:#8a2a35}
+.btn.sm{padding:5px 9px;font-size:12px}
+.badge{font-size:11.5px;padding:2px 7px;border-radius:6px;background:var(--card);border:1px solid var(--line);color:var(--mute);white-space:nowrap}
+.badge.ok{color:#9ff0c0;border-color:#2a8a57}
+.badge.warn{color:#ffd88a;border-color:#8a6a2a}
+.wrap{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.toolbar{position:sticky;top:var(--hh,100px);z-index:10;background:var(--bg);padding:8px 0 6px;margin:-4px 0 6px}
+.search{width:100%;padding:10px 12px;border-radius:11px;border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit}
+.filters{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin-top:8px}
+.filters::-webkit-scrollbar{display:none}
+.filters .chip{font-size:12px;padding:5px 10px}
+select{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:999px;padding:5px 10px;font:inherit;font-size:12px}
+.sub{margin:16px 2px 6px;color:var(--mute);font-size:11.5px;text-transform:uppercase;letter-spacing:1.2px;font-weight:600}
+.item{display:flex;align-items:center;gap:10px;padding:10px 10px 10px 8px;background:var(--card);border-radius:12px;margin-bottom:6px;border-left:4px solid var(--c,#888);position:relative}
+.item.done .title{opacity:.75}
+.item.up{box-shadow:0 0 0 1.5px var(--acc) inset}
+.item .n{width:24px;color:var(--mute);font-size:11.5px;text-align:right;flex:none}
+.cb{width:26px;height:26px;border-radius:8px;border:2px solid #3d5677;display:grid;place-items:center;flex:none;font-size:15px;font-weight:800}
+.cb.on{background:var(--good);border-color:var(--good);color:#06210f}
+.body{flex:1;min-width:0}
+.title{font-weight:600;color:var(--c);overflow-wrap:anywhere}
+.sm{font-size:12px;color:var(--mute);margin-top:3px;display:flex;flex-wrap:wrap;gap:3px 9px;align-items:center}
+.ch s{opacity:.65}
+.rt{min-width:40px;height:34px;border-radius:10px;display:grid;place-items:center;font-weight:800;font-size:15px;background:#0a1525;border:1px solid var(--line2);flex:none}
+.rt.none{color:var(--mute);font-weight:400;font-size:13px}
+.src{color:#b9d3ff}
+.free{color:#9ff0c0;font-weight:600}
+.uptag{position:absolute;top:-7px;left:44px;font-size:10px;background:var(--acc);color:#fff;padding:1px 6px;border-radius:5px;font-weight:700;letter-spacing:.4px}
+.next{color:var(--warn)}
+.sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:40;display:none}
+.sheet{position:fixed;left:0;right:0;bottom:0;max-height:90vh;overflow:auto;background:var(--bg2);border-top:1px solid var(--line2);border-radius:18px 18px 0 0;z-index:50;padding:8px 16px 28px;display:none;max-width:760px;margin:0 auto}
+.sheet:before{content:"";display:block;width:40px;height:4px;border-radius:4px;background:#2c4468;margin:0 auto 12px}
+.sheet.on,.sheet-bg.on{display:block}
+.sheet h3{margin:0 0 4px;font-size:19px}
+.grid10{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;margin:10px 0}
+.grid10 button{padding:12px 0;border-radius:11px;background:var(--card);border:1px solid var(--line2);font-weight:800;font-size:16px}
+.grid10 button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.links{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+textarea,input[type=text]{width:100%;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px;font:inherit}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-size:13px;margin:8px 0}
+.kv>span:nth-child(odd){color:var(--mute)}
+.wl{font-size:13px;padding:8px 10px;border-radius:9px;background:var(--card);margin-bottom:4px;display:flex;gap:8px;align-items:center;width:100%;text-align:left}
+.wl.m{border-left:3px solid var(--good)}
+.wl.x{border-left:3px solid #4a5568;color:var(--mute)}
+.wl .ty{font-size:10.5px;color:var(--mute);min-width:56px}
+.lrow{display:flex;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid var(--line);font-size:13.5px;width:100%;text-align:left}
+.lrow:last-child{border-bottom:0}
+.lrow .nm{flex:1;min-width:0}
+.mini{height:5px;background:#08121f;border-radius:6px;overflow:hidden;margin-top:5px}
+.mini i{display:block;height:100%;background:var(--good)}
+.hist{display:flex;align-items:flex-end;gap:5px;height:110px;margin-top:8px}
+.hist div{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;justify-content:flex-end}
+.hist i{display:block;width:100%;background:linear-gradient(180deg,#5b9bff,#2c63b8);border-radius:5px 5px 2px 2px;min-height:2px}
+.hist span{font-size:11px;color:var(--mute)}
+.hist em{font-style:normal;font-size:10px;color:var(--mute)}
+.pbadge{position:absolute;top:-5px;right:-5px;background:var(--warn);color:#201400;font-size:10.5px;font-weight:800;border-radius:9px;padding:1px 5px;display:none}
+.pend{display:flex;align-items:center;gap:8px;padding:9px 10px;background:var(--card);border-radius:10px;margin-bottom:5px;border-left:3px solid var(--c,#888)}
+.pend .tt{flex:1;min-width:0;text-align:left}
+.pend .tt b{color:var(--c);font-weight:600}
+.pend .act{width:36px;height:34px;border-radius:9px;display:grid;place-items:center;border:1px solid var(--line2);background:var(--card2);flex:none}
+.pend .act.y{background:#1d6a41;border-color:#2a8a57}
+.pend .act.n{background:#4a1d23;border-color:#7a2a33}
+.newdot{font-size:10px;color:#201400;background:var(--warn);border-radius:5px;padding:0 5px;margin-left:4px;font-weight:800}
+.th{width:42px;height:58px;object-fit:cover;border-radius:7px;flex:none;background:#0a1525;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+.pth{width:46px;height:64px;object-fit:cover;border-radius:7px;flex:none;background:#0a1525}
+.pend .tt{display:flex;flex-direction:column;gap:2px}
+.hero{position:relative;overflow:hidden}
+.hero .bgimg{position:absolute;inset:-20px;background-size:cover;background-position:center 25%;filter:blur(22px) saturate(1.2) brightness(.32);opacity:.9}
+.hero>*:not(.bgimg){position:relative}
+.av{width:64px;height:64px;border-radius:50%;object-fit:cover;object-position:center 20%;border:2px solid #3a5f95;flex:none;background:#0a1525;box-shadow:0 4px 16px rgba(0,0,0,.45)}
+.avph{width:64px;height:64px;border-radius:50%;flex:none;display:grid;place-items:center;font-weight:800;font-size:22px;background:linear-gradient(135deg,#1f4f9a,#0e2a55);border:2px solid #3a5f95}
+.gridv{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px}
+.gcard{position:relative;background:var(--card);border-radius:12px;overflow:hidden;border:1px solid var(--line);cursor:pointer;display:flex;flex-direction:column}
+.gcard .cv{aspect-ratio:2/3;background:linear-gradient(160deg,var(--c),#0a1525 75%);display:flex;align-items:flex-end;padding:8px;font-weight:700;font-size:12.5px;line-height:1.25;color:#fff;text-shadow:0 1px 3px #000}
+.gcard .cv img{position:absolute;inset:0;width:100%;height:auto;aspect-ratio:2/3;object-fit:cover}
+.gcard .ct{padding:7px 8px 8px;font-size:12px;font-weight:600;color:var(--c);line-height:1.25;flex:1}
+.gcard .gr{position:absolute;top:6px;right:6px;min-width:28px;height:26px;border-radius:8px;background:rgba(7,14,26,.85);display:grid;place-items:center;font-weight:800;font-size:13px;border:1px solid var(--line2)}
+.gcard .gc{position:absolute;top:6px;left:6px;width:26px;height:26px;border-radius:8px;background:rgba(7,14,26,.85);border:1.5px solid #3d5677;display:grid;place-items:center;font-weight:800}
+.gcard .gc.on{background:var(--good);border-color:var(--good);color:#06210f}
+.gcard.done .cv img{filter:saturate(.6) brightness(.8)}
+.gcard.up{box-shadow:0 0 0 2px var(--acc)}
+.cover{display:flex;gap:14px;align-items:flex-start;margin-bottom:6px}
+.cover img{width:110px;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.5);flex:none}
+.cover .ph{width:110px;aspect-ratio:2/3;border-radius:10px;flex:none;background:linear-gradient(160deg,var(--c),#0a1525 80%);display:grid;place-items:center;font-size:11px;color:var(--mute);text-align:center;padding:6px}
+.ring{width:84px;height:84px;flex:none}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#16304f;border:1px solid var(--line2);padding:10px 14px;border-radius:12px;z-index:60;display:none;font-size:13.5px;align-items:center;gap:14px;box-shadow:0 8px 30px rgba(0,0,0,.4)}
+.toast button{color:#8fbaff;font-weight:700}
+.empty{color:var(--mute);text-align:center;padding:30px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:12px;color:var(--mute)}
+.legend span{display:flex;align-items:center;gap:5px}
+.two{display:grid;grid-template-columns:1fr;gap:12px}
+details summary{cursor:pointer;color:var(--mute);font-size:12.5px;list-style:none;margin-top:8px}
+details summary::-webkit-details-marker{display:none}
+@media(min-width:840px){
+  body{font-size:16px}
+  .side{display:block;width:280px;flex:none;border-right:1px solid var(--line);background:#081324;height:100vh;position:sticky;top:0;overflow:auto;padding:14px 10px 40px}
+  .side .g{margin:14px 6px 4px;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--mute);font-weight:700;cursor:pointer}
+  .side .t{display:flex;align-items:center;gap:8px;width:100%;padding:7px 10px;border-radius:9px;font-size:13.5px;color:#c7d3e6;text-align:left}
+  .side .t.on{background:var(--acc2);color:#fff}
+  .side .t .meta{margin-left:auto}
+  .side .ov{font-weight:700;font-size:15px}
+  #groups,#tabs{display:none!important}
+  .grid10{grid-template-columns:repeat(11,1fr)}
+  .two{grid-template-columns:1fr 1fr}
+}
+</style>
+</head>
+<body>
+<div class="app">
+<nav class="side" id="side"></nav>
+<div class="content">
+<header id="hdr">
+  <div class="top">
+    <div class="brand"><b>DW Canon</b><small id="stat"></small></div>
+    <button class="iconbtn" id="btnSync" aria-label="Sync with the wiki" style="position:relative">⟳<span id="pendBadge" class="pbadge"></span></button>
+    <button class="iconbtn" id="btnSearch" aria-label="Search everything">🔎</button>
+    <button class="iconbtn" id="btnMenu" aria-label="Settings">⚙︎</button>
+  </div>
+  <div class="chips" id="groups"></div>
+  <div class="chips tabs" id="tabs"></div>
+</header>
+<main id="main"></main>
+</div>
+</div>
+<div class="sheet-bg" id="sbg"></div>
+<div class="sheet" id="sheet"></div>
+<div class="toast" id="toast"><span id="toastMsg"></span><button id="toastUndo" style="display:none">UNDO</button></div>
+<script src="data.js"></script>
+<script>
+'use strict';
+const LS='dwcanon.v1';
+let D=null, ST=null, cur={g:0,t:'overview'}, filt={state:'all',type:'all',q:'',sort:'order'};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const enc=encodeURIComponent;
+let undoFn=null;
+function toast(m,undo){$('#toastMsg').textContent=m;undoFn=undo||null;$('#toastUndo').style.display=undo?'inline':'none';
+  const t=$('#toast');t.style.display='flex';clearTimeout(t._h);t._h=setTimeout(()=>{t.style.display='none';undoFn=null},undo?4500:2200)}
+$('#toastUndo').onclick=()=>{if(undoFn){undoFn();undoFn=null;$('#toast').style.display='none';render()}};
+function load(){try{ST=JSON.parse(localStorage.getItem(LS)||'null')}catch(e){ST=null}
+  if(!ST)ST={};fill()}
+function fill(){for(const k of ['works','orders','approvals','wiki','added','types','settings','ui','scroll','pending','rejected','timeline','syncs','storyInfo','orderDiff','covers','tabImg'])if(!ST[k])ST[k]={};if(!Array.isArray(ST.custom))ST.custom=[];for(const k in ST.syncs)if(typeof ST.syncs[k]==='string')ST.syncs[k]={date:ST.syncs[k]};for(const k in ST.pending)(ST.pending[k]||[]).forEach(p=>{if(!p.status||p.status==='unknown'){p.status='nomain';p.why=p.why||'not verified yet — sync again'}});
+  if(!ST.settings.host)ST.settings.host='tardis.wiki'}
+function save(){try{localStorage.setItem(LS,JSON.stringify(ST))}catch(e){toast('Could not save: '+e)}}
+// ---------- model ----------
+function W(k){const b=D.works[k]||ST.added[k]||{};const s=ST.works[k]||{};return{title:b.title,type:b.type,src:b.src,
+  rating:('rating' in s)?s.rating:(b.rating==null?null:b.rating), done:('done' in s)?s.done:!!b.done, notes:s.notes||''}}
+function setW(k,patch,label){const before=Object.assign({},ST.works[k]||{});const had=k in ST.works;
+  ST.works[k]=Object.assign(ST.works[k]||{},patch);save();
+  if(label)toast(label,()=>{if(had)ST.works[k]=before;else delete ST.works[k];save()})}
+const typeOf=id=>{const t=D.types.find(x=>x.id===id)||D.types[0];return{id:t.id,color:t.color,label:ST.types[t.id]||t.label,pdf:t.pdf}};
+function tabById(id){for(let gi=0;gi<D.groups.length;gi++){const g=D.groups[gi];for(const t of g.tabs)if(t.id===id)return{g,t,gi}}return null}
+const isSkip=g=>g.name.startsWith('Skipped');
+function tabItems(t){let items=t.items.concat(ST.added[t.id+'#items']||[]);
+  const ord=ST.orders[t.id]; if(!ord)return items;
+  const m=new Map(items.map(i=>[i.id,i]));const out=[];
+  for(const id of ord)if(m.has(id)){out.push(m.get(id));m.delete(id)}
+  for(const i of items)if(m.has(i.id))out.push(i);return out}
+function stats(items,dedupe){const seen=new Set(),by={},all=[];let done=0,n=0;
+  for(const i of items){if(dedupe){if(seen.has(i.k))continue;seen.add(i.k)}
+    const w=W(i.k);n++;if(w.done)done++;
+    if(w.rating!=null){all.push(w.rating);(by[w.type]=by[w.type]||[]).push(w.rating)}}
+  const avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;const per={};
+  for(const k in by)per[k]={avg:avg(by[k]),n:by[k].length};
+  return{n,done,avg:avg(all),rated:all.length,per,all}}
+const f1=x=>x==null?'–':(Math.round(x*10)/10).toFixed(1);
+function canonItems(){const a=[];D.groups.forEach(g=>{if(!isSkip(g))g.tabs.forEach(t=>a.push(...tabItems(t)))});return a}
+function avgChips(s){let h=`<div class="avg all"><span>All</span><b>${f1(s.avg)}</b><span class="meta">${s.rated} rated</span></div>`;
+  for(const t of D.types){const p=s.per[t.id];if(!p)continue;const ty=typeOf(t.id);
+    h+=`<div class="avg"><span class="dot" style="background:${ty.color}"></span><span>${esc(ty.label)}</span><b>${f1(p.avg)}</b><span class="meta">${p.n}</span></div>`}
+  return `<div class="avgs">${h}</div>`}
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function fmtDate(d){if(!d)return'';let m;
+  if((m=d.match(/^(\d{1,2})[ -](\d{1,2})[ -](\d{4})$/)))return `${+m[1]} ${MON[+m[2]-1]||m[2]} ${m[3]}`;
+  if((m=d.match(/^(\d{1,2}) (\d{4})$/))&&+m[1]<=12)return `${MON[+m[1]-1]} ${m[2]}`;
+  return d.replace(/\b([a-z])/g,c=>c.toUpperCase())}
+function nextUp(t){for(const it of tabItems(t)){if(!W(it.k).done)return it}return null}
+// ---------- nav ----------
+function renderNav(){
+  let h=`<button class="chip ${cur.t==='overview'?'on':''}" data-ov="1">Overview</button>`;
+  D.groups.forEach((g,i)=>h+=`<button class="chip ${cur.t!=='overview'&&cur.g===i?'on':''}" data-g="${i}">${esc(g.name)}</button>`);
+  $('#groups').innerHTML=h;
+  const tabsEl=$('#tabs');
+  if(cur.t==='overview'){tabsEl.innerHTML='';tabsEl.style.display='none'}
+  else{tabsEl.style.display='flex';tabsEl.innerHTML=D.groups[cur.g].tabs.map(t=>{const s=stats(tabItems(t));
+      return `<button class="chip ${cur.t===t.id?'on':''}" data-t="${t.id}">${esc(t.name)}<span class="pct">${s.n?Math.round(100*s.done/s.n):0}%</span></button>`}).join('');
+    const on=tabsEl.querySelector('.chip.on');if(on)tabsEl.scrollLeft=on.offsetLeft-tabsEl.clientWidth/2+on.clientWidth/2}
+  let sd=`<button class="t ov ${cur.t==='overview'?'on':''}" data-ov="1">Overview</button>`;
+  D.groups.forEach((g,gi)=>{sd+=`<div class="g">${esc(g.name)}</div>`+g.tabs.map(t=>{const s=stats(tabItems(t));
+    return `<button class="t ${cur.t===t.id?'on':''}" data-g="${gi}" data-t="${t.id}"><span>${esc(t.name)}</span><span class="meta">${s.done}/${s.n}</span></button>`}).join('')});
+  $('#side').innerHTML=sd;
+  updateBadge();
+  const s=stats(canonItems(),true);$('#stat').textContent=`${s.done}/${s.n} canon works · avg ${f1(s.avg)}`;
+  document.documentElement.style.setProperty('--hh',$('#hdr').offsetHeight+'px');
+}
+function go(gi,tid){rememberScroll();if(tid==='overview')cur.t='overview';else{cur.g=gi;cur.t=tid;ST.ui['lastTab'+gi]=tid;ST.ui.last={g:gi,t:tid};save()}
+  filt.q='';render();restoreScroll()}
+function rememberScroll(){ST.scroll[cur.t]=window.scrollY}
+function restoreScroll(){const y=ST.scroll[cur.t]||0;requestAnimationFrame(()=>window.scrollTo(0,y))}
+$('#groups').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.ov)return go(0,'overview');
+  const gi=+b.dataset.g;go(gi,ST.ui['lastTab'+gi]||D.groups[gi].tabs[0].id)};
+$('#tabs').onclick=e=>{const b=e.target.closest('button');if(b)go(cur.g,b.dataset.t)};
+$('#side').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.ov)return go(0,'overview');go(+b.dataset.g,b.dataset.t)};
+// ---------- views ----------
+function render(){renderNav();if(cur.t==='overview')renderOverview();else renderTab()}
+function renderOverview(){
+  const sc=stats(canonItems(),true);
+  let h=`<div class="panel hero"><div class="row" style="gap:16px">${ringSvg(sc.n?sc.done/sc.n:0)}<div style="flex:1"><h2>All canon</h2><div class="meta">${sc.done} of ${sc.n} works done · ${sc.rated} rated · average ${f1(sc.avg)}</div></div></div>
+    <div style="margin-top:12px">${avgChips(sc)}</div></div>`;
+  // continue
+  const cont=[];D.groups.forEach((g,gi)=>{if(isSkip(g))return;g.tabs.forEach(t=>{const s=stats(tabItems(t));if(s.done>0&&s.done<s.n){const it=nextUp(t);if(it)cont.push({gi,t,s,it})}})});
+  cont.sort((a,b)=>(b.s.done/b.s.n)-(a.s.done/a.s.n));
+  h+=`<div class="two"><div class="panel"><h3>Continue</h3>${cont.length?cont.slice(0,10).map(c=>{const w=W(c.it.k);const ty=typeOf(w.type);
+      return `<button class="lrow" data-g="${c.gi}" data-t="${c.t.id}" data-it="${c.it.id}"><span class="dot" style="background:${ty.color}"></span><span class="nm"><b>${esc(w.title)}</b><div class="meta">${esc(c.t.name)} · ${c.s.done}/${c.s.n}</div><div class="mini"><i style="width:${100*c.s.done/c.s.n}%"></i></div></span><span class="meta">›</span></button>`}).join(''):'<div class="meta">Nothing in progress.</div>'}</div>`;
+  // histogram
+  const hist=Array(11).fill(0);sc.all.forEach(r=>{if(r>=0&&r<=10)hist[Math.round(r)]++});const mx=Math.max(1,...hist);
+  h+=`<div class="panel"><h3>Your ratings</h3><div class="hist">${hist.map((c,i)=>`<div><em>${c||''}</em><i style="height:${100*c/mx}%"></i><span>${i}</span></div>`).join('')}</div>`;
+  const top=[];const seen=new Set();canonItems().forEach(i=>{if(seen.has(i.k))return;seen.add(i.k);const w=W(i.k);if(w.rating!=null)top.push(w)});
+  top.sort((a,b)=>b.rating-a.rating||a.title.localeCompare(b.title));
+  h+=`<details><summary>Top rated ▾</summary>${top.slice(0,25).map(w=>`<div class="lrow"><span class="dot" style="background:${typeOf(w.type).color}"></span><span class="nm">${esc(w.title)}</span><b>${w.rating}</b></div>`).join('')}</details></div></div>`;
+  {const P=Object.keys(ST.pending).filter(k=>(ST.pending[k]||[]).length&&tabById(k));
+   if(P.length)h+=`<div class="panel" style="border-color:#8a6a2a"><div class="row"><h3 style="flex:1;margin:0">Waiting for your approval</h3><button class="btn sm pri" id="ovRev">Review ${pendingTotal()}</button></div><div class="meta" style="margin-top:6px">${P.map(k=>esc(tabById(k).t.name)+' ('+countable(ST.pending[k])+')').join(' · ')}</div></div>`}
+  // legend
+  h+=`<div class="panel"><h3>Media types</h3><div class="legend">${D.types.map(t=>{const ty=typeOf(t.id);return `<span><i class="dot" style="background:${ty.color}"></i>${esc(ty.label)} <span style="opacity:.6">(${esc(t.pdf)})</span></span>`}).join('')}</div></div>`;
+  D.groups.forEach((g,gi)=>{const items=[];g.tabs.forEach(t=>items.push(...tabItems(t)));const s=stats(items,true);
+    h+=`<div class="panel"><div class="row"><h2 style="font-size:17px;flex:1">${esc(g.name)}</h2><span class="meta">${s.done} / ${s.n}</span></div><div class="prog"><i style="width:${s.n?100*s.done/s.n:0}%"></i></div>${avgChips(s)}<div style="margin-top:8px">`;
+    h+=g.tabs.map(t=>{const st=stats(tabItems(t));const ap=ST.approvals[t.id];
+      return `<button class="lrow" data-g="${gi}" data-t="${t.id}"><span class="nm">${esc(t.name)} ${ap&&ap.status==='approved'?'<span class="badge ok">wiki ✓</span>':''}<div class="mini"><i style="width:${st.n?100*st.done/st.n:0}%"></i></div></span><span class="meta">${st.done}/${st.n}</span><b style="width:36px;text-align:right">${f1(st.avg)}</b></button>`}).join('');
+    h+='</div></div>'});
+  $('#main').innerHTML=h;
+  $('#main').onclick=e=>{if(e.target.closest('#ovRev')){reviewSheet(Object.keys(ST.pending).filter(k=>(ST.pending[k]||[]).length&&tabById(k)));return}
+    const r=e.target.closest('.lrow[data-t]');if(!r)return;go(+r.dataset.g,r.dataset.t);
+    if(r.dataset.it)setTimeout(()=>{const el=document.querySelector(`.item[data-id="${r.dataset.it}"]`);if(el)el.scrollIntoView({block:'center'})},60)}}
+function wikiUrl(p){const host=ST.settings.host==='fandom'?'https://tardis.fandom.com/wiki/':'https://tardis.wiki/wiki/';return host+enc(p.replace(/ /g,'_')).replace(/%3A/g,':').replace(/%2F/g,'/')}
+function pagesFor(t){return (ST.wiki[t.id]&&ST.wiki[t.id].length)?ST.wiki[t.id]:t.wiki}
+function sortedItems(items){if(filt.sort==='order')return items;const a=items.slice();
+  const key={rating_desc:i=>-(W(i.k).rating??-1),rating_asc:i=>(W(i.k).rating??99),title:i=>W(i.k).title.toLowerCase(),type:i=>D.types.findIndex(t=>t.id===W(i.k).type)}[filt.sort];
+  a.sort((x,y)=>{const p=key(x),q=key(y);return p<q?-1:p>q?1:0});return a}
+function renderTab(){
+  const {g,t}=tabById(cur.t);const items=tabItems(t);const s=stats(items);const skip=isSkip(g);
+  const ap=ST.approvals[t.id];const pages=pagesFor(t);const up=nextUp(t);
+  const tim=ST.tabImg[t.id];
+  let h=`<div class="panel hero">${tim&&tim.img?`<div class="bgimg" style="background-image:url('${esc(tim.img)}')"></div>`:''}<div class="row">${tim&&tim.img?`<img class="av" src="${esc(tim.img)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'avph',textContent:'${esc(initials(t.name))}'}))">`:`<div class="avph">${esc(initials(t.name))}</div>`}<div style="flex:1;min-width:0"><h2>${esc(t.name)}</h2><div class="meta">${esc(g.name)} · ${s.done} of ${s.n} done${s.rated?' · avg '+f1(s.avg):''}</div></div>
+    <button class="btn sm" id="tabMenu">⋯</button></div>
+  <div class="prog"><i style="width:${s.n?100*s.done/s.n:0}%"></i></div>${avgChips(s)}`;
+  if(!skip){h+=`<div class="wrap" style="margin-top:12px">${pages.map(p=>`<a class="btn sm" href="#" data-open="${esc(wikiUrl(p))}">📖 ${esc(p.replace('Theory:Timeline - ',''))} timeline</a>`).join('')}
+    <button class="btn sm pri" id="wikiBtn">${ap&&ap.status==='approved'?'Re-check wiki order':'Get wiki order'}</button>
+    <button class="btn sm" id="syncTab">⟳ Sync new stories</button>${countable(ST.pending[t.id])?`<button class="btn sm" id="revTab" style="border-color:#8a6a2a;color:#ffd88a">${countable(ST.pending[t.id])} to review</button>`:''}${syncInfoHtml(t)}
+    ${ap?`<span class="badge ${ap.status==='approved'?'ok':'warn'}">${ap.status==='approved'?'Wiki order ✓ '+esc(ap.date):'Wiki order rejected '+esc(ap.date)}</span>`:`<span class="badge">${t.custom?'Timeline order':'PDF order'}</span>`}</div>`}
+  h+='</div>';
+  const typesHere=D.types.filter(x=>items.some(i=>W(i.k).type===x.id));
+  h+=`<div class="toolbar"><input class="search" id="q" placeholder="Filter ${esc(t.name)}…" value="${esc(filt.q)}"><div class="filters">`+
+    ['all','todo','done'].map(x=>`<button class="chip ${filt.state===x?'on':''}" data-fs="${x}">${x==='all'?'All':x==='todo'?'To do':'Done'}</button>`).join('')+
+    `<button class="chip" id="viewT">${ST.ui.view==='grid'?'☰ List':'▦ Covers'}</button><select id="sort"><option value="order">${ST.approvals[t.id]&&ST.approvals[t.id].status==='approved'?'Wiki order':'Your order'}</option><option value="rating_desc">Rating ↓</option><option value="rating_asc">Rating ↑</option><option value="title">Title A–Z</option><option value="type">Media type</option></select>`+
+    (typesHere.length>1?`<button class="chip ${filt.type==='all'?'on':''}" data-ft="all">All types</button>`+typesHere.map(x=>{const ty=typeOf(x.id);return `<button class="chip ${filt.type===x.id?'on':''}" data-ft="${x.id}"><i class="dot" style="background:${ty.color};margin-right:5px"></i>${esc(ty.label)}</button>`}).join(''):'')+
+    `</div></div>`;
+  let lastSub=null,list='';const q=filt.q.trim().toLowerCase();const plain=!ST.orders[t.id]&&filt.sort==='order';
+  const pos=new Map(items.map((it,i)=>[it.id,i+1]));
+  for(const it of sortedItems(items)){const w=W(it.k);
+    if(filt.state==='todo'&&w.done)continue;if(filt.state==='done'&&!w.done)continue;
+    if(filt.type!=='all'&&w.type!==filt.type)continue;if(q&&!(w.title||'').toLowerCase().includes(q))continue;
+    const isUp=up&&up.id===it.id&&!skip;
+    if(ST.ui.view==='grid'){list+=cardHtml(it,w,isUp);continue}
+    if(plain&&it.sub&&it.sub!==lastSub){list+=`<div class="sub">${esc(it.sub)}</div>`;lastSub=it.sub}
+    list+=itemHtml(it,w,pos.get(it.id),!plain,isUp)}
+  h+=list?(ST.ui.view==='grid'?`<div class="gridv">${list}</div>`:list):'<div class="empty">Nothing matches.</div>';
+  const missingCovers=items.filter(i=>!coverOf(i.k,i)&&!(ST.covers[i.k]&&ST.covers[i.k].none)).length;
+  if(!skip&&missingCovers)h+=`<div style="text-align:center;margin:14px 0"><button class="btn" id="getCovers">🖼 Find covers for ${missingCovers} entries</button></div>`;
+  $('#main').innerHTML=h;$('#sort').value=filt.sort;
+  $('#main').onclick=onTabClick;
+  $('#sort').onchange=e=>{filt.sort=e.target.value;renderTab()};
+  if(!skip&&!ST.tabImg[t.id]&&!t._pt){t._pt=1;tabPortrait(t).then(r=>{if(r.img&&cur.t===t.id){rememberScroll();renderTab();restoreScroll()}})}
+  const qi=$('#q');qi.oninput=()=>{filt.q=qi.value;const p=qi.selectionStart;renderTab();const n=$('#q');n.focus();n.setSelectionRange(p,p)};
+}
+function itemHtml(it,w,idx,showSub,isUp){const ty=typeOf(w.type);
+  const chars=(it.chars||[]).map(c=>c[1]?`<s>${esc(c[0])}</s>`:esc(c[0])).join(', ');
+  let sm='';
+  if(chars)sm+=`<span class="ch">[${chars}]</span>`;
+  if(it.part)sm+=`<span>Parts ${esc(it.part)}</span>`;
+  if(it.date)sm+=`<span>${esc(fmtDate(it.date))}</span>`;
+  if(showSub&&it.sub)sm+=`<span class="badge">${esc(it.sub)}</span>`;
+  if(it.next)sm+=`<span class="next">⤵ continues</span>`;
+  if(it.wiki!==undefined)sm+=`<span class="badge ok" title="Added from the wiki ${esc(it.wiki)}">wiki</span>`;
+  if(w.src&&!w.done)sm+=`<span class="src">${w.src.free?'<span class="free">FREE</span> · ':''}${esc(w.src.price)}</span>`;
+  if(w.notes)sm+=`<span>📝 note</span>`;
+  return `<div class="item ${w.done?'done':''} ${isUp?'up':''}" style="--c:${ty.color}" data-id="${it.id}" data-k="${esc(it.k)}">
+   ${isUp?'<span class="uptag">NEXT</span>':''}<span class="n">${idx}</span><button class="cb ${w.done?'on':''}" data-cb="1" aria-label="Done">${w.done?'✓':''}</button>${(()=>{const cv=coverOf(it.k,it);return cv?`<img class="th" loading="lazy" src="${esc(cv)}" alt="" onerror="this.remove()">`:''})()}
+   <div class="body"><div class="title">${esc(w.title)}</div>${sm?`<div class="sm">${sm}</div>`:''}</div>
+   <button class="rt ${w.rating==null?'none':''}" data-rt="1">${w.rating==null?'( )':w.rating}</button></div>`}
+function cardHtml(it,w,isUp){const ty=typeOf(w.type);const cv=coverOf(it.k,it);
+  return `<div class="gcard ${w.done?'done':''} ${isUp?'up':''}" style="--c:${ty.color}" data-id="${it.id}" data-k="${esc(it.k)}">
+    <div class="cv">${cv?`<img loading="lazy" src="${esc(cv)}" alt="" onerror="this.remove()">`:`<span style="opacity:.75;font-weight:600;font-size:11px;letter-spacing:.5px;text-transform:uppercase">${esc(ty.label)}</span>`}</div>
+    <button class="gc ${w.done?'on':''}" data-cb="1">${w.done?'✓':''}</button><div class="gr">${w.rating==null?'–':w.rating}</div>
+    <div class="ct">${esc(w.title)}</div></div>`}
+function onTabClick(e){
+  const op=e.target.closest('[data-open]');if(op){e.preventDefault();openUrl(op.dataset.open);return}
+  if(e.target.closest('#wikiBtn')){wikiSheet();return}
+  if(e.target.closest('#tabMenu')){tabMenu();return}
+  if(e.target.closest('#syncTab')){syncOne(tabById(cur.t).t);return}
+  if(e.target.closest('#revTab')){reviewSheet([cur.t]);return}
+  if(e.target.closest('#ordDiff')){wikiSheet();return}
+  const fs=e.target.closest('[data-fs]');if(fs){filt.state=fs.dataset.fs;renderTab();return}
+  const ft=e.target.closest('[data-ft]');if(ft){filt.type=ft.dataset.ft;renderTab();return}
+  if(e.target.closest('#viewT')){ST.ui.view=ST.ui.view==='grid'?'list':'grid';save();renderTab();return}
+  if(e.target.closest('#getCovers')){fetchCoversUI(tabById(cur.t).t);return}
+  const row=e.target.closest('.item,.gcard');if(!row)return;const k=row.dataset.k;
+  if(e.target.closest('[data-cb]')){const w=W(k);setW(k,{done:!w.done},(w.done?'Unticked ':'Ticked ')+w.title);rememberScroll();render();restoreScroll();return}
+  itemSheet(k,row.dataset.id)}
+async function fetchCoversUI(t){let stop=false;openSheet(`<h3>Finding covers · ${esc(t.name)}</h3><div class="meta" id="cvp">Searching tardis.wiki and TARDIS Fandom…</div><div class="prog"><i id="cvb" style="width:0%"></i></div><button class="btn" id="cls">Run in background</button>`);
+  $('#sheet').onclick=e=>{if(e.target.closest('#cls'))closeSheet()};
+  const n=await coversForTab(t,(k,n)=>{const a=$('#cvp'),b=$('#cvb');if(a)a.textContent=`${k}/${n} looked up`;if(b)b.style.width=(100*k/n)+'%'});
+  closeSheet();if(cur.t===t.id){rememberScroll();renderTab();restoreScroll()}const found=tabItems(t).filter(i=>coverOf(i.k,i)).length;toast(`Covers: ${found} of ${tabItems(t).length} entries have one`)}
+function tabMenu(){const {t}=tabById(cur.t);openSheet(`<h3>${esc(t.name)}</h3><div class="links" style="flex-direction:column;align-items:stretch">
+  <button class="btn" id="mAll">Mark all shown entries done</button>
+  <button class="btn" id="addBtn">＋ Add an entry to this tab</button>
+  <button class="btn" id="mCov">🖼 Find missing covers</button>
+  ${ST.orders[t.id]?'<button class="btn" id="resetOrd">Restore the order from your PDF</button>':''}
+  <button class="btn" id="chgPage">Change wiki timeline page</button>
+  ${(ST.rejected[t.id]||[]).length?`<button class="btn" id="unrej">Un-hide ${ST.rejected[t.id].length} rejected wiki stories</button>`:''}
+  ${t.custom?'<button class="btn no" id="delTab">Delete this timeline tab</button>':''}</div>`);
+  $('#sheet').onclick=e=>{
+    if(e.target.closest('#mAll')){const shown=[...document.querySelectorAll('#main .item')].map(r=>r.dataset.k);const prev={};
+      shown.forEach(k=>{prev[k]=ST.works[k]?Object.assign({},ST.works[k]):null;ST.works[k]=Object.assign(ST.works[k]||{},{done:true})});save();closeSheet();render();
+      toast(`Marked ${shown.length} done`,()=>{for(const k in prev){if(prev[k])ST.works[k]=prev[k];else delete ST.works[k]}save()});return}
+    if(e.target.closest('#addBtn')){addSheet();return}
+    if(e.target.closest('#mCov')){fetchCoversUI(t);return}
+    if(e.target.closest('#resetOrd')){delete ST.orders[t.id];delete ST.approvals[t.id];save();closeSheet();render();toast('PDF order restored');return}
+    if(e.target.closest('#chgPage')){pageFinder(t,pagesFor(t));return}
+    if(e.target.closest('#unrej')){delete ST.rejected[t.id];save();closeSheet();toast('Rejected stories will show on the next sync');return}
+    if(e.target.closest('#delTab')){if(!confirm('Delete the tab '+t.name+'? Ratings on its stories are kept.'))return;ST.custom=ST.custom.filter(c=>c.id!==t.id);delete ST.pending[t.id];delete ST.added[t.id+'#items'];delete ST.orders[t.id];save();closeSheet();injectCustom();go(0,'overview')}}}
+// ---------- sheets ----------
+function openSheet(h){$('#sheet').innerHTML=h;$('#sheet').classList.add('on');$('#sbg').classList.add('on');$('#sheet').scrollTop=0}
+function closeSheet(){$('#sheet').classList.remove('on');$('#sbg').classList.remove('on')}
+$('#sbg').onclick=closeSheet;
+window.onBack=function(){if($('#sheet').classList.contains('on')){closeSheet();return true}if(cur.t!=='overview'){go(0,'overview');return true}return false};
+function openUrl(u){if(window.Android)Android.open(u);else window.open(u,'_blank')}
+function storyLinks(w,it){const t=w.title;const L=[
+  ['📖 TARDIS wiki',it&&it.href?absWiki(it.href):`${wikiBase()}/w/index.php?search=${enc(t)}`]];
+  if(w.type==='audio')L.push(['🎧 Big Finish',`https://www.bigfinish.com/search_results/suggest/${enc(t)}`]);
+  if(['tv','webcast','video','film'].includes(w.type))L.push(['▶︎ YouTube',`https://www.youtube.com/results?search_query=${enc('Doctor Who '+t)}`]);
+  if(['novel','short'].includes(w.type))L.push(['📚 Open Library (free loans)',`https://openlibrary.org/search?q=${enc('Doctor Who '+t)}`],['Candy Jar',`https://www.lethbridge-stewart.co.uk/?s=${enc(t)}`]);
+  L.push(['Amazon.it',`https://www.amazon.it/s?k=${enc('Doctor Who '+t)}`],['eBay.it',`https://www.ebay.it/sch/i.html?_nkw=${enc('Doctor Who '+t)}`]);
+  return L}
+function itemSheet(k,id){const w=W(k);const ty=typeOf(w.type);
+  const where=[];D.groups.forEach((g,gi)=>g.tabs.forEach(t=>{if(tabItems(t).some(i=>i.k===k))where.push({gi,t})}));
+  const it=findItem(id);
+  const cv=coverOf(k,it);
+  let h=`<div class="cover" style="--c:${ty.color}"><span id="cov">${cv?`<img src="${esc(cv)}" alt="" onerror="this.remove()">`:`<div class="ph">${ST.covers[k]&&ST.covers[k].none?'No cover found':'Looking for a cover…'}</div>`}</span>
+  <div style="min-width:0"><h3 style="color:${ty.color}">${esc(w.title)}</h3><div class="meta">${esc(ty.label)}${it&&it.date?' · '+esc(fmtDate(it.date)):''}${it&&it.chars&&it.chars.length?' · ['+it.chars.map(c=>c[1]?'<s>'+esc(c[0])+'</s>':esc(c[0])).join(', ')+']':''}</div>
+  ${it&&it.main?`<div class="meta" style="margin-top:4px">Main character: <b style="color:var(--ink)">${esc(it.main)}</b> ${it.conf==='both'?'<span class="badge ok">✓ 2 wikis agree</span>':it.conf==='one'?'<span class="badge warn">1 source</span>':''}</div>`:''}
+  <div style="margin-top:8px;font-size:26px;font-weight:800">${w.rating==null?'<span class="meta" style="font-size:14px">not rated</span>':w.rating+'<span class="meta" style="font-size:13px"> /10</span>'}</div></div></div>
+  <div class="grid10">${[0,1,2,3,4,5,6,7,8,9,10].map(n=>`<button data-r="${n}" class="${w.rating===n?'on':''}">${n}</button>`).join('')}</div>
+  <div class="wrap"><button class="btn" data-r="clear">Clear ( )</button><button class="btn ${w.done?'':'ok'}" data-done="1">${w.done?'Mark not done':'✓ Mark done'}</button>
+  <label class="meta" style="display:flex;align-items:center;gap:6px;margin-left:auto"><input type="checkbox" id="adv" ${ST.ui.advance?'checked':''}> after rating, open next unrated</label></div>`;
+  if(w.src)h+=`<div class="panel" style="margin-top:14px"><h3>Where to get it</h3><div class="kv"><span>Source</span><span>${esc(w.src.where)}</span><span>Price</span><span class="${w.src.free?'free':''}">${esc(w.src.price)}</span><span>Confidence</span><span>${esc(w.src.conf)}</span></div><div class="meta">"Verified" = range and price checked on 30 Oct 2026. "[Inference]" = release worked out from range lists; double-check before buying.</div></div>`;
+  h+=`<div class="links" style="margin-top:12px">${storyLinks(w,it).map(l=>`<a class="btn sm" href="#" data-open="${esc(l[1])}">${esc(l[0])}</a>`).join('')}</div>
+  ${where.length>1?`<div style="margin-top:12px" class="meta">Also in: ${where.filter(x=>x.t.id!==cur.t).map(x=>`<a href="#" data-goto="${x.gi}|${x.t.id}">${esc(x.t.name)}</a>`).join(', ')}</div>`:''}
+  <div style="margin-top:14px"><textarea id="notes" rows="3" placeholder="Notes…">${esc(w.notes)}</textarea></div>
+  <div class="wrap" style="margin-top:10px"><button class="btn pri" id="saveNotes">Save notes</button><button class="btn" id="cls">Close</button></div>`;
+  openSheet(h);
+  if(!cv&&!(ST.covers[k]&&ST.covers[k].none))lookupCover(k).then(c=>{const el=$('#cov');if(!el||!$('#sheet').classList.contains('on'))return;
+    el.innerHTML=c.img?`<img src="${esc(c.img)}" alt="" onerror="this.remove()">`:'<div class="ph">No cover found</div>';});
+  $('#sheet').onclick=e=>{const op=e.target.closest('[data-open]');if(op){e.preventDefault();openUrl(op.dataset.open);return}
+    const gt=e.target.closest('[data-goto]');if(gt){e.preventDefault();closeSheet();const [gi,tid]=gt.dataset.goto.split('|');go(+gi,tid);return}
+    if(e.target.id==='adv'){ST.ui.advance=e.target.checked;save();return}
+    const r=e.target.closest('[data-r]');if(r){const notes=$('#notes').value;
+      if(r.dataset.r==='clear')setW(k,{rating:null,notes},'Rating cleared');else setW(k,{rating:+r.dataset.r,done:true,notes},`${w.title}: ${r.dataset.r}`);
+      closeSheet();rememberScroll();render();restoreScroll();
+      if(ST.ui.advance&&r.dataset.r!=='clear'&&cur.t!=='overview'){const n=nextUnrated(id);if(n)setTimeout(()=>itemSheet(n.k,n.id),120)}return}
+    if(e.target.closest('[data-done]')){setW(k,{done:!W(k).done,notes:$('#notes').value});closeSheet();render();return}
+    if(e.target.closest('#saveNotes')){setW(k,{notes:$('#notes').value});closeSheet();render();toast('Notes saved');return}
+    if(e.target.closest('#cls'))closeSheet()}}
+function findItem(id){for(const g of D.groups)for(const t of g.tabs)for(const i of tabItems(t))if(i.id===id)return i;return null}
+function nextUnrated(id){const {t}=tabById(cur.t);const items=tabItems(t);const i=items.findIndex(x=>x.id===id);
+  for(let j=i+1;j<items.length;j++)if(W(items[j].k).rating==null)return items[j];return null}
+function addSheet(){openSheet(`<h3>Add entry</h3><div class="meta">Adds to this tab. If the title already exists in another tab, it shares that rating and tick.</div>
+  <div style="margin:12px 0 6px">Title</div><input type="text" id="at"><div style="margin:12px 0 6px">Media type</div>
+  <div class="wrap">${D.types.map((t,i)=>`<button class="chip ${i===1?'on':''}" data-at="${t.id}"><i class="dot" style="background:${t.color};margin-right:5px"></i>${esc(typeOf(t.id).label)}</button>`).join('')}</div>
+  <div style="margin:12px 0 6px">[Characters] (comma separated, optional)</div><input type="text" id="ac">
+  <div style="margin-top:14px"><button class="btn pri" id="addGo">Add</button></div>`);
+  let ty='audio';$('#sheet').onclick=e=>{const b=e.target.closest('[data-at]');if(b){ty=b.dataset.at;document.querySelectorAll('[data-at]').forEach(x=>x.classList.toggle('on',x===b));return}
+    if(e.target.closest('#addGo')){const t=$('#at').value.trim();if(!t)return;addItem(cur.t,t,ty,$('#ac').value);closeSheet();render();toast('Added '+t)}}}
+function normT(s){return String(s||'').toLowerCase().replace(/\(.*?\)/g,'').replace(/&/g,'and').replace(/^the\s+/,'').replace(/[^a-z0-9]/g,'')}
+let _nidx=null;
+function existingKey(title){if(!_nidx){_nidx=new Map();for(const k in D.works)if(!k.startsWith('skip:')){const nk=normT(D.works[k].title);if(!_nidx.has(nk))_nidx.set(nk,k)}}
+  return _nidx.get(normT(title))}
+function addItem(tid,title,type,chars,extra){let k=existingKey(title);
+  if(!k){k='add:'+normT(title)+'|'+type;ST.added[k]={title,type,rating:null,done:false}}
+  const arr=ST.added[tid+'#items']||(ST.added[tid+'#items']=[]);
+  const it={id:tid+'_a'+Date.now()+Math.floor(Math.random()*999),k,sub:null,chars:(chars||'').split(',').map(x=>x.trim()).filter(Boolean).map(x=>[x,0]),date:null,part:null,next:false,ref:false};
+  if(extra)Object.assign(it,extra);arr.push(it);save();return it}
+// ---------- wiki ----------
+let cbN=0;const cbs={};
+window.__httpCb=(id,ok,body)=>{const f=cbs[id];delete cbs[id];if(f)f(ok,body)};
+function httpGet(url){return new Promise((res,rej)=>{if(window.Android){const id='c'+(++cbN);cbs[id]=(ok,b)=>ok?res(b):rej(new Error(String(b).slice(0,200)));Android.get(url,id)}
+  else fetch(url).then(r=>r.text()).then(res,rej)})}
+function apiBases(){return ST.settings.host==='fandom'?['https://tardis.fandom.com/api.php']:['https://tardis.wiki/w/api.php','https://tardis.wiki/api.php']}
+async function api(params){let last;for(const b of apiBases()){try{const u=b+'?'+new URLSearchParams(Object.assign({format:'json',formatversion:'2',origin:'*'},params));
+  const txt=await httpGet(u);const j=JSON.parse(txt);if(j.error&&j.error.code!=='missingtitle')throw new Error(j.error.info);return j}catch(e){last=e}}throw last||new Error('No API')}
+async function fetchPage(title){const j=await api({action:'parse',page:title,prop:'text',redirects:'1'});
+  if(j.error)return null;const html=j.parse&&(j.parse.text&&j.parse.text['*']||j.parse.text);return html||null}
+const CIT=/\b(TV|AUDIO|PROSE|COMIC|WC|GAME|HOMEVID|NOVEL|AUDIOBOOK|FB|PODCAST|STAGE|WEBCAST|AUDIO WEBCAST|FILM|POEM|VID|DWM|SHORT|ANNUAL|INFO|CD|NOVEL ADAPTATION):\s*/g;
+function extractCitations(html){
+  const doc=new DOMParser().parseFromString(html,'text/html');doc.querySelectorAll('style,script,.reference,sup').forEach(x=>x.remove());
+  const text=doc.body.textContent.replace(/\s+/g,' ');const out=[];const seen=new Set();
+  const amap=new Map();doc.querySelectorAll('a[href]').forEach(a=>{const k=normT(a.textContent);const h=a.getAttribute('href');if(k&&h&&!h.startsWith('#')&&!amap.has(k))amap.set(k,h)});
+  const re=/\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g;let m;
+  while((m=re.exec(text))){const inner=m[1];const marks=[];let mm;CIT.lastIndex=0;
+    while((mm=CIT.exec(inner)))marks.push({i:mm.index,end:CIT.lastIndex,ty:mm[1]});
+    for(let j=0;j<marks.length;j++){let t=inner.slice(marks[j].end,j+1<marks.length?marks[j+1].i:inner.length).replace(/[;,.\s]+$/,'').trim();
+      if(!t||t.length>90)continue;const nk=normT(t);if(!nk||seen.has(nk))continue;seen.add(nk);out.push({title:t,ty:marks[j].ty,nk,href:amap.get(nk)||null})}}
+  return out}
+const TYMAP={TV:'tv',AUDIO:'audio','AUDIO WEBCAST':'audio',PROSE:'short',NOVEL:'novel',COMIC:'comic',DWM:'comic',WC:'webcast',WEBCAST:'webcast',GAME:'game',HOMEVID:'video',FILM:'film',POEM:'poem'};
+function matchItems(cits,items){const byK=new Map();items.forEach(it=>{const nk=normT(W(it.k).title);if(!byK.has(nk))byK.set(nk,[]);byK.get(nk).push(it)});
+  const used=new Set();return cits.map(c=>{let cand=byK.get(c.nk);
+    if(!cand){for(const [nk,arr] of byK){const a=Math.min(nk.length,c.nk.length),b=Math.max(nk.length,c.nk.length);if(a>=8&&a/b>=0.7&&(nk.startsWith(c.nk)||c.nk.startsWith(nk))){cand=arr;break}}}
+    const it=cand&&cand.find(x=>!used.has(x.id));if(it)used.add(it.id);return Object.assign({},c,{it:it||null})})}
+async function wikiSheet(){const {t}=tabById(cur.t);const pages=pagesFor(t);
+  openSheet(`<h3>Wiki order · ${esc(t.name)}</h3><div class="meta">Fetching ${pages.map(esc).join(' + ')} from ${esc(ST.settings.host)}…</div>`);
+  try{let cits=[];const missing=[];
+    for(const p of pages){const html=await fetchPage(p);if(!html){missing.push(p);continue}cits=cits.concat(extractCitations(html))}
+    if(missing.length&&!cits.length)return pageFinder(t,missing);
+    const seen=new Set();cits=cits.filter(c=>!seen.has(c.nk)&&seen.add(c.nk));
+    const items=tabItems(t);const res=matchItems(cits,items);const matched=res.filter(r=>r.it);
+    const inWiki=new Set(matched.map(r=>r.it.id));const notFound=items.filter(i=>!inWiki.has(i.id));
+    let h=`<h3>Wiki order · ${esc(t.name)}</h3>
+    <div class="links">${pages.map(p=>`<a class="btn sm" href="#" data-open="${esc(wikiUrl(p))}">📖 ${esc(p)}</a>`).join('')}<button class="btn sm" id="chgPage">Change page</button></div>
+    ${missing.length?`<div class="badge warn" style="margin-top:8px;display:inline-block">Not found on wiki: ${missing.map(esc).join(', ')}</div>`:''}
+    <div class="meta" style="margin:10px 0">${matched.length} of your ${items.length} entries are on the timeline. ${cits.length-matched.length} timeline stories aren't in this tab (＋ adds them). Your other entries stay next to the entry they followed.</div>
+    <div class="wrap" style="margin-bottom:12px"><button class="btn ok" id="apOk" ${matched.length?'':'disabled'}>✓ Approve this order</button><button class="btn no" id="apNo">Reject</button></div>
+    <h3>Proposed order</h3>`;
+    let n=0;for(const r of res){if(r.it){n++;const w=W(r.it.k);h+=`<div class="wl m"><span class="ty">${n}. ${esc(r.ty)}</span><span style="color:${typeOf(w.type).color}">${esc(w.title)}</span></div>`}
+      else{const ek=existingKey(r.title);h+=`<div class="wl x"><span class="ty">${esc(r.ty)}</span><span style="flex:1">${esc(r.title)}${ek?' <span class="badge ok">in your lists</span>':''}</span><button class="btn sm" data-addw="${esc(r.title)}" data-ty="${esc(r.ty)}">＋</button></div>`}}
+    if(notFound.length)h+=`<h3 style="margin-top:14px">Yours, not on the page (${notFound.length})</h3>`+notFound.map(i=>`<div class="wl x">${esc(W(i.k).title)}</div>`).join('');
+    openSheet(h);
+    $('#sheet').onclick=e=>{const op=e.target.closest('[data-open]');if(op){e.preventDefault();openUrl(op.dataset.open);return}
+      if(e.target.closest('#chgPage')){pageFinder(t,pages);return}
+      const ad=e.target.closest('[data-addw]');if(ad){const it=addItem(t.id,ad.dataset.addw,TYMAP[ad.dataset.ty]||'short','');ad.disabled=true;ad.textContent='✓';
+        const r=res.find(x=>x.title===ad.dataset.addw);if(r)r.it=it;toast('Added to '+t.name);return}
+      if(e.target.closest('#apOk')){applyOrder(t,res);ST.approvals[t.id]={status:'approved',date:new Date().toISOString().slice(0,10),pages};save();closeSheet();filt.sort='order';render();toast('Wiki order approved');return}
+      if(e.target.closest('#apNo')){ST.approvals[t.id]={status:'rejected',date:new Date().toISOString().slice(0,10),pages};save();closeSheet();render();return}}
+  }catch(err){openSheet(`<h3>Couldn't reach the wiki</h3><div class="meta">${esc(String(err.message||err))}</div><div class="links" style="margin-top:10px">
+    <button class="btn" id="tryF">Try ${ST.settings.host==='fandom'?'tardis.wiki':'Fandom'} instead</button>${pages.map(p=>`<a class="btn" href="#" data-open="${esc(wikiUrl(p))}">Open ${esc(p)}</a>`).join('')}</div>`);
+    $('#sheet').onclick=e=>{const op=e.target.closest('[data-open]');if(op){e.preventDefault();openUrl(op.dataset.open);return}
+      if(e.target.closest('#tryF')){ST.settings.host=ST.settings.host==='fandom'?'tardis.wiki':'fandom';save();wikiSheet()}}}}
+function applyOrder(t,res){const items=tabItems(t);const out=res.filter(r=>r.it).map(r=>r.it.id);const inOut=new Set(out);
+  items.forEach((it,i)=>{if(inOut.has(it.id))return;let pos=0;
+    for(let j=i-1;j>=0;j--){const p=out.indexOf(items[j].id);if(p>=0){pos=p+1;break}}
+    out.splice(pos,0,it.id);inOut.add(it.id)});
+  ST.orders[t.id]=out}
+async function pageFinder(t,pages,why){const name=t.name.replace(/^The /,'');
+  openSheet(`<h3>Pick the timeline page</h3><div class="meta">Searching the wiki for "${esc(name)}"…</div>`);
+  let found=[];try{const j=await api({action:'query',list:'prefixsearch',pssearch:'Theory:Timeline - ',pslimit:'500'});
+      const all=(j.query&&j.query.prefixsearch||[]).map(x=>x.title);
+      const words=name.toLowerCase().split(/[^a-z0-9]+/).filter(w=>w.length>2);
+      found=all.filter(ti=>words.some(w=>ti.toLowerCase().includes(w)));
+      if(!found.length){const j2=await api({action:'query',list:'search',srsearch:'Timeline '+name,srnamespace:'*',srlimit:'20'});
+        found=(j2.query&&j2.query.search||[]).map(x=>x.title).filter(x=>/timeline/i.test(x))}}catch(e){}
+  let h=`<h3>Pick the timeline page · ${esc(t.name)}</h3><div class="meta">${why?esc(why)+' · ':''}Tried: ${pages.map(esc).join(', ')}</div><div style="margin:10px 0">`;
+  h+=found.length?found.map(f=>`<button class="wl" data-pick="${esc(f)}">${esc(f)}</button>`).join(''):'<div class="meta">No matching pages found.</div>';
+  h+=`</div><div style="margin:8px 0 6px">Or type an exact page title</div><input type="text" id="pg" value="${esc(pages[0]||'Theory:Timeline - ')}"><div class="wrap" style="margin-top:10px"><button class="btn pri" id="pgGo">Use this page</button><button class="btn" id="pgAdd">Add as extra page</button></div>`;
+  openSheet(h);
+  $('#sheet').onclick=e=>{const p=e.target.closest('[data-pick]');if(p){ST.wiki[t.id]=[p.dataset.pick];save();(why?syncOne(t):wikiSheet());return}
+    if(e.target.closest('#pgGo')){ST.wiki[t.id]=[$('#pg').value.trim()];save();(why?syncOne(t):wikiSheet());return}
+    if(e.target.closest('#pgAdd')){ST.wiki[t.id]=pagesFor(t).concat([$('#pg').value.trim()]);save();(why?syncOne(t):wikiSheet())}}}
+
+// ---------- wiki sync: new stories awaiting approval ----------
+function wikiBase(){return ST.settings.host==='fandom'?'https://tardis.fandom.com':'https://tardis.wiki'}
+function absWiki(h){return /^https?:/.test(h)?h:wikiBase()+(h.startsWith('/')?'':'/')+h}
+function wikiSearch(t){return ST.settings.host==='fandom'?`https://tardis.fandom.com/wiki/Special:Search?query=${enc(t)}`:`https://tardis.wiki/w/index.php?search=${enc(t)}`}
+function sugUrl(p){return p.href?absWiki(p.href):wikiSearch(p.title)}
+const countable=P=>(P||[]).filter(p=>p.status==='ok').length;
+function pendingTotal(){let n=0;for(const k in ST.pending)n+=countable(ST.pending[k]);return n}
+function syncableTabs(){const a=[];D.groups.forEach(g=>{if(isSkip(g))return;g.tabs.forEach(t=>{if(pagesFor(t).length)a.push(t)})});return a}
+const GENERIC=new Set(['the','and','doctor','timeline','theory','of','dr','who','mr','mrs','miss','sir','captain','colonel','brigadier_']);
+const ALIAS={'brigadier':['lethbridge','brigadier'],'kate':['kate'],'yates':['yates'],'benton':['benton'],'osgood':['osgood'],'nesteen':['nestene'],'master':['master','missy'],'rani':['rani'],'river':['river','melody'],'mark':['mark seven'],'joel':['joel']};
+const normName=x=>String(x||'').toLowerCase().replace(/^the\s+/,'').replace(/[^a-z0-9]+/g,' ').trim();
+const toks=x=>normName(x).split(' ').filter(w=>w.length>2&&!GENERIC.has(w));
+const isDocName=x=>/\bdoctor$/i.test(String(x||'').trim())||/^dr\.? who$/i.test(String(x||'').trim());
+function tabSubjects(t){return pagesFor(t).map(p=>p.replace(/^Theory:Timeline - /,'')).concat([t.name])}
+function isDoctorTab(t){return tabSubjects(t).some(isDocName)}
+function matchesSubject(name,t){const nt=toks(name);if(!nt.length)return false;
+  for(const sub of tabSubjects(t)){if(normName(sub)===normName(name))return true;
+    let st=toks(sub);for(const w of st.slice())if(ALIAS[w])st=st.concat(ALIAS[w]);
+    if(nt.some(w=>st.includes(w)))return true}return false}
+let TLNAMES=null;
+async function timelineNames(){if(TLNAMES)return TLNAMES;try{TLNAMES=(await allTimelinePages()).map(p=>p.replace(/^Theory:Timeline - /,''))}catch(e){TLNAMES=[]}return TLNAMES}
+function hasOwnTimeline(name,names){const n=normName(name);const nt=toks(name);
+  return names.some(x=>{const xn=normName(x);if(xn===n)return true;const xt=toks(x);return xt.length>1&&nt.length>1&&xt.every(w=>nt.includes(w))})}
+function pageTitleFromHref(h){try{return decodeURIComponent(h.replace(/^.*\/wiki\//,'').split('#')[0]).replace(/_/g,' ')}catch(e){return null}}
+const SRC={tw:{name:'tardis.wiki',api:['https://tardis.wiki/w/api.php','https://tardis.wiki/api.php'],web:'https://tardis.wiki'},
+  fd:{name:'TARDIS Fandom',api:['https://tardis.fandom.com/api.php'],web:'https://tardis.fandom.com'}};
+const primaryId=()=>ST.settings.host==='fandom'?'fd':'tw';const secondaryId=()=>primaryId()==='tw'?'fd':'tw';
+async function apiAt(sid,params){let last;for(const b of SRC[sid].api){try{const u=b+'?'+new URLSearchParams(Object.assign({format:'json',formatversion:'2',origin:'*'},params));
+  const j=JSON.parse(await httpGet(u));if(j.error&&j.error.code!=='missingtitle')throw new Error(j.error.info);return j}catch(e){last=e}}throw last||new Error('No API')}
+async function fetchPageAt(sid,title){const j=await apiAt(sid,{action:'parse',page:title,prop:'text',redirects:'1'});
+  if(!j||j.error||!j.parse)return null;const html=j.parse.text&&(j.parse.text['*']||j.parse.text);return html?{html,title:j.parse.title||title}:null}
+const SUFFIX={'audio story':'audio','audio drama':'audio','short story':'short','novel':'novel','novella':'novel','novelisation':'novel','comic story':'comic','tv story':'tv','poem':'poem','webcast':'webcast','game':'game','film':'film','home video':'video','feature film':'film'};
+const TYPE_SUFFIX={audio:'audio story',short:'short story',novel:'novel',comic:'comic story',tv:'TV story',poem:'poem',webcast:'webcast',game:'game',film:'film',video:'home video'};
+const typeFromPage=t=>{const m=String(t||'').match(/\(([^()]+)\)\s*$/);return m?SUFFIX[m[1].toLowerCase()]||null:null};
+const stripParen=t=>String(t||'').replace(/\s*\([^()]*\)\s*$/,'');
+function absImg(src,sid){if(!src)return null;if(src.startsWith('//'))src='https:'+src;else if(src.startsWith('/'))src=SRC[sid].web+src;
+  if(!/^https:\/\//.test(src)||/\.svg(\?|$)/i.test(src))return null;return src.replace(/\/scale-to-width-down\/\d+/,'/scale-to-width-down/300')}
+function parseStory(html,sid){const doc=new DOMParser().parseFromString(html,'text/html');const ib={};
+  doc.querySelectorAll('[data-source]').forEach(el=>{const k=el.getAttribute('data-source').toLowerCase().replace(/_/g,' ');const v=(el.querySelector('.pi-data-value')||el).textContent.replace(/\s+/g,' ').trim();if(v&&!ib[k])ib[k]=v});
+  doc.querySelectorAll('table tr').forEach(tr=>{const th=tr.querySelector('th'),td=tr.querySelector('td');if(th&&td){const k=th.textContent.replace(/\s+/g,' ').trim().toLowerCase().replace(/\(s\)/,'');if(!ib[k])ib[k]=td.textContent.replace(/\s+/g,' ').trim()}});
+  const out={main:null,featured:[],doctor:ib['doctor']||ib['doctors']||null,img:null};
+  let lede='';for(const el of doc.querySelectorAll('p')){const tx=el.textContent.replace(/\s+/g,' ');const m=tx.match(/\bfeatur(?:ed|es|ing)\s+([^.;]+)/i);if(m){lede=m[1];break}}
+  if(lede)out.featured=lede.replace(/\[\d+\]/g,'').split(/,\s*|\s+and\s+|\s*&\s*/).map(x=>x.replace(/^(the|both|an?|also)\s+/i,'').trim()).filter(x=>x&&x.length<60);
+  const ibMain=ib['main character']||ib['main characters']||ib['main']||null;
+  out.main=(ibMain&&ibMain.split(/,|\band\b/)[0].trim())||out.featured[0]||(out.doctor&&!/none|n\/a/i.test(out.doctor)?out.doctor.split(/,|\band\b/)[0].trim():null);
+  const imgs=[...doc.querySelectorAll('.pi-image img, .infobox img, aside img, table img, figure img, img')];
+  for(const im of imgs){const w=+(im.getAttribute('width')||0);if(w&&w<70)continue;const src=absImg(im.getAttribute('data-src')||im.getAttribute('src'),sid);if(src){out.img=src;break}}
+  return out}
+async function findStoryPage(sid,title,typeId){let j;try{j=await apiAt(sid,{action:'query',list:'search',srsearch:title,srlimit:'10',srnamespace:'0'})}catch(e){return null}
+  const hits=(j.query&&j.query.search||[]).map(x=>x.title).filter(x=>normT(stripParen(x))===normT(title));if(!hits.length)return null;
+  const want=TYPE_SUFFIX[typeId];return hits.find(x=>want&&x.toLowerCase().endsWith('('+want.toLowerCase()+')'))||hits[0]}
+function sameChar(a,b){if(normName(a)===normName(b))return true;if(isDocName(a)||isDocName(b))return false;const ta=toks(a),tb=toks(b);return ta.some(w=>tb.includes(w))}
+function combine(res,tagType){const P=primaryId(),S=secondaryId();const vals=[P,S].filter(k=>res.src[k]&&res.src[k].main);
+  res.img=(res.src[P]&&res.src[P].img)||(res.src[S]&&res.src[S].img)||null;
+  const pt=[P,S].map(k=>res.src[k]&&typeFromPage(res.src[k].page)).filter(Boolean);
+  res.pageType=pt.length?pt[0]:null;res.typeAgree=pt.length<2||pt[0]===pt[1];res.typeMismatch=!!(res.pageType&&tagType&&res.pageType!==tagType);
+  if(!vals.length){res.agree='none';res.main=null;return res}
+  if(vals.length===1){res.agree='one';res.main=res.src[vals[0]].main;res.only=vals[0];return res}
+  const a=res.src[P].main,b=res.src[S].main;res.main=a;res.alt=b;res.agree=sameChar(a,b)?'both':'conflict';return res}
+async function storyInfo(p,tagType){const c=ST.storyInfo[p.nk];if(c&&c.v===3)return c;
+  const title=(p.href&&pageTitleFromHref(p.href))||p.title;const res={v:3,src:{}};const P=primaryId(),S=secondaryId();
+  try{const r=await fetchPageAt(P,title);if(r)res.src[P]=Object.assign(parseStory(r.html,P),{page:r.title})}catch(e){res.err=1}
+  try{let r=await fetchPageAt(S,title);if(!r){const t2=await findStoryPage(S,p.title,tagType);if(t2)r=await fetchPageAt(S,t2)}
+      if(r)res.src[S]=Object.assign(parseStory(r.html,S),{page:r.title})}catch(e){res.secErr=1}
+  combine(res,tagType);if(!res.err)ST.storyInfo[p.nk]=res;return res}
+function classify(t,info,names){const P=primaryId(),S=secondaryId();
+  if(info.agree==='none')return{st:'nomain',why:'main character not found on '+[P,S].filter(k=>info.src[k]).map(k=>SRC[k].name).join(' or ')+(Object.keys(info.src).length?'':' (page not found)')};
+  if(info.agree==='conflict')return{st:'conflict',why:`${SRC[P].name}: ${info.main} · ${SRC[S].name}: ${info.alt}`};
+  const m=info.main;
+  if(isDoctorTab(t)){
+    if(isDocName(m))return tabSubjects(t).some(x=>normName(x)===normName(m))||matchesSubject(m,t)?{st:'ok'}:{st:'filtered',why:'main character is the '+m};
+    if(hasOwnTimeline(m,names))return{st:'filtered',why:m+' has their own timeline'};
+    return{st:'ok',why:m+' has no timeline of their own'}}
+  return matchesSubject(m,t)?{st:'ok'}:{st:'filtered',why:'main character is '+(isDocName(m)?'the ':'')+m}}
+async function pageRev(title){try{const j=await api({action:'query',prop:'revisions',titles:title,rvprop:'ids|timestamp|user|comment',redirects:'1'});
+  const pg=j.query&&j.query.pages&&(Array.isArray(j.query.pages)?j.query.pages[0]:Object.values(j.query.pages)[0]);const r=pg&&pg.revisions&&pg.revisions[0];
+  return r?{rev:r.revid,ts:r.timestamp,user:r.user,comment:r.comment||''}:null}catch(e){return null}}
+function lisLen(a){const t=[];for(const x of a){let lo=0,hi=t.length;while(lo<hi){const m=(lo+hi)>>1;if(t[m]<x)lo=m+1;else hi=m}t[lo]=x}return t.length}
+function orderCheck(t,res){const items=tabItems(t);const pos=new Map(items.map((it,i)=>[it.id,i]));
+  const seq=res.filter(r=>r.it).map(r=>pos.get(r.it.id));const n=seq.length;const out=n-lisLen(seq);
+  const wikiSeq=res.filter(r=>r.it).map(r=>r.nk);const prev=(ST.orderDiff[t.id]&&ST.orderDiff[t.id].wikiSeq)||null;
+  let wikiChanged=false;if(prev){const common=wikiSeq.filter(x=>prev.includes(x));const pp=common.map(x=>prev.indexOf(x));wikiChanged=common.length-lisLen(pp)>0}
+  ST.orderDiff[t.id]={out,matched:n,wikiSeq,wikiChanged,date:new Date().toISOString().slice(0,10)};return ST.orderDiff[t.id]}
+async function syncTab(t,progress){const pages=pagesFor(t);let cits=[];const missing=[];const revs=[];
+  for(const p of pages){const html=await fetchPage(p);if(!html){missing.push(p);continue}cits=cits.concat(extractCitations(html));const r=await pageRev(p);if(r)revs.push(Object.assign({page:p},r))}
+  if(!cits.length)return{t,error:missing.length?'Timeline page not found: '+missing.join(', '):'No stories found on the page'};
+  const seen=new Set();cits=cits.filter(c=>!seen.has(c.nk)&&seen.add(c.nk));
+  ST.timeline[t.id]=cits.map(c=>c.nk);
+  const res=matchItems(cits,tabItems(t));const rej=new Set(ST.rejected[t.id]||[]);
+  const prevP=new Set((ST.pending[t.id]||[]).map(p=>p.nk));const known=new Set(ST.timeline['_seen_'+t.id]||[]);
+  // tabs sharing this timeline page (e.g. S0–S4 on the First Doctor page) each get only their own stretch
+  let lo=0,hi=Infinity;
+  const sharing=syncableTabs().filter(o=>o.id!==t.id&&pagesFor(o).some(p=>pages.includes(p)));
+  if(sharing.length){const minIdx=tt=>{const r2=matchItems(cits,tabItems(tt));const ix=r2.map((r,i)=>r.it?i:-1).filter(i=>i>=0);return ix.length?ix[Math.floor(ix.length/2)]:null};
+    const mine=minIdx(t);if(mine!==null){
+      // my stretch starts at my first entry after the previous season's anchor, and ends at the next season's first entry
+      const firstOf=tt=>{const r2=matchItems(cits,tabItems(tt));const ix=r2.map((r,i)=>r.it?i:-1).filter(i=>i>=0);return ix};
+      const mineIx=firstOf(t);const oth=sharing.map(o=>({a:minIdx(o),ix:firstOf(o)})).filter(o=>o.a!==null);
+      const prev=oth.filter(o=>o.a<mine);const next=oth.filter(o=>o.a>mine);
+      const prevA=prev.length?Math.max(...prev.map(o=>o.a)):-1;
+      lo=prev.length?Math.min(...mineIx.filter(i=>i>prevA).concat([mine])):0;
+      hi=next.length?Math.min(...next.map(o=>Math.min(...o.ix.filter(i=>i>mine).concat([o.a])))):Infinity}}
+  const cand=[];res.forEach((r,i)=>{if(r.it||rej.has(r.nk)||i<lo||i>=hi)return;
+    cand.push({title:r.title,ty:r.ty,nk:r.nk,href:r.href,i,isNew:known.size>0&&!known.has(r.nk)&&!prevP.has(r.nk),inLists:!!existingKey(r.title)})});
+  const names=await timelineNames();let k=0;
+  const work=cand.slice();const worker=async()=>{while(work.length){const p=work.shift();const info=await storyInfo(p,TYMAP[p.ty]||'short');
+      const c=classify(t,info,names);p.main=info.main;p.status=c.st;p.why=c.why||'';p.conf=info.agree;p.only=info.only||null;p.img=info.img||null;p.pages=Object.fromEntries(Object.entries(info.src).map(([k,v])=>[k,v.page]));p.pageType=info.typeAgree?info.pageType:null;p.typeMismatch=info.typeMismatch;k++;if(progress)progress(k,cand.length)}};
+  await Promise.all([worker(),worker(),worker(),worker()]);
+  ST.timeline['_seen_'+t.id]=cits.map(c=>c.nk);
+  const od=orderCheck(t,res);
+  const prevSync=ST.syncs[t.id]||{};const rev=revs[0]||null;
+  ST.syncs[t.id]={date:new Date().toISOString().slice(0,10),rev:rev&&rev.rev,ts:rev&&rev.ts,user:rev&&rev.user,comment:rev&&rev.comment,
+    pageChanged:!!(rev&&prevSync.rev&&prevSync.rev!==rev.rev),revs};
+  ST.pending[t.id]=cand;save();
+  const ok=cand.filter(p=>p.status==='ok').length;
+  return{t,n:cand.length,ok,filtered:cand.filter(p=>p.status==='filtered').length,unknown:cand.filter(p=>p.status==='nomain').length,conflict:cand.filter(p=>p.status==='conflict').length,matched:res.filter(r=>r.it).length,total:cits.length,missing,order:od}}
+function fmtTs(ts){if(!ts)return'';const d=new Date(ts);return isNaN(d)?ts:`${d.getDate()} ${MON[d.getMonth()]} ${d.getFullYear()}`}
+function syncInfoHtml(t){const s=ST.syncs[t.id];if(!s)return'';const od=ST.orderDiff[t.id];let h='';
+  if(s.ts)h+=`<span class="badge" title="${esc(s.comment||'')}">wiki page updated ${esc(fmtTs(s.ts))}${s.user?' by '+esc(s.user):''}</span>`;
+  if(s.pageChanged)h+=`<span class="badge warn">page changed since your previous sync</span>`;
+  h+=`<span class="badge">synced ${esc(s.date)}</span>`;
+  if(od&&od.out>0)h+=`<button class="btn sm" id="ordDiff" style="border-color:#8a6a2a;color:#ffd88a">Order differs from wiki: ${od.out} out of place</button>`;
+  else if(od&&od.matched)h+=`<span class="badge ok">order matches wiki</span>`;
+  if(od&&od.wikiChanged)h+=`<span class="badge warn">wiki order changed since last sync</span>`;
+  return h}
+async function syncOne(t){openSheet(`<h3>Syncing ${esc(t.name)}…</h3><div class="meta">Reading ${pagesFor(t).map(esc).join(' + ')} on ${esc(ST.settings.host)}</div>`);
+  try{const r=await syncTab(t,(k,n)=>{const el=document.querySelector('#sheet .meta');if(el)el.textContent=`Checking main characters ${k}/${n}…`});if(r.error){return pageFinder(t,pagesFor(t),r.error)}render();
+    reviewSheet([t.id],`${r.total} stories on the timeline · ${r.matched} already in this tab · ${r.ok} to review`+(r.conflict?` · ${r.conflict} where the wikis disagree`:'')+(r.unknown?` · ${r.unknown} skipped: main character not found`:'')+(r.filtered?` · ${r.filtered} filtered out by main character`:'')+(r.order.out?` · order differs from wiki (${r.order.out} out of place)`:' · order matches wiki'))}
+  catch(e){syncError(e,()=>syncOne(t))}}
+async function syncAll(){const tabs=syncableTabs();let stop=false;const errs=[];const orderTabs=[];let done=0,found=0;
+  openSheet(`<h3>Sync with the wiki</h3><div class="meta" id="syp">Starting…</div><div class="prog"><i id="syb" style="width:0%"></i></div><div class="wrap"><button class="btn" id="syStop">Stop</button></div>`);
+  $('#sheet').onclick=e=>{if(e.target.closest('#syStop'))stop=true};
+  for(const t of tabs){if(stop)break;const el=$('#syp');if(el)el.textContent=`${done+1}/${tabs.length} · ${t.name}`;
+    try{const r=await syncTab(t,(k,n)=>{const el=$('#syp');if(el)el.textContent=`${done+1}/${tabs.length} · ${t.name} · main characters ${k}/${n}`});if(r.error)errs.push([t,r.error]);else{found+=r.ok;if(r.order.out)orderTabs.push([t,r.order.out])}}catch(e){errs.push([t,String(e.message||e)]);if(done===0&&errs.length===1){return syncError(e,syncAll)}}
+    done++;const b=$('#syb');if(b)b.style.width=(100*done/tabs.length)+'%'}
+  render();
+  const ids=tabs.filter(t=>(ST.pending[t.id]||[]).length).map(t=>t.id);
+  reviewSheet(ids,`Synced ${done} tabs · ${found} stories to review`+(errs.length?` · ${errs.length} tabs need a timeline page`:''),errs,orderTabs)}
+function syncError(e,retry){openSheet(`<h3>Couldn't reach the wiki</h3><div class="meta">${esc(String(e.message||e))}</div><div class="wrap" style="margin-top:12px"><button class="btn" id="tryF">Try ${ST.settings.host==='fandom'?'tardis.wiki':'Fandom'} instead</button><button class="btn" id="cls">Close</button></div>`);
+  $('#sheet').onclick=ev=>{if(ev.target.closest('#tryF')){ST.settings.host=ST.settings.host==='fandom'?'tardis.wiki':'fandom';save();retry()}if(ev.target.closest('#cls'))closeSheet()}}
+function confBadge(p){if(p.conf==='both')return '<span class="badge ok">✓ 2 wikis agree</span>';if(p.conf==='one')return `<span class="badge warn">1 source: ${esc(SRC[p.only]?SRC[p.only].name:'?')}</span>`;return ''}
+function pendRow(t,p,ro){const tyId=p.pageType||TYMAP[p.ty]||'short';const ty=typeOf(tyId);const links=Object.entries(p.pages||{}).map(([k,pg])=>`<a href="#" data-open="${esc(SRC[k].web+'/wiki/'+enc(pg.replace(/ /g,'_')))}">${esc(SRC[k].name)}</a>`).join(' · ');
+  return `<div class="pend" style="--c:${ty.color}" data-tid="${t.id}" data-nk="${esc(p.nk)}">
+   ${p.img?`<img class="pth" loading="lazy" src="${esc(p.img)}" onerror="this.remove()" alt="">`:`<span class="pth ph" style="background:${ty.color}22"></span>`}
+   <div class="tt"><button data-open="${esc(sugUrl(p))}" style="text-align:left"><b>${esc(p.title)}</b>${p.isNew?'<span class="newdot">NEW</span>':''}</button>
+    <div class="meta">${esc(ty.label)}${p.typeMismatch?' <span style="color:var(--warn)">(timeline says '+esc(p.ty)+')</span>':''}${p.main?' · main: <b style="color:var(--ink)">'+esc(p.main)+'</b>':''}${p.why&&p.status!=='ok'?' · '+esc(p.why):''}${p.inLists?' · already in another tab':''}</div>
+    <div class="sm">${confBadge(p)}${links?'<span class="meta">'+links+'</span>':''}</div></div>
+   <button class="act" data-open="${esc(sugUrl(p))}" aria-label="Open on wiki">↗</button>${ro?'':`<button class="act y" data-y="1" aria-label="Approve">✓</button><button class="act n" data-n="1" aria-label="Reject">✗</button>`}</div>`}
+function reviewSheet(ids,head,errs,orderTabs){
+  const tabs=ids.map(id=>tabById(id)).filter(Boolean);
+  let h=`<h3>Waiting for your approval</h3><div class="meta">${esc(head||'')}</div>
+   <div class="meta" style="margin-top:6px">Every story is checked on both tardis.wiki and TARDIS Fandom. Stories whose main character can't be found, or where the two wikis disagree, are never added. Listed first: stories whose main character fits the tab (the Doctor of that era, or someone without their own timeline, on Doctor and season tabs; the tab's own character elsewhere). ✓ adds at its timeline position · ✗ hides it on future syncs · ↗ opens its wiki page</div>`;
+  const ot=orderTabs||[];if(ot.length)h+=`<details style="margin-top:8px" open><summary>Order differs from the wiki in ${ot.length} tabs ▾</summary>${ot.map(([t,n])=>`<button class="lrow" data-ord="${t.id}"><span class="nm">${esc(t.name)}<div class="meta">${n} entries out of place</div></span><span class="meta">compare ›</span></button>`).join('')}</details>`;
+  if(errs&&errs.length)h+=`<details style="margin-top:8px"><summary>Tabs without a timeline page (${errs.length}) ▾</summary>${errs.map(([t,m])=>`<button class="lrow" data-fix="${t.id}"><span class="nm">${esc(t.name)}<div class="meta">${esc(m)}</div></span><span class="meta">pick page ›</span></button>`).join('')}</details>`;
+  let any=false;
+  for(const {t} of tabs){const P=ST.pending[t.id]||[];if(!P.length)continue;any=true;
+    const ok=P.filter(p=>p.status==='ok'),un=P.filter(p=>p.status==='nomain'),fl=P.filter(p=>p.status==='filtered'),cf=P.filter(p=>p.status==='conflict');
+    const s=ST.syncs[t.id]||{};
+    h+=`<div class="row" style="margin:18px 0 4px"><b style="flex:1">${esc(t.name)} <span class="meta">${ok.length} to review${fl.length?' · '+fl.length+' filtered':''}${cf.length?' · '+cf.length+' disputed':''}${un.length?' · '+un.length+' skipped':''}</span></b>
+      ${pagesFor(t).map(p=>`<a class="btn sm" href="#" data-open="${esc(wikiUrl(p))}">📖 timeline</a>`).join('')}
+      ${ok.length?`<button class="btn sm ok" data-yall="${t.id}">✓ all</button><button class="btn sm no" data-nall="${t.id}">✗ all</button>`:''}</div>
+      <div class="meta" style="margin-bottom:8px">${s.ts?'Wiki page updated '+esc(fmtTs(s.ts))+(s.user?' by '+esc(s.user):''):''}${s.pageChanged?' · <span style="color:var(--warn)">changed since your previous sync</span>':''}</div>`;
+    h+=ok.map(p=>pendRow(t,p)).join('');
+    if(fl.length)h+=`<details><summary>Filtered out by main character (${fl.length}) — approve any you still want ▾</summary>${fl.map(p=>pendRow(t,p)).join('')}</details>`;
+    if(cf.length)h+=`<details><summary>Wikis disagree on the main character (${cf.length}) — not added ▾</summary><div class="meta" style="margin:6px 0">Open both pages to check. These can't be added until the sources agree; they're re-checked on every sync.</div>${cf.map(p=>pendRow(t,p,true)).join('')}</details>`;
+    if(un.length)h+=`<details><summary>Skipped: main character not found (${un.length}) — not added ▾</summary>${un.map(p=>pendRow(t,p,true)).join('')}</details>`}
+  if(!any)h+='<div class="empty">Nothing waiting. Everything on these timelines is already in your lists or rejected.</div>';
+  openSheet(h);
+  $('#sheet').onclick=e=>{const op=e.target.closest('[data-open]');if(op){e.preventDefault();openUrl(op.dataset.open);return}
+    const od=e.target.closest('[data-ord]');if(od){const x=tabById(od.dataset.ord);closeSheet();go(x.gi,x.t.id);wikiSheet();return}
+    const fx=e.target.closest('[data-fix]');if(fx){const {t}=tabById(fx.dataset.fix);pageFinder(t,pagesFor(t),'No timeline page');return}
+    const ya=e.target.closest('[data-yall]');if(ya){const {t}=tabById(ya.dataset.yall);(ST.pending[t.id]||[]).filter(p=>p.status==='ok').forEach(p=>approveSug(t,p));save();render();reviewSheet(ids,head,null,orderTabs);toast('Added to '+t.name);return}
+        const na=e.target.closest('[data-nall]');if(na){const {t}=tabById(na.dataset.nall);(ST.pending[t.id]||[]).filter(p=>p.status==='ok').forEach(p=>rejectSug(t,p));save();render();reviewSheet(ids,head,null,orderTabs);return}
+    const row=e.target.closest('.pend');if(!row)return;const {t}=tabById(row.dataset.tid);const p=(ST.pending[t.id]||[]).find(x=>x.nk===row.dataset.nk);if(!p)return;
+    if(e.target.closest('[data-y]')){approveSug(t,p);save();row.remove();render();toast(`Added ${p.title} to ${t.name}`);return}
+    if(e.target.closest('[data-n]')){rejectSug(t,p);save();row.remove();render();return}}}
+function approveSug(t,p){if(p.status!=='ok'&&p.status!=='filtered')return false;if(p.img)ST.covers['nk:'+p.nk]={img:p.img};const it=addItem(t.id,p.title,p.pageType||TYMAP[p.ty]||'short','',{href:p.href,wiki:(ST.syncs[t.id]&&ST.syncs[t.id].date)||'',main:p.main||null,img:p.img||null,conf:p.conf||null});
+  const tl=ST.timeline[t.id]||[];const items=tabItems(t).filter(x=>x.id!==it.id);let anchor=null;
+  for(let j=p.i-1;j>=0&&!anchor;j--){const f=items.find(x=>normT(W(x.k).title)===tl[j]);if(f)anchor=f.id}
+  const order=items.map(x=>x.id);order.splice(anchor?order.indexOf(anchor)+1:0,0,it.id);ST.orders[t.id]=order;
+  ST.pending[t.id]=(ST.pending[t.id]||[]).filter(x=>x.nk!==p.nk)}
+function rejectSug(t,p){const r=ST.rejected[t.id]||(ST.rejected[t.id]=[]);if(!r.includes(p.nk))r.push(p.nk);
+  ST.pending[t.id]=(ST.pending[t.id]||[]).filter(x=>x.nk!==p.nk)}
+function updateBadge(){const n=pendingTotal();const b=$('#pendBadge');if(b){b.textContent=n>99?'99+':n;b.style.display=n?'block':'none'}}
+$('#btnSync').onclick=()=>{const n=pendingTotal();
+  openSheet(`<h3>Wiki sync</h3><div class="meta">Reads each tab's TARDIS wiki timeline and lists the stories that aren't in your lists yet, for you to approve one by one.</div>
+  <div class="links" style="flex-direction:column;align-items:stretch;margin-top:12px">
+   <button class="btn pri" id="syAll">⟳ Sync all ${syncableTabs().length} tabs</button>
+   ${n?`<button class="btn" id="syRev">Review ${n} waiting</button>`:''}
+   <button class="btn" id="syNew">＋ Add another wiki timeline as a new tab</button></div>
+  <div class="meta" style="margin-top:10px">Source: ${esc(ST.settings.host)} (change in Settings).</div>`);
+  $('#sheet').onclick=e=>{if(e.target.closest('#syAll'))syncAll();if(e.target.closest('#syRev'))reviewSheet(Object.keys(ST.pending).filter(k=>(ST.pending[k]||[]).length));if(e.target.closest('#syNew'))newTimelineTab()}};
+// ---------- custom timeline tabs ----------
+function injectCustom(){let g=D.groups.find(x=>x.custom);
+  if(!ST.custom.length){if(g)D.groups.splice(D.groups.indexOf(g),1);return}
+  if(!g){g={name:'Wiki timelines',custom:true,tabs:[]};D.groups.push(g)}
+  g.tabs=ST.custom.map(c=>({id:c.id,name:c.name,wiki:c.wiki,items:[],custom:true}))}
+async function allTimelinePages(){const out=[];let cont={};
+  for(let i=0;i<6;i++){const j=await api(Object.assign({action:'query',list:'prefixsearch',pssearch:'Theory:Timeline - ',pslimit:'500'},cont));
+    (j.query&&j.query.prefixsearch||[]).forEach(x=>out.push(x.title));if(j.continue&&j.continue.psoffset)cont={psoffset:j.continue.psoffset};else break}
+  return out}
+async function newTimelineTab(){openSheet(`<h3>Add a wiki timeline</h3><div class="meta">Loading the list of timeline pages…</div>`);
+  let pages=[];try{pages=await allTimelinePages()}catch(e){}
+  const used=new Set();D.groups.forEach(g=>g.tabs.forEach(t=>pagesFor(t).forEach(p=>used.add(p))));
+  const draw=q=>pages.filter(p=>!q||p.toLowerCase().includes(q)).slice(0,150).map(p=>`<button class="wl" data-np="${esc(p)}">${esc(p.replace('Theory:Timeline - ',''))}${used.has(p)?' <span class="badge ok">already a tab</span>':''}</button>`).join('')||'<div class="meta">No pages found. Type the exact title below.</div>';
+  openSheet(`<h3>Add a wiki timeline</h3><div class="meta">${pages.length} timeline pages on ${esc(ST.settings.host)}. The new tab starts empty; every story goes through your approval.</div>
+    <input class="search" id="npq" placeholder="Filter, e.g. Fourth Doctor, Ace, Sarah Jane…" style="margin:10px 0"><div id="npl">${draw('')}</div>
+    <div style="margin:12px 0 6px">Or exact page title</div><input type="text" id="npt" value="Theory:Timeline - "><div style="margin-top:8px"><button class="btn pri" id="npGo">Create tab</button></div>`);
+  $('#npq').oninput=e=>{$('#npl').innerHTML=draw(e.target.value.trim().toLowerCase())};
+  $('#sheet').onclick=e=>{const b=e.target.closest('[data-np]');const title=b?b.dataset.np:(e.target.closest('#npGo')?$('#npt').value.trim():null);if(!title)return;
+    const c={id:'c'+Date.now(),name:title.replace(/^Theory:Timeline - /,''),wiki:[title]};ST.custom.push(c);save();injectCustom();
+    const gi=D.groups.findIndex(x=>x.custom);go(gi,c.id);syncOne(tabById(c.id).t)}}
+// ---------- images ----------
+function coverOf(k,it){const c=ST.covers[k];if(c&&c.img)return c.img;if(it&&it.img)return it.img;if(it&&it.k&&String(it.k).startsWith('add:')){const c2=ST.covers['nk:'+String(it.k).slice(4).split('|')[0]];if(c2&&c2.img)return c2.img}return null}
+async function lookupCover(k){const w=W(k);const c=ST.covers[k];if(c&&(c.img||(c.none&&c.t>Date.now()-14*864e5)))return c;
+  for(const sid of [primaryId(),secondaryId()]){try{const pg=await findStoryPage(sid,w.title,w.type);if(!pg)continue;const r=await fetchPageAt(sid,pg);if(!r)continue;
+    const ps=parseStory(r.html,sid);if(ps.img){ST.covers[k]={img:ps.img,page:r.title,sid};save();return ST.covers[k]}}catch(e){}}
+  ST.covers[k]={none:true,t:Date.now()};save();return ST.covers[k]}
+async function coversForTab(t,progress){const ks=[...new Set(tabItems(t).map(i=>i.k))].filter(k=>!coverOf(k)&&!(ST.covers[k]&&ST.covers[k].none&&ST.covers[k].t>Date.now()-14*864e5));
+  let n=0;const work=ks.slice();const w=async()=>{while(work.length){const k=work.shift();await lookupCover(k);n++;if(progress)progress(n,ks.length)}};
+  await Promise.all([w(),w(),w(),w()]);return ks.length}
+async function tabPortrait(t){const c=ST.tabImg[t.id];if(c&&(c.img||(c.none&&c.t>Date.now()-14*864e5)))return c;
+  const subj=(pagesFor(t)[0]||t.name).replace(/^Theory:Timeline - /,'');
+  for(const sid of [primaryId(),secondaryId()]){try{const r=await fetchPageAt(sid,subj);if(r){const ps=parseStory(r.html,sid);if(ps.img){ST.tabImg[t.id]={img:ps.img};save();return ST.tabImg[t.id]}}}catch(e){}}
+  ST.tabImg[t.id]={none:true,t:Date.now()};save();return ST.tabImg[t.id]}
+function initials(n){return String(n||'?').replace(/^The /,'').split(/\s+/).filter(Boolean).slice(0,2).map(x=>x[0]).join('').toUpperCase()}
+function ringSvg(p){const r=36,c=2*Math.PI*r;return `<svg class="ring" viewBox="0 0 84 84"><circle cx="42" cy="42" r="${r}" fill="none" stroke="#0a1626" stroke-width="9"/><circle cx="42" cy="42" r="${r}" fill="none" stroke="url(#rg)" stroke-width="9" stroke-linecap="round" stroke-dasharray="${c*p} ${c}" transform="rotate(-90 42 42)"/><defs><linearGradient id="rg"><stop offset="0" stop-color="#3ccf7a"/><stop offset="1" stop-color="#4f8df5"/></linearGradient></defs><text x="42" y="47" text-anchor="middle" fill="#e8eef7" font-size="17" font-weight="800">${Math.round(p*100)}%</text></svg>`}
+// ---------- search all / settings ----------
+$('#btnSearch').onclick=()=>{openSheet(`<h3>Search everything</h3><input class="search" id="qa" placeholder="Title or character…" style="margin-top:8px"><div id="qr" style="margin-top:8px"></div>`);
+  const qa=$('#qa');qa.focus();qa.oninput=()=>{const q=qa.value.trim().toLowerCase();if(q.length<2){$('#qr').innerHTML='';return}let h='',n=0;
+    for(let gi=0;gi<D.groups.length;gi++)for(const t of D.groups[gi].tabs)for(const it of tabItems(t)){const w=W(it.k);
+      const hit=(w.title||'').toLowerCase().includes(q)||(it.chars||[]).some(c=>c[0].toLowerCase().includes(q));if(!hit)continue;if(++n>100)break;
+      h+=`<button class="lrow" data-g="${gi}" data-t="${t.id}" data-it="${it.id}"><span class="dot" style="background:${typeOf(w.type).color}"></span><span class="nm">${esc(w.title)}<div class="meta">${esc(D.groups[gi].name)} › ${esc(t.name)}</div></span><b>${w.rating==null?'( )':w.rating}</b>${w.done?' ✓':''}</button>`}
+    $('#qr').innerHTML=h||'<div class="empty">No matches</div>'};
+  $('#sheet').onclick=e=>{const r=e.target.closest('.lrow');if(!r)return;closeSheet();go(+r.dataset.g,r.dataset.t);
+    setTimeout(()=>{const el=document.querySelector(`.item[data-id="${r.dataset.it}"]`);if(el){el.scrollIntoView({block:'center'});el.style.outline='2px solid var(--acc)';setTimeout(()=>el.style.outline='',1600)}},80)}};
+function csv(){const rows=[['Group','Tab','#','Title','Type','Rating','Done','Characters','Date','Notes']];
+  D.groups.forEach(g=>g.tabs.forEach(t=>tabItems(t).forEach((it,i)=>{const w=W(it.k);rows.push([g.name,t.name,i+1,w.title,typeOf(w.type).label,w.rating??'',w.done?'yes':'',(it.chars||[]).map(c=>c[0]).join('; '),it.date||'',w.notes])})));
+  return rows.map(r=>r.map(c=>{c=String(c);return /[",\n]/.test(c)?'"'+c.replace(/"/g,'""')+'"':c}).join(',')).join('\n')}
+$('#btnMenu').onclick=()=>{let h=`<h3>Settings</h3><div style="margin:14px 0 6px;font-weight:600">Wiki</div>
+  <div class="wrap"><button class="chip ${ST.settings.host!=='fandom'?'on':''}" data-host="tardis.wiki">tardis.wiki</button><button class="chip ${ST.settings.host==='fandom'?'on':''}" data-host="fandom">tardis.fandom.com</button></div>
+  <div style="margin:16px 0 6px;font-weight:600">Media type names</div>`+D.types.map(t=>`<div class="row" style="margin-bottom:6px"><span class="dot" style="background:${t.color}"></span><input type="text" data-tl="${t.id}" value="${esc(typeOf(t.id).label)}"><span class="meta" style="white-space:nowrap">${esc(t.pdf)}</span></div>`).join('')+
+  `<div style="margin:16px 0 6px;font-weight:600">Backup & export</div><div class="links"><button class="btn" id="exp">Share backup</button><button class="btn" id="expc">Copy backup</button><button class="btn" id="imp">Import from clipboard</button><button class="btn" id="csv">Share as CSV</button></div>
+  <div class="meta" style="margin-top:8px">Ticks, ratings, notes, approved orders and added entries live on this phone. Reinstalling or clearing app data wipes them, so export a backup now and then.</div>
+  <div class="wrap" style="margin-top:16px"><button class="btn pri" id="sv">Save</button><button class="btn no" id="rst">Reset everything</button></div>
+  <div class="meta" style="margin-top:14px">Data from your 8 PDFs · built ${esc(D.built)} · ${Object.keys(D.works).length} works</div>`;
+  openSheet(h);
+  $('#sheet').onclick=e=>{const hb=e.target.closest('[data-host]');if(hb){ST.settings.host=hb.dataset.host;save();document.querySelectorAll('[data-host]').forEach(x=>x.classList.toggle('on',x===hb));return}
+    const bk=JSON.stringify({app:'dwcanon',v:1,state:ST});
+    if(e.target.closest('#exp')){if(window.Android)Android.share(bk);return}
+    if(e.target.closest('#expc')){if(window.Android)Android.copy(bk);toast('Backup copied');return}
+    if(e.target.closest('#csv')){if(window.Android)Android.share(csv());return}
+    if(e.target.closest('#imp')){const txt=window.Android?Android.paste():'';try{const j=JSON.parse(txt);if(j.app!=='dwcanon')throw 0;ST=j.state;fill();injectCustom();save();closeSheet();render();toast('Backup imported')}catch(x){toast('Clipboard has no DW Canon backup')}return}
+    if(e.target.closest('#sv')){document.querySelectorAll('[data-tl]').forEach(i=>{const v=i.value.trim();if(v&&v!==D.types.find(t=>t.id===i.dataset.tl).label)ST.types[i.dataset.tl]=v;else delete ST.types[i.dataset.tl]});save();closeSheet();render();return}
+    if(e.target.closest('#rst')){if(confirm('Wipe all your ticks, ratings, notes and orders and go back to the PDF data?')){localStorage.removeItem(LS);load();injectCustom();closeSheet();go(0,'overview')}}}};
+// ---------- boot ----------
+window.addEventListener('pagehide',()=>{rememberScroll();save()});
+try{D=window.DW_DATA;load();injectCustom();
+  // migrate custom labels from v1 ids
+  for(const [o,nw] of [['teal','poem'],['brown','webcast'],['green','game']]){if(ST.types[o]){delete ST.types[o]}}
+  for(const k in ST.added){const a=ST.added[k];if(a&&a.type&&({teal:'poem',brown:'webcast',green:'game'})[a.type])a.type={teal:'poem',brown:'webcast',green:'game'}[a.type]}
+  {const idx={};for(const k in D.works){const p=k.split('|');idx[p[0]+'|'+(p[2]||'')]=(idx[p[0]+'|'+(p[2]||'')]||[]).concat([k])}
+   for(const k of Object.keys(ST.works)){if(D.works[k]||ST.added[k]||k.startsWith('skip:'))continue;const p=k.split('@')[0].split('|');const c=idx[p[0]+'|'+(p[2]||'')];
+     if(c&&c.length===1&&!ST.works[c[0]]){ST.works[c[0]]=ST.works[k];delete ST.works[k]}}save()}
+  if(ST.ui.last&&tabById(ST.ui.last.t)){cur.g=ST.ui.last.g;cur.t=ST.ui.last.t}
+  render();restoreScroll()}catch(e){$('#main').innerHTML='<div class="empty">Could not load data: '+esc(e)+'</div>'}
+</script>
+</body>
+</html>

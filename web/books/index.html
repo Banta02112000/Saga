@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Books</title>
+<link rel="stylesheet" href="../shared/theme.css">
+<link rel="stylesheet" href="../style.css">
+<link rel="stylesheet" href="books.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="wordmark">Books</div>
+  <button class="iconbtn" data-action="scan" aria-label="Scan a barcode">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>
+  </button>
+</header>
+<div class="jobbar" aria-hidden="true"><i id="jobfill"></i></div>
+<main id="view" tabindex="-1"></main>
+<nav class="tabs" id="tabs" aria-label="Sections"></nav>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div id="overlay"></div>
+<script src="../shared/shell.js"></script><script src="../shared/i18n-it.js"></script><script src="../shared/i18n.js"></script>
+<script>BantaShell.strip("books", function (app) { Android.openApp(app); });</script>
+<script src="core.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
