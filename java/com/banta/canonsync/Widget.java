@@ -34,6 +34,35 @@ public class Widget extends AppWidgetProvider {
         }
     }
 
+    // Look chosen in Settings > Widgets (widget_style.txt): "alpha=<0..100>", "look=dark|light", "size=<sp>".
+    static void style(Context ctx, RemoteViews v, String pkg, int idRoot, int idTitle, int idBody) {
+        int alpha = 95, size = 14;
+        boolean light = false;
+        try {
+            String st = Shared.readFile(ctx, "widget_style.txt");
+            if (st != null) for (String line : st.split("\n")) {
+                int eq = line.indexOf('=');
+                if (eq < 0) continue;
+                String k = line.substring(0, eq).trim(), val = line.substring(eq + 1).trim();
+                if (k.equals("alpha")) alpha = Integer.parseInt(val);
+                else if (k.equals("look")) light = val.equals("light");
+                else if (k.equals("size")) size = Integer.parseInt(val);
+            }
+        } catch (Throwable ignored) {
+        }
+        int[] steps = { 100, 85, 70, 55, 40, 25, 10, 0 };
+        int pick = 100;
+        for (int x : steps) if (Math.abs(x - alpha) < Math.abs(pick - alpha)) pick = x;
+        int bg = ctx.getResources().getIdentifier("wbg_" + (light ? "light" : "dark") + "_" + pick, "drawable", pkg);
+        if (bg != 0) v.setInt(idRoot, "setBackgroundResource", bg);
+        v.setTextColor(idTitle, light ? 0xFF8A5A00 : 0xFFF5B841);
+        v.setTextColor(idBody, light ? 0xFF1E1A2B : 0xFFF1ECFF);
+        if (size >= 10 && size <= 22) {
+            v.setTextViewTextSize(idBody, 2, size); // 2 = sp
+            v.setTextViewTextSize(idTitle, 2, size - 1);
+        }
+    }
+
     static String file(String kind) { return kind.length() == 0 ? "widget.txt" : "widget_" + kind + ".txt"; }
 
     static void draw(Context ctx, AppWidgetManager mgr, int[] ids, String kind, String tab, int code) {
@@ -62,6 +91,7 @@ public class Widget extends AppWidgetProvider {
             RemoteViews v = new RemoteViews(pkg, layout);
             v.setTextViewText(idTitle, title);
             v.setTextViewText(idBody, body);
+            style(ctx, v, pkg, idRoot, idTitle, idBody);
             Intent open = new Intent(ctx, MainActivity.class);
             open.putExtra("tab", tab);
             open.addFlags(0x10000000 | 0x20000000 | 0x00020000);

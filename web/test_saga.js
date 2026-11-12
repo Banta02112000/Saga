@@ -208,7 +208,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   ok(await A(() => { __app.db.set("imdb_eps", JSON.stringify({ tt7777777: { t: "Rated Episodes Show", y: 2020, eps: { "1:1": "2021-03-04", "1:2": 1 } } })); __app.libAdopt();
     const it = __app.lib.all().find(x => x.imdb === "tt7777777"); return it && it.status === "watching" && it.eps["1:1"] === "2021-03-04" && !!it.eps["1:2"]; }), "episodes rated on IMDb tick the series");
   { const wf = await A(() => __app.widgetFiles());
-    ok(Object.keys(wf).length === 6 && /^Next episodes/.test(wf["widget_episodes.txt"]) && /\n@@✓ .+\t\{"op":"ep"/.test(wf["widget_episodes.txt"]) && /so far\n@@\n/.test(wf["widget_year.txt"]) && /^Reading/.test(wf["widget_books.txt"]), "six widget files: " + JSON.stringify(wf).slice(0, 600)); }
+    ok(Object.keys(wf).length === 7 && wf["widget_style.txt"] === "alpha=95\nlook=dark\nsize=14\n" && /^Next episodes/.test(wf["widget_episodes.txt"]) && /\n@@✓ .+\t\{"op":"ep"/.test(wf["widget_episodes.txt"]) && /so far\n@@\n/.test(wf["widget_year.txt"]) && /^Reading/.test(wf["widget_books.txt"]), "six widget files: " + JSON.stringify(wf).slice(0, 600)); }
   // 5.4: undo, tags, calendar file, picks, error log
   { const r = await A(() => { const it = __app.lib.all().find(x => x.title === "Severance"); const before = JSON.stringify(it.eps);
       __app.go("home"); const b = document.querySelector('[data-action="libnext"]'); b.click();
@@ -266,7 +266,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.5.4.4", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.5.4.5", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();
@@ -411,6 +411,13 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   await pg.waitForTimeout(300);
   await pg.screenshot({ path: `${OUT}/s-game-wide.png` });
   ok(!errors.length, "page errors:\n" + errors.join("\n"));
+  // accessibility: every visible control has a name a screen reader can say
+  { const miss = await A(async () => { const out = {}; const scan = tag => { for (const b of document.querySelectorAll("button, [role=button], a, input, select, textarea")) { if (b.offsetParent === null) continue; const tc = (() => { const c = b.cloneNode(true); c.querySelectorAll("svg").forEach(x => x.remove()); return c.textContent; })(); const name = (b.getAttribute("aria-label") || tc || b.getAttribute("title") || "").trim() || (b.labels && b.labels[0] && b.labels[0].textContent.trim()) || b.getAttribute("placeholder") || ""; if (!name) { const k = tag + " " + b.outerHTML.slice(0, 140); out[k] = 1; } } };
+      for (const t of ["home", "watch", "missing", "games", "books", "sync", "settings", "stats"]) { try { __app.go(t); scan(t); } catch (e) {} }
+      try { __app.go("watch"); const p = document.querySelector("#view .poster"); if (p) { p.click(); scan("libsheet"); window.Saga.close(); } } catch (e) {}
+      try { __app.go("missing"); const r = document.querySelector('#view [data-action="sheet"]'); if (r) { r.click(); scan("sheet"); window.Saga.close(); } } catch (e) {}
+      return Object.keys(out); });
+    ok(!miss.length, "every control has a spoken name: " + JSON.stringify(miss.slice(0, 10))); await A(() => __app.go("home")); }
   console.log("SAGA 5 UI TESTS PASSED");
   await browser.close(); srv.close();
 })().catch(e => { console.error(e); process.exit(1); });

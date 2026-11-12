@@ -37,17 +37,35 @@
     }
     fromJSON(j) { this.games = (j.games || []).map(blank); this.removed = j.removed || {}; this.settings = Object.assign(this.settings, j.settings || {}); this.meta = j.meta || {}; }
     toJSON() { return { app: "games", v: 1, games: this.games, removed: this.removed, settings: this.settings, meta: this.meta }; }
-    save() { this.ver++; this._idx = null; if (this.persist) this.persist.save(JSON.stringify(this.toJSON())); }
+    save() { this.ver++; this._idx = null; this._fi = null; if (this.persist) this.persist.save(JSON.stringify(this.toJSON())); }
     get(id) { return this.games.find(g => g.id === id) || null; }
+    // Look-ups go through maps (steam id, IMDb id, title), rebuilt whenever the list changed: a 1,000-game list
+    // checked against a 10,000-title sync no longer scans every game for every row.
+    _ix() {
+      const gs = this.games;
+      if (this._fi && this._fi.arr === gs && this._fi.len === gs.length) return this._fi;
+      const s = new Map(), i = new Map(), t = new Map(), pos = new Map();
+      const put = (m, k, g) => { if (!k) return; const a = m.get(k); if (a) a.push(g); else m.set(k, [g]); };
+      gs.forEach((g, j) => { pos.set(g, j); put(s, g.steam, g); put(i, g.imdb, g); put(t, norm(g.title), g); });
+      return (this._fi = { arr: gs, len: gs.length, s, i, t, pos });
+    }
     find(o) {
       const n = norm(o.title), y = o.year || (o.date ? +o.date.slice(0, 4) : null);
-      return this.games.find(g => (o.steam && g.steam === o.steam) || (o.imdb && g.imdb === o.imdb) ||
-        (norm(g.title) === n && n && (!y || !yearOf(g) || Math.abs(yearOf(g) - y) <= 1))) || null;
+      const ok = g => (o.steam && g.steam === o.steam) || (o.imdb && g.imdb === o.imdb) ||
+        (norm(g.title) === n && n && (!y || !yearOf(g) || Math.abs(yearOf(g) - y) <= 1));
+      const ix = this._ix();
+      const cand = [...(o.steam ? ix.s.get(o.steam) || [] : []), ...(o.imdb ? ix.i.get(o.imdb) || [] : []), ...(n ? ix.t.get(n) || [] : [])];
+      let best = null, bp = Infinity;
+      for (const g of cand) { const p = ix.pos.get(g); if (p < bp && ok(g)) { best = g; bp = p; } }
+      return best;
     }
     add(o, status) {
       const have = this.find(o);
       if (have) {
-        for (const k of ["steam", "imdb", "date", "platform", "franchise", "multiverse", "cover", "hours", "imdbR"]) if (!have[k] && o[k]) have[k] = o[k];
+        for (const k of ["steam", "imdb", "date", "platform", "franchise", "multiverse", "cover", "hours", "imdbR"]) if (!have[k] && o[k]) {
+          have[k] = o[k];
+          if ((k === "steam" || k === "imdb") && this._fi) { const m = this._fi[k === "steam" ? "s" : "i"], a = m.get(o[k]); if (a) a.push(have); else m.set(o[k], [have]); }
+        }
         if (status && rank(status) > rank(have.status)) setStatus(have, status);
         return { game: have, existed: true };
       }

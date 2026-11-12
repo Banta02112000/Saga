@@ -45,6 +45,19 @@ cat > app/res/drawable/widget_bg.xml <<XML
     <corners android:radius="22dp"/>
 </shape>
 XML
+# backgrounds for the widget transparency setting: dark and light, from solid to fully see-through
+for A in 100:FF 85:D9 70:B3 55:8C 40:66 25:40 10:1A 0:00; do
+  P=${A%%:*}; H=${A##*:}
+  for T in dark:221B3B light:F7F4EE; do
+cat > app/res/drawable/wbg_${T%%:*}_$P.xml <<XML
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#$H${T##*:}"/>
+    <corners android:radius="22dp"/>
+</shape>
+XML
+  done
+done
 cat > app/res/drawable/widget_btn.xml <<XML
 <?xml version="1.0" encoding="utf-8"?>
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">

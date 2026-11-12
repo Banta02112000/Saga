@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.5.4.4";
+  const VERSION = "0.5.4.5";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -229,6 +229,10 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.5.4.5", ["Syncing no longer freezes the screen with a big library: the slowest steps were rewritten and the screen gets a chance to redraw between steps.",
+      "Your year no longer counts episodes you ticked in bulk (catching up, marking a whole series, imports without a date) as watched that day; it shows how many it left out.",
+      "Picture quality from JustWatch can be switched off (Settings › Streaming). When JustWatch doesn't answer, Saga waits 12 hours before asking again instead of slowing every title down.",
+      "Widgets: choose the background opacity (down to fully see-through), a light or dark look, and the text size in Settings › Widgets."]],
     ["0.5.4.4", ["New icon.",
       "Up next no longer lists series whose remaining episodes aren't out yet, including ones with no date announced.",
       "Sync one entry at a time: films and series (details, IMDb and Trakt), games (Steam, date, store prices) and books (missing details, price). Check canon for one title with the AI, from your library or from the Missing tab.",
@@ -494,7 +498,7 @@
       ${scores.length ? `<p class="small muted" style="margin:4px 0 0">${scores.map(esc).join(" · ")}</p>` : ""}
       ${inf.crew.length ? `<p class="small muted" style="margin:4px 0 0">${inf.tv ? "Created by" : "Directed by"} ${esc(inf.crew.join(", "))}${inf.cast.length ? ` · With ${esc(inf.cast.slice(0, 3).join(", "))}` : ""}</p>` : ""}
       <h4>Where to watch in ${esc(inf.region)}</h4>${offers}
-      ${inf.offers.length && inf.offers.every(o => !o.res) ? `<p class="small muted">Picture quality unavailable${inf.jwError ? " (JustWatch didn't respond)" : ""}.</p>` : ""}
+      ${inf.offers.length && inf.offers.every(o => !o.res) ? `<p class="small muted">Picture quality unavailable${inf.jwError ? ` (JustWatch ${inf.jwError === "switched off" ? "switched off in Settings" : "didn't respond"})` : ""}.</p>` : ""}
       ${worldHtml(inf)}
       ${inf.overview ? `<details class="report"><summary>Synopsis (may contain spoilers)</summary><p class="small">${esc(inf.overview)}</p></details>` : ""}
       <p class="small muted" style="margin:8px 0 0">Streaming data: JustWatch via TMDB, every country.</p>`;
@@ -1055,6 +1059,7 @@
         <h2>Region, streaming and TMDB</h2>
         ${field("region", "Country for release dates and streaming", { placeholder: "IT", hint: "Two-letter code, e.g. IT, GB, US." })}
         ${field("my_services", "Your streaming services", { placeholder: "Disney+, Netflix, Prime Video", hint: "Listed first in Worldwide with a VPN, and used for the VPN badge when a title doesn't stream in your country." })}
+        <label class="switch"><input type="checkbox" data-setting="jw_quality" ${db.get("jw_quality", "1") === "1" ? "checked" : ""}><span>Picture quality (4K, HD) from JustWatch. JustWatch has no public API, so this uses its app's own address and can stop working at any time.</span></label>
         ${field("vpn_countries", "VPN countries with picture quality", { placeholder: C.VPN_DEFAULT, hint: "Every country's services are shown; these also get 4K/HD info from JustWatch (up to 14)." })}
         ${field("tmdb_key", "TMDB API key or read token (free)", { secret: true })}
       </section>
@@ -1195,7 +1200,11 @@
   function widgetHelp() {
     return `<section class="stack"><h2>Home-screen widgets</h2>
       <label class="switch"><input type="checkbox" data-feature="widget" ${feat("widget") ? "checked" : ""}><span>Keep widgets up to date</span></label>
-      <p class="small muted">Long-press your home screen › Widgets › Saga. Six to choose from: Up next, Next episodes (with a Mark watched button), Coming up, Games, Reading and Your year. They refresh whenever Saga changes something.</p></section>`;
+      <p class="small muted">Long-press your home screen › Widgets › Saga. Six to choose from: Up next, Next episodes (with a Mark watched button), Coming up, Games, Reading and Your year. They refresh whenever Saga changes something.</p>
+      <label class="field"><span>Background opacity: <b id="walphaV">${esc(db.get("widget_alpha", "95"))}%</b></span><input type="range" min="0" max="100" step="5" value="${esc(db.get("widget_alpha", "95"))}" data-setting="widget_alpha" aria-label="Widget background opacity" oninput="document.getElementById('walphaV').textContent=this.value+'%'"></label>
+      <label class="field"><span>Look</span><select data-setting="widget_look">${[["dark", "Dark background, light text"], ["light", "Light background, dark text"]].map(([v, l]) => `<option value="${v}" ${db.get("widget_look", "dark") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label class="field"><span>Text size</span><select data-setting="widget_size">${[["12", "Small"], ["14", "Normal"], ["16", "Large"], ["18", "Extra large"]].map(([v, l]) => `<option value="${v}" ${db.get("widget_size", "14") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <p class="small muted">At low opacity, pick the look that reads best on your wallpaper: light text for dark wallpapers, dark text for light ones.</p></section>`;
   }
   function renderSettings() {
     const secs = settingsSections();
@@ -1453,6 +1462,7 @@
   function widgetFiles() {
     const ne = nextEpisodes();
     const f = {};
+    f["widget_style.txt"] = `alpha=${db.get("widget_alpha", "95")}\nlook=${db.get("widget_look", "dark")}\nsize=${db.get("widget_size", "14")}\n`;
     f["widget.txt"] = (ne[0] ? `▶ ${ne[0].lib ? ne[0].it.title : ne[0].show} · S${ne[0].s} E${ne[0].e}\n` : "") + C.widgetText(status(), gamesIdx(), dwIdx(), undefined, booksIdx());
     // next episodes, with a Mark watched button for the first
     const first = ne.find(x => x.lib);
@@ -1647,15 +1657,20 @@
     // episodes you've watched on Trakt, with the day you watched each one, merged into the library every time
     let prog = {}, changed = 0;
     try { prog = JSON.parse(db.get("trakt_progress", "{}")) || {}; } catch (e) { prog = {}; }
+    // series looked up through maps built once (a scan per series froze the screen with a big library)
+    const byTmdb = new Map(), byImdb = new Map(), byName = new Map();
+    const index = x => { if (x.type !== "show") return; if (x.tmdb && !byTmdb.has(String(x.tmdb))) byTmdb.set(String(x.tmdb), x); if (x.imdb && !byImdb.has(x.imdb)) byImdb.set(x.imdb, x);
+      const k = L.norm(x.title); if (k) { const a = byName.get(k); if (a) a.push(x); else byName.set(k, [x]); } };
+    for (const x of lib.all()) index(x);
     for (const [tmdbId, p] of Object.entries(prog)) {
-      let it = lib.all().find(x => x.type === "show" && ((x.tmdb && String(x.tmdb) === String(tmdbId)) || (p.imdb && x.imdb === p.imdb)));
-      if (!it) it = lib.all().find(x => x.type === "show" && L.norm(x.title) === L.norm(p.t) && (!p.y || !x.year || Math.abs(x.year - p.y) <= 1));
-      if (!it) { if (lib.adopted[p.imdb || `show|${L.norm(p.t)}|${p.y || ""}`]) continue; it = lib.add({ type: "show", title: p.t, year: p.y || null, imdb: p.imdb || null, tmdb: +tmdbId || null, src: "trakt" }, "watching").item; }
+      let it = byTmdb.get(String(tmdbId)) || (p.imdb && byImdb.get(p.imdb)) || null;
+      if (!it) it = (byName.get(L.norm(p.t)) || []).find(x => !p.y || !x.year || Math.abs(x.year - p.y) <= 1) || null;
+      if (!it) { if (lib.adopted[p.imdb || `show|${L.norm(p.t)}|${p.y || ""}`]) continue; it = lib.add({ type: "show", title: p.t, year: p.y || null, imdb: p.imdb || null, tmdb: +tmdbId || null, src: "trakt" }, "watching").item; index(it); }
       if (!it.tmdb && +tmdbId) it.tmdb = +tmdbId;
       const fallback = (p.last || "").slice(0, 10);
       for (const [sn, nums] of Object.entries(p.eps || {})) for (const e of nums) {
         const k = L.epKey(+sn, e);
-        if (!it.eps[k]) { it.eps[k] = (p.d && p.d[k]) || fallback; changed++; }
+        if (!it.eps[k]) { it.eps[k] = (p.d && p.d[k]) || fallback; if (!(p.d && p.d[k])) L.markBulk(it, k); changed++; }
       }
       if (it.status === "watchlist" || (it.status === "watched" && !lib.caughtUp(it) && it.epl)) it.status = "watching";
     }
@@ -2152,24 +2167,24 @@
   // ---- your year: films, episodes, games, books and stories, by month
   function yearCounts(year) {
     const ys = String(year), m = Array(12).fill(0);
-    let films = 0, episodes = 0, rewatches = 0, minutes = 0, gamesN = 0, gameHours = 0, booksN = 0, pages = 0, stories = 0;
+    let films = 0, episodes = 0, rewatches = 0, minutes = 0, gamesN = 0, gameHours = 0, booksN = 0, pages = 0, stories = 0, bulkEps = 0;
     const top = [];
     const mo = d => { const k = +String(d).slice(5, 7) - 1; if (k >= 0) m[k]++; };
     for (const it of lib.all()) {
       if (it.type === "movie") it.watches.forEach((d, i) => { if (String(d).startsWith(ys)) { films++; if (i) rewatches++; minutes += it.runtime || 110; mo(d); if (it.rating >= 8) top.push({ t: it.title, r: it.rating, img: it.poster, act: `data-action="libopen" data-id="${esc(it.id)}"`, kind: "movie" }); } });
-      else { let any = 0; for (const d of Object.values(it.eps)) if (String(d).startsWith(ys)) { episodes++; minutes += it.runtime || 45; mo(d); any = 1; } if (any && it.rating >= 8) top.push({ t: it.title, r: it.rating, img: it.poster, act: `data-action="libopen" data-id="${esc(it.id)}"`, kind: "show" }); }
+      else { let any = 0; for (const [k, d] of Object.entries(it.eps)) if (String(d).startsWith(ys)) { if (it.bulk && it.bulk[k]) { bulkEps++; continue; } episodes++; minutes += it.runtime || 45; mo(d); any = 1; } if (any && it.rating >= 8) top.push({ t: it.title, r: it.rating, img: it.poster, act: `data-action="libopen" data-id="${esc(it.id)}"`, kind: "show" }); }
     }
     for (const g of games.visible()) g.plays.forEach(d => { if (String(d).startsWith(ys)) { gamesN++; gameHours += g.hours || 0; mo(d); if (g.rating >= 8) top.push({ t: g.title, r: g.rating, img: g.steam ? GC.COVER(g.steam) : "", act: `data-action="gopen" data-id="${esc(g.id)}"`, kind: "game" }); } });
     for (const b of books.books) for (const r of BC.readsOf(b)) { const d = r.finished ? new Date(r.finished).toISOString().slice(0, 10) : ""; if (d.startsWith(ys)) { booksN++; pages += b.pages || 0; mo(d); if (b.rating >= 8) top.push({ t: b.title, r: b.rating, img: (b.cover || "").replace(/^http:/, "https:"), act: `data-action="bopen" data-id="${esc(b.id)}"`, kind: "book" }); } }
     if (secOn("timeline")) for (const x of Kit.mods.timeline.recent(9999)) if (x.date.startsWith(ys)) { stories++; mo(x.date); }
-    return { year, months: m, films, episodes, rewatches, hours: Math.round(minutes / 60), games: gamesN, gameHours: Math.round(gameHours), books: booksN, pages, stories, top: top.sort((a, b) => b.r - a.r).slice(0, 20) };
+    return { year, months: m, films, episodes, bulkEps, rewatches, hours: Math.round(minutes / 60), games: gamesN, gameHours: Math.round(gameHours), books: booksN, pages, stories, top: top.sort((a, b) => b.r - a.r).slice(0, 20) };
   }
   function renderYear() {
     const y = ui.year || new Date().getFullYear(), c = yearCounts(y), max = Math.max(1, ...c.months);
     const MON = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
     return `<div class="row" style="margin-bottom:10px"><button class="iconbtn" data-action="yearstep" data-v="-1" aria-label="Previous year">‹</button><h2 class="grow" style="text-align:center;margin:0;font-size:30px">${y}</h2><button class="iconbtn" data-action="yearstep" data-v="1" aria-label="Next year" ${y >= new Date().getFullYear() ? "disabled" : ""}>›</button></div>
       <section><div class="bigstat">${fmt(c.hours + c.gameHours)}</div><div class="muted">hours of stories: ${fmt(c.hours)} watching (estimated from runtimes), ${fmt(c.gameHours)} playing (time to beat)</div></section>
-      <div class="stat3"><div><b>${fmt(c.films)}</b><span>films${c.rewatches ? ` (${c.rewatches} rewatch${c.rewatches === 1 ? "" : "es"})` : ""}</span></div><div><b>${fmt(c.episodes)}</b><span>episodes</span></div><div><b>${fmt(c.games)}</b><span>games finished</span></div>
+      <div class="stat3"><div><b>${fmt(c.films)}</b><span>films${c.rewatches ? ` (${c.rewatches} rewatch${c.rewatches === 1 ? "" : "es"})` : ""}</span></div><div><b>${fmt(c.episodes)}</b><span>episodes${c.bulkEps ? ` (+${fmt(c.bulkEps)} ticked in bulk, not counted)` : ""}</span></div><div><b>${fmt(c.games)}</b><span>games finished</span></div>
         <div><b>${fmt(c.books)}</b><span>books read</span></div><div><b>${fmt(c.pages)}</b><span>pages</span></div><div><b>${fmt(c.stories)}</b><span>Doctor Who stories</span></div></div>
       <section class="card" style="margin-top:20px"><div class="kicker" style="margin-bottom:10px">Month by month</div><div class="months">${c.months.map(n => `<i style="height:${Math.round(n / max * 100)}%" title="${n}"></i>`).join("")}</div><div class="months" style="height:auto">${MON.map(x => `<span>${x}</span>`).join("")}</div></section>
       ${c.top.length ? `<section>${Kit.head("Your favourites of the year")}${Kit.rail(c.top.map(x => Kit.tile({ title: x.t, img: x.img, kind: x.kind, badge: `★ ${x.r / 2}`, attrs: x.act }, x.t)))}</section>` : `<p class="muted">Rate what you finish (4 stars or more) and your favourites show up here.</p>`}`;
@@ -2230,6 +2245,7 @@
     const step = async (k, label, fn, limit) => {
       if (C.CONFIG.cancelled) return;
       ui.stage = k; progress(null, label);
+      await C.breathe(); // let the screen redraw and taps through before the next heavy step
       const t0 = Date.now();
       try { const m = await C.withTimeout(Promise.resolve().then(fn), limit || 120000, "stopped after its time limit, continues next time"); lines.push(`OK   ${label}: ${m}`); setStage(k, true, m, t0); }
       catch (e) { lines.push(`FAIL ${label}: ${e.message}`); setStage(k, false, e.message, t0); }
@@ -3068,6 +3084,7 @@
       render();
     }
     if (k === "threshold") invalidate();
+    if (k.startsWith("widget_")) { widgetCache["widget_style.txt"] = null; updateWidget(); }
     if (k === "ai_preset" || k === "ai_key") render(); // the key field and scan button follow the chosen service
     if (k.startsWith("bg_")) {
       applyBackground();

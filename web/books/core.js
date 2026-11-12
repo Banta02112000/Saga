@@ -6,7 +6,7 @@
   const DAY = 864e5;
   const GB = "https://www.googleapis.com/books/v1/volumes";
   const OL = "https://openlibrary.org";
-  const UA = { "User-Agent": "Saga/0.5.4.4 (+https://github.com/Banta02112000/Saga)", Accept: "application/json" };
+  const UA = { "User-Agent": "Saga/0.5.4.5 (+https://github.com/Banta02112000/Saga)", Accept: "application/json" };
   const STATUSES = ["reading", "want", "read", "dnf"];
   const STATUS_LABEL = { reading: "Reading", want: "Want to read", read: "Read", dnf: "Did not finish" };
   const FORMATS = ["Paper", "Ebook", "Audio"];

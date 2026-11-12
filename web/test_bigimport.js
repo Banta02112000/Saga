@@ -19,6 +19,7 @@ const mock = (seed) => {
   window.__http = [];
   const reply = (m, url, body) => {
     const J = (o, st) => ({ status: st || 200, body: JSON.stringify(o) });
+    if (window.__big) { const b = window.__big(url); if (b) return J(b); }
     if (/api\.trakt\.tv\/users\/banta\/watched\/movies/.test(url)) return J([{ movie: { title: "Heat", year: 1995, ids: { imdb: "tt0113277", tmdb: 949 } }, last_watched_at: "2024-03-01T20:00:00Z" }]);
     if (/api\.trakt\.tv\/users\/banta\/watched\/shows/.test(url)) return J([{ show: { title: "Severance", year: 2022, ids: { imdb: "tt11280740", tmdb: 95396 } }, last_watched_at: "2025-01-20T21:00:00Z", seasons: [{ number: 1, episodes: [{ number: 1, plays: 1, last_watched_at: "2024-12-01T21:00:00Z" }, { number: 2, plays: 1, last_watched_at: "2024-12-02T21:00:00Z" }] }] }]);
     if (/api\.trakt\.tv\/users\/banta\/ratings/.test(url)) return J([]);
@@ -103,6 +104,24 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   ok(r2.sev && r2.sev["1:1"] === "2024-12-01" && r2.heat[1] === 9 && r2.dune, "Trakt ZIP: progress, rating, watchlist");
   console.log("Trakt ZIP", JSON.stringify(r2), await A(() => [__app.ui.status, __app.db.items("trakt", null).length]));
   console.log(await A(() => JSON.stringify([__app.db.items("trakt", null).map(r => [r.title, r.kind, r.medium]), __app.lib.all().filter(x => /Heat|Sever|Dune/.test(x.title)).map(x => x.title), __app.db.get("lib_adopt", "1"), Object.keys(__app.lib.adopted).length])));
+  // sync with a big Trakt account on top of 10,500 IMDb ratings: the screen must not freeze (no long blocking step)
+  await A(() => __app.go("home"));
+  await A(() => { __app.db.set("username", "banta");
+    const mv = n => Array.from({ length: n }, (_, i) => ({ movie: { title: "Film " + i, year: 1950 + i % 70, ids: { imdb: "tt" + (3000000 + i), tmdb: 10000 + i, trakt: i } }, last_watched_at: "2024-03-01T20:00:00Z", plays: 1 }));
+    const sh = n => Array.from({ length: n }, (_, i) => ({ show: { title: "Show " + i, year: 1990 + i % 30, ids: { imdb: "tt" + (4000000 + i), tmdb: 20000 + i, trakt: 5000 + i } }, last_watched_at: "2025-01-20T21:00:00Z", seasons: [1,2,3].map(s => ({ number: s, episodes: Array.from({ length: 10 }, (_, e) => ({ number: e + 1, plays: 1, last_watched_at: "2024-12-01T20:00:00Z" })) })) }));
+    const rt = n => Array.from({ length: n }, (_, i) => ({ type: "movie", rating: 1 + i % 10, rated_at: "2024-03-01T20:00:00Z", movie: { title: "Film " + i, year: 1950 + i % 70, ids: { imdb: "tt" + (3000000 + i) } } }));
+    const M = mv(4000), S = sh(800), R = rt(4000);
+    window.__big = u => /watched\/movies/.test(u) ? M : /watched\/shows/.test(u) ? S : /ratings/.test(u) ? R : /watchlist/.test(u) ? M.slice(0, 500).map(x => ({ type: "movie", movie: x.movie })) : null; __app.db.set("token", "x"); __app.db.set("client_id", "c"); window.__lt = []; window.__marks = [];
+    new PerformanceObserver(l => { for (const e of l.getEntries()) window.__lt.push([Math.round(e.startTime), Math.round(e.duration)]); }).observe({ entryTypes: ["longtask"] });
+    const orig = __app.setProgress; });
+  const tS = await A(() => performance.now());
+  await A(() => { const b = document.querySelector('[data-action="sync"]'); if (b) b.click(); });
+  await pg.waitForTimeout(200); await A(() => { if (!__app.ui.job) { const b = document.querySelector('[data-action="sync"]'); if (b) b.click(); } });
+  await pg.waitForFunction(() => !__app.ui.job, null, { timeout: 300000 });
+  const lt = (await A(() => window.__lt)).filter(x => x[0] > tS).sort((a, b) => b[1] - a[1]);
+  console.log("sync: longest blocking steps", JSON.stringify(lt.slice(0, 4)), await A(() => (__app.ui.report || "").slice(0, 80)));
+  ok(/OK  Trakt account: 9300 records/.test(await A(() => __app.ui.report)), "big Trakt sync ran");
+  ok(!lt.length || lt[0][1] < 1200, "sync never blocks the screen for long: " + JSON.stringify(lt.slice(0, 3)));
   console.log("errors", errors); ok(!errors.length, "no page errors"); console.log("BIG IMPORT TESTS PASSED");
   await browser.close(); srv.close();
 })().catch(e => { console.error(e); process.exit(1); });

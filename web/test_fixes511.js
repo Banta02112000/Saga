@@ -1,6 +1,20 @@
 const assert = require("assert");
 const C = require("./core.js"), L = require("./library.js"), I = require("./imports.js");
 (async () => {
+  // episodes ticked in bulk are remembered as such (stats leave them out); a single tick isn't
+  { const lb = new L.Library(null); const it = lb.add({ type: "show", title: "Bulk Show", year: 2020 }, "watching").item;
+    it.epl = [[1, 1, "2020-01-01"], [1, 2, "2020-01-08"], [1, 3, "2020-01-15"], [1, 4, "2020-01-22"]];
+    lb.markUpTo(it, 1, 3); assert.deepStrictEqual(Object.keys(it.bulk).sort(), ["1:1", "1:2"]);
+    lb.toggleEp(it, 1, 4); assert.ok(!it.bulk["1:4"] && it.eps["1:4"]);
+    lb.toggleEp(it, 1, 1); assert.ok(!it.bulk["1:1"] && !it.eps["1:1"]);
+    lb.markUpTo(it, 1, 2, "2024-05-05"); assert.ok(!it.bulk["1:1"], "a given date is a real date"); }
+  // games: the indexed look-up finds the same game a full scan would
+  { const G = require("./games.js"); const gl = new G.Games(null);
+    for (let i = 0; i < 300; i++) gl.add({ title: "Game " + i, date: (1990 + i % 30) + "-01-01", steam: i % 3 ? 1000 + i : null, imdb: i % 5 ? null : "tt" + (500 + i) }, "backlog");
+    const scan = o => { const n = G.norm(o.title), y = o.year; return gl.games.find(g => (o.steam && g.steam === o.steam) || (o.imdb && g.imdb === o.imdb) || (G.norm(g.title) === n && n && (!y || !G.yearOf(g) || Math.abs(G.yearOf(g) - y) <= 1))) || null; };
+    for (const o of [{ title: "Game 7" }, { title: "game 8", year: 1998 }, { title: "Game 9", year: 1950 }, { title: "x", steam: 1010 }, { title: "x", imdb: "tt505" }, { title: "Nope" }, { title: "Game 12", steam: 99999 }])
+      assert.strictEqual(gl.find(o), scan(o), JSON.stringify(o));
+    const { game } = gl.add({ title: "Game 3", steam: 777 }); assert.strictEqual(gl.find({ title: "zz", steam: 777 }), game, "ids filled in later are found"); }
   // Up next in the canon: a franchise whose remaining entries are unreleased or undated has nothing "next"
   { const st = [{ franchise: "X", have: true, title: "A", year: 2000, medium: "Movie" }, { franchise: "X", have: false, title: "B", date: "2999-01-01", year: 2999, medium: "TV Series" },
       { franchise: "Y", have: true, title: "C", year: 2001, medium: "Movie" }, { franchise: "Y", have: false, title: "D", year: 2002, medium: "Movie" }, { franchise: "Y", have: false, title: "E", medium: "TV Series" }];

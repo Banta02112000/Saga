@@ -290,6 +290,7 @@
     set(k, v) {
       if (this._sec && SECRET_RX.test(k)) {
         const old = this._sec[k];
+        if (old === String(v) && !(k in this.settings)) return; // unchanged: no Keystore write (each one costs time on the phone)
         this._sec[k] = String(v);
         if (this._secSave()) { if (k in this.settings) { delete this.settings[k]; this.touch(); } return; }
         if (old === undefined) delete this._sec[k]; else this._sec[k] = old;
@@ -947,6 +948,8 @@
   // http(method, url, {headers, body}) -> Promise<{status, headers, body, error}>
   // Every network call during sync goes through this: a hard time limit per request, and up to `tries` attempts on
   // dropped connections, server errors (5xx) and rate limits (429, honouring Retry-After). The in-app browser is kept.
+  // a short pause so the screen can redraw and take taps between heavy steps
+  const breathe = (ms = 16) => new Promise(r => setTimeout(r, ms));
   function robust(http, opt = {}) {
     if (http && http.robust) return http;
     const timeout = opt.timeout || 45000, tries = opt.tries || 3, log = opt.log || null;
@@ -1781,7 +1784,16 @@ fragment T on MovieOrShowOrSeasonOrEpisode {
     }
     const imdb = (d.external_ids || {}).imdb_id || c.imdb || null;
     let jw = null, jwError = null;
-    try { jw = await justWatch(http, region, { title: d.title || d.name || c.title, year: c.year }, { imdb, tmdb: tid.id }, vpnCountries); } catch (e) { jwError = e.message; }
+    // JustWatch has no public API: picture quality comes from its app's internal address, which can change or be
+    // blocked. It can be switched off (Settings › Streaming); after a failure it rests for 12 hours instead of
+    // making every title wait 30 seconds.
+    const jwOn = db.get("jw_quality", "1") === "1", jwRest = +db.get("jw_fail_at", "0") || 0;
+    if (!jwOn) jwError = "switched off";
+    else if (Date.now() - jwRest < 12 * 3600e3) jwError = "not answering, trying again later";
+    else {
+      try { jw = await justWatch(http, region, { title: d.title || d.name || c.title, year: c.year }, { imdb, tmdb: tid.id }, vpnCountries); if (jwRest) db.set("jw_fail_at", "0"); }
+      catch (e) { jwError = e.message; if (!/HTTP 4\d\d/.test(e.message) || /HTTP 4(03|29)/.test(e.message)) db.set("jw_fail_at", String(Date.now())); }
+    }
     if (jw) {
       // JustWatch adds picture quality; merge into TMDB's list (same names) and add anything TMDB didn't have
       for (const o of jw.offers) {
@@ -3062,6 +3074,7 @@ ${blocks.join("\n\n")}`;
         if (!first && gap) await sleep(gap);
         first = false;
         progress(doneN / Math.max(total, 1), `Syncing ${label}`);
+        await breathe();
         const t0 = Date.now();
         L(`start ${label}`);
         try {
@@ -3123,7 +3136,7 @@ ${blocks.join("\n\n")}`;
   const Core = {
     MEDIA, PROFILES, SECRET_RX, norm, parseYear, mediumFromImdb, mediumFromText, ratio, TitleIndex, Store,
     parseCsv, parseImdbText, importImdbCsv, importFranchiseFile, traktEntries, routeTraktFile, storeTrakt, importTraktZip,
-    consumed, Exclusion, canonStatus, franchiseProgress, upNext, missingCanon, discrepancies, computeStats,
+    breathe, consumed, Exclusion, canonStatus, franchiseProgress, upNext, missingCanon, discrepancies, computeStats,
     authorizeUrl, exchangeCode, Trakt, traktSync, imdbList, imdbRatings, imdbWatchlist, imdbUserId, listIdFrom, walkTitles, browseTitles, pageExtract, pageProbe, probeFor, TMDB, collectionScan, season0Scan,
     CONFIG, AI_PRESETS, compatProvider, compatScan, traktOne, traktEpRatings, parseLines, parseMvGroup, relevantNames, promptLine, netHint, robust, pool, details, titleInfo, justWatch, pickDates, dateSummary, bestOffer, cachedInfo, enrichInfo, platformRatings, ratingDiffs, withTimeout, watchProgress, continueWatching, testGemini, gemError, fillPosters, posterKey, aiState, resetAi, canonScan, claudeScan, claudeCall, claudeModels, rankClaudeModel, CLAUDE_DEFAULT, upcomingEpisodes, canonKeys, parseJsonArray, multiverseScan, collectionRows, refreshCollections, tvNext, upcomingEvents, computeAlerts, backgroundRun, fmtWhen, hashId, geminiState, resetGemini, mvGroup, mvExpand, multiverses, mvMap, mvAlias, mvPending, mvDone, geminiProvider, vpnOptions, bestVpn, worldFrom, worldCountries, jwQuery, flag: FLAGS, VPN_DEFAULT, manualScan, franchiseBatches, verifyPrompt, parseVerify, newsBatches, newsPrompt, parseCanonRows, franchiseName, releaseList, releaseKey, parseDate, seeds, rankGeminiModel, resolveGeminiModel, syncAll, sleep,
   };

@@ -10,13 +10,16 @@
   const norm = t => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/&/g, "and").replace(/^(the|a|an|il|lo|la|i|gli|le)\s+/, "").replace(/[^a-z0-9]/g, "");
   const yearOf = d => { const m = String(d || "").match(/(18|19|20)\d\d/); return m ? +m[0] : null; };
   const day = d => { if (!d) return ""; if (typeof d === "number") return new Date(d).toISOString().slice(0, 10); const s = String(d).trim(); if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10); const t = Date.parse(s); return isNaN(t) ? "" : new Date(t).toISOString().slice(0, 10); };
-  const epKey = (s, e) => `${s}:${e}`;
+  // Episodes ticked in bulk without a real day (catching up, "mark the whole series watched", an import that only
+// knows the last day): their date is the day of the click, not the day they were watched, so stats leave them out.
+const markBulk = (it, k) => { (it.bulk || (it.bulk = {}))[k] = 1; };
+const epKey = (s, e) => `${s}:${e}`;
   const stripTags = s => String(s || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 
   function blank(o) {
     return Object.assign({ id: "", type: "movie", title: "", orig: "", year: null, poster: "", overview: "", genres: [], runtime: null, network: "",
       tmdb: null, tvmaze: null, imdb: null, itunes: null, status: "watchlist", rating: 0, added: Date.now(), updated: Date.now(),
-      watches: [], eps: {}, epl: null, epChecked: 0, ended: false, notes: "", src: "", anime: false, mal: null }, o || {});
+      watches: [], eps: {}, bulk: {}, epl: null, epChecked: 0, ended: false, notes: "", src: "", anime: false, mal: null }, o || {});
   }
   const idFor = o => (o.mal && !o.tmdb ? `mal:${o.type}:${o.mal}` : o.tmdb ? `tm:${o.type}:${o.tmdb}` : o.tvmaze ? `tvm:${o.tvmaze}` : o.imdb ? `im:${o.imdb}` : o.itunes ? `it:${o.itunes}` : `x:${o.type}:${norm(o.title)}|${o.year || ""}`);
 
@@ -101,7 +104,7 @@
       it.status = st; it.updated = Date.now();
       if (st === "watched" && it.type === "movie" && !it.watches.length) { it.watches.push(day(date) || today()); this.q(it, { op: "watch", d: it.watches[0] }); }
       if (st === "watched" && it.type === "show" && prev !== "watched" && !it.watches.length) {
-        if (it.epl) for (const [s, e, d] of it.epl) if (!d || d <= today()) { if (!it.eps[epKey(s, e)]) it.eps[epKey(s, e)] = day(date) || today(); }
+        if (it.epl) for (const [s, e, d] of it.epl) if (!d || d <= today()) { const k = epKey(s, e); if (!it.eps[k]) { it.eps[k] = day(date) || today(); if (!day(date)) markBulk(it, k); } }
         it.watches.push(day(date) || today());
       }
       if (st === "watchlist" && it.type === "movie") it.watches = [];
@@ -121,12 +124,12 @@
     rewatch(it, date) {
       if (it.type !== "show") return this.logWatch(it, date);
       if (Object.keys(it.eps).length && this.caughtUp(it) && !it.watches.includes(lastEpDay(it))) it.watches.push(lastEpDay(it) || day(date) || today());
-      it.eps = {}; it.status = "watching"; it.updated = Date.now();
+      it.eps = {}; it.bulk = {}; it.status = "watching"; it.updated = Date.now();
       return it.watches.length;
     }
     toggleEp(it, s, e, date) {
       const k = epKey(s, e);
-      if (it.eps[k]) { delete it.eps[k]; this.q(it, { op: "unep", s, e }); } else { it.eps[k] = day(date) || today(); this.q(it, { op: "ep", s, e, d: it.eps[k] }); }
+      if (it.eps[k]) { delete it.eps[k]; if (it.bulk) delete it.bulk[k]; this.q(it, { op: "unep", s, e }); } else { it.eps[k] = day(date) || today(); this.q(it, { op: "ep", s, e, d: it.eps[k] }); }
       this.afterEps(it);
       return !!it.eps[k];
     }
@@ -134,7 +137,7 @@
     markUpTo(it, s, e, date) {
       for (const [ss, ee, d] of it.epl || []) {
         if (ss === 0) continue;
-        if (ss < s || (ss === s && ee <= e)) { if (!it.eps[epKey(ss, ee)] && (!d || d <= today())) { it.eps[epKey(ss, ee)] = day(date) || today(); this.q(it, { op: "ep", s: ss, e: ee, d: it.eps[epKey(ss, ee)] }); } }
+        if (ss < s || (ss === s && ee <= e)) { if (!it.eps[epKey(ss, ee)] && (!d || d <= today())) { it.eps[epKey(ss, ee)] = day(date) || today(); if (!day(date) && !(ss === s && ee === e)) markBulk(it, epKey(ss, ee)); this.q(it, { op: "ep", s: ss, e: ee, d: it.eps[epKey(ss, ee)] }); } }
       }
       this.afterEps(it);
     }
@@ -142,7 +145,7 @@
       for (const [ss, ee, d] of it.epl || []) if (ss === s && (!d || d <= today())) {
         const k = epKey(ss, ee);
         if (on && !it.eps[k]) { it.eps[k] = day(date) || today(); this.q(it, { op: "ep", s: ss, e: ee, d: it.eps[k] }); }
-        else if (!on && it.eps[k]) { delete it.eps[k]; this.q(it, { op: "unep", s: ss, e: ee }); }
+        else if (!on && it.eps[k]) { delete it.eps[k]; if (it.bulk) delete it.bulk[k]; this.q(it, { op: "unep", s: ss, e: ee }); }
       }
       this.afterEps(it);
     }
@@ -550,7 +553,7 @@
     return out.length ? out.join(", ") : "nothing Trakt needed";
   }
 
-  const API = { adoptKey, settleShow, searchImdb, searchAnime, fromJikan, animeDetails, traktPush, Library, STATUSES, LABEL, search, details, stale, fromTmdb, fromTvmaze, fromItunes, norm, day, yearOf, epKey, blank, idFor };
+  const API = { markBulk, adoptKey, settleShow, searchImdb, searchAnime, fromJikan, animeDetails, traktPush, Library, STATUSES, LABEL, search, details, stale, fromTmdb, fromTvmaze, fromItunes, norm, day, yearOf, epKey, blank, idFor };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   else root.Lib = API;
 })(typeof window !== "undefined" ? window : globalThis);
