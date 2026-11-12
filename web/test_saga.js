@@ -72,7 +72,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
       "books.json": JSON.stringify({ app: "books", v: 1, books: [{ id: "b1", title: "Dune", authors: ["Frank Herbert"], status: "read", finished: Date.parse("2026-03-03"), started: Date.parse("2026-02-01"), pages: 600, rating: 9 }], goal: { year: 2026, n: 20 } }),
       "features.json": JSON.stringify({ dw: 1 }) },
   };
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ args: ["--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost"] }) // no outside network: the same result on any machine;
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2 });
   await ctx.addInitScript(mock, seed);
   const errors = [];

@@ -61,7 +61,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
 
 (async () => {
   const seed = { ls: {}, files: { "canonsync.json": JSON.stringify({ v: 1, settings: { auto_sync: "0", preset_v1: "1", bg_enabled: "0", notif_asked: "1" }, items: [] }) } };
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ args: ["--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost"] }) // no outside network: the same result on any machine;
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 } });
   await ctx.addInitScript(mock, seed);
   const errors = [];

@@ -33,7 +33,7 @@ const mock = (BC) => {
 };
 const ok = (c, m) => { if (!c) throw new Error(m); };
 (async () => {
-  const b = await chromium.launch();
+  const b = await chromium.launch({ args: ["--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost"] }) // no outside network: the same result on any machine;
   const ctx = await b.newContext({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2 });
   await ctx.addInitScript(mock, BC);
   const p = await ctx.newPage();

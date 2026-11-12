@@ -32,7 +32,7 @@ const mock = () => {
   if (!window.Banta) window.__bantaMem = { "features.json": "{\"gemini\":1}" };
 };
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ args: ["--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost"] }) // no outside network: the same result on any machine;
   const errors = [];
   const page = async (w, h) => { const p = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 2 }); p.on("pageerror", e => errors.push(String(e))); await p.addInitScript(mock); return p; };
   const check = async (p, label) => {

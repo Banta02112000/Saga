@@ -78,7 +78,7 @@ async function runProbe(page, url, timeoutMs) {
 }
 
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ args: ["--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost"] }) // no outside network: the same result on any machine;
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, isMobile: true });
   const page = await ctx.newPage();
   const navs = [];

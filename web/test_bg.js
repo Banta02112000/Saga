@@ -2,7 +2,7 @@
 const { chromium } = require("playwright");
 const path = require("path");
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ args: ["--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost"] }) // no outside network: the same result on any machine;
   const page = await (await browser.newContext()).newPage();
   const errors = [];
   page.on("pageerror", e => errors.push(String(e)));

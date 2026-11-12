@@ -10,7 +10,7 @@ const srv = http.createServer((q, r) => { const u = decodeURIComponent(q.url.spl
   if (!f || !fs.existsSync(f)) { r.writeHead(404); return r.end(); } r.writeHead(200, { "Content-Type": { ".html": "text/html", ".js": "application/javascript", ".css": "text/css" }[path.extname(f)] || "application/octet-stream" }); fs.createReadStream(f).pipe(r); }).listen(0);
 const ok = (c, m) => { if (!c) throw new Error(m); };
 (async () => {
-  const b = await chromium.launch();
+  const b = await chromium.launch({ args: ["--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost"] }) // no outside network: the same result on any machine;
   const page = async (ctx, u) => { const p = await ctx.newPage(); await p.goto(`http://127.0.0.1:${srv.address().port}${u}`); await p.waitForTimeout(600); return p; };
   const base = () => window.Android = new Proxy({}, { get: () => () => "" });
 
