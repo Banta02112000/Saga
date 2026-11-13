@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.5.4.7";
+  const VERSION = "0.5.4.8";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -229,6 +229,9 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.5.4.8", ["Diary: everything you watched, played and read in one list, newest first, by month, with filters (Home › Recently › Diary). A day's episodes of one series show as one line.",
+      "Your year and the diary now come from one shared activity history, so their numbers always agree.",
+      "Imports: before anything is written, Saga shows what each file is, how many entries it has and how many are already in your library. Every import can be undone afterwards (Settings › Import)."]],
     ["0.5.4.7", ["Sync and the frozen screen: with 1,000 or more IMDb ratings already in Saga, a sync reads only your newest 500 instead of every page, and IMDb lists are asked for straight from IMDb's API without opening their page. Settings › IMDb › Read all my ratings again reads the whole list when you want it.",
       "New app icon: your chosen picture, used as it is."]],
     ["0.5.4.6", ["Sync: reading IMDb lists no longer redraws thousands of rows on the screen engine the app shares, and each page of results is processed as it arrives instead of all at the end. These were the long freezes during the IMDb part of a sync.",
@@ -1409,6 +1412,7 @@
           <button class="btn" data-action="hubsteam" ${ui.job ? "disabled" : ""}>Import Steam</button></div>
         <details class="report"><summary>Where to get each export</summary>${HUB.map(([n, t]) => `<p class="small"><b>${esc(n)}</b> · ${esc(t)}</p>`).join("")}</details>
         ${db.get("hub_last") ? `<p class="small muted" style="margin:0">${esc(db.get("hub_last"))}</p>` : ""}
+        ${db.get("import_undo_at") ? `<button class="btn small" data-action="undoimport">${icon("undo")}Undo the ${esc(db.get("import_undo_what", "last"))} import of ${esc(new Date(+db.get("import_undo_at")).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }))}</button>` : ""}
       </section>`;
   }
   // games and books are handed to their tabs through a shared file and a message
@@ -1461,12 +1465,44 @@
     db.flush();
     return lines;
   }
+  // Before anything is written: what each file is, how many entries, and how many are already in Saga
+  function previewImport(files) {
+    const rows = [];
+    let total = 0;
+    lib.withIndex(() => {
+      for (const f of files) {
+        if (f.error) { rows.push(`${f.name}: can't be read (${f.error})`); continue; }
+        let d;
+        try { d = Imports.detect(f); } catch (e) { rows.push(`${f.name}: ${e.message}`); continue; }
+        if (d.target === "watch") {
+          const rs = d.rows || []; let have = 0;
+          for (const r of rs) if (lib.find({ type: r.type || "movie", title: r.title, year: r.year, imdb: r.imdb, tmdb: r.tmdb, mal: r.mal })) have++;
+          total += rs.length;
+          rows.push(`${d.kind}: ${fmt(rs.length)} films and series, ${fmt(have)} already in your library, ${fmt(rs.length - have)} new`);
+        } else if (d.target === "games") {
+          const rs = d.rows || []; const have = rs.filter(r => games.find(r)).length; total += rs.length;
+          rows.push(`${d.kind}: ${fmt(rs.length)} games, ${fmt(have)} already in Games, ${fmt(rs.length - have)} new${feat("games") ? "" : " (switch Games on in Features first)"}`);
+        } else if (d.target === "books") {
+          const n = (d.rows || []).length; total += n;
+          rows.push(`${d.kind}: ${n ? fmt(n) + " books" : "books"} for Books${feat("books") ? "" : " (switch Books on in Features first)"}`);
+        } else if (d.target === "canon") { total++; rows.push(`${f.name}: ${d.kind === "file" ? "franchise mapping" : d.kind} records for the canon finder`); }
+        else rows.push(`${f.name}: not recognised`);
+      }
+    });
+    const ok = total > 0;
+    $("#overlay").innerHTML = `<div class="scrim" data-action="dismiss"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlgT">
+      <h3 id="dlgT">${ok ? "Import these?" : "Nothing to import"}</h3>${rows.map(r => `<p class="small" style="margin:6px 0">${esc(r)}</p>`).join("")}
+      ${ok ? `<p class="small muted">Ratings, notes and progress you set in Saga are kept. A copy of your data from just before is saved, so you can undo this import in Settings › Import.</p>` : ""}
+      <div class="actions"><button class="btn quiet" data-action="dismiss">${ok ? "Cancel" : "Close"}</button>${ok ? `<button class="btn primary" id="dlgOk">Import</button>` : ""}</div></div></div>`;
+    if (ok) $("#dlgOk").onclick = () => { closeOverlay(); runJob("Import", async () => { keepBeforeImport("export file"); return (await hubImport(files)).join(" · "); }); };
+  }
   async function hubSteam() {
     const v = (($("#steamProfile") || {}).value || "").trim();
     const url = Imports.steamProfileUrl(v);
     if (!url) return toast("Type your Steam profile link or name");
     db.set("steam_profile", v);
     await runJob("Import", async () => {
+      keepBeforeImport("Steam");
       const rows = await Imports.steamLibrary(C.robust(Native.http, { timeout: 30000, tries: 2 }), v, db.get("steam_key"));
       const ggr = handOver("games", "", { rows, kind: "Steam library" });
       db.set("steam_sync_at", String(Date.now()));
@@ -2195,7 +2231,7 @@
     const cont = homeContinue();
     if (cont.length) parts.push(`<section>${Kit.head("Continue")}${Kit.rail(cont)}</section>`);
     const rec = recentAll(16);
-    if (rec.length) parts.push(`<section>${Kit.head("Recently watched, played and read", `<button class="btn quiet small" data-action="recentall">All</button>`)}${Kit.rail(rec.map(recentTile))}</section>`);
+    if (rec.length) parts.push(`<section>${Kit.head("Recently watched, played and read", `<button class="btn quiet small" data-action="recentall">Diary</button>`)}${Kit.rail(rec.map(recentTile))}</section>`);
     if (db.get("home_calendar", "1") === "1") {
       const soon = comingUp(14);
       if (soon.length) parts.push(`<section>${Kit.head("Coming up", `<button class="btn quiet small" data-action="go" data-sec="upcoming">Calendar</button>`)}${Kit.rail(soon.map(x => x.html))}</section>`);
@@ -2257,19 +2293,39 @@
   }
 
   // ---- your year: films, episodes, games, books and stories, by month
+  // ---- activity history: one dated list across films, series, games, books and Doctor Who (activity.js)
+  function activity() {
+    return Activity.build({ library: lib, games: secOn("games") ? games : null, books: secOn("books") ? books : null, readsOf: BC.readsOf, gameCover: GC.COVER,
+      stories: secOn("timeline") ? Kit.mods.timeline.recent(99999) : null });
+  }
+  const openAttrs = e => e.app === "watch" ? `data-action="libopen" data-id="${esc(e.id)}"` : e.app === "games" ? `data-action="gopen" data-id="${esc(e.id)}"` : e.app === "books" ? `data-action="bopen" data-id="${esc(e.id)}"` : "";
   function yearCounts(year) {
-    const ys = String(year), m = Array(12).fill(0);
-    let films = 0, episodes = 0, rewatches = 0, minutes = 0, gamesN = 0, gameHours = 0, booksN = 0, pages = 0, stories = 0, bulkEps = 0;
-    const top = [];
-    const mo = d => { const k = +String(d).slice(5, 7) - 1; if (k >= 0) m[k]++; };
-    for (const it of lib.all()) {
-      if (it.type === "movie") it.watches.forEach((d, i) => { if (String(d).startsWith(ys)) { films++; if (i) rewatches++; minutes += it.runtime || 110; mo(d); if (it.rating >= 8) top.push({ t: it.title, r: it.rating, img: it.poster, act: `data-action="libopen" data-id="${esc(it.id)}"`, kind: "movie" }); } });
-      else { let any = 0; for (const [k, d] of Object.entries(it.eps)) if (String(d).startsWith(ys)) { if (it.bulk && it.bulk[k]) { bulkEps++; continue; } episodes++; minutes += it.runtime || 45; mo(d); any = 1; } if (any && it.rating >= 8) top.push({ t: it.title, r: it.rating, img: it.poster, act: `data-action="libopen" data-id="${esc(it.id)}"`, kind: "show" }); }
+    const c = Activity.year(activity(), year);
+    c.top = c.top.map(e => ({ t: e.t, r: e.rating, img: e.img, act: openAttrs(e), kind: e.app === "watch" ? (e.kind === "episode" ? "show" : "movie") : e.app === "games" ? "game" : "book" }));
+    return c;
+  }
+  // Diary: everything, newest first, by month; a day's episodes of one series on one line
+  const DIARY_KINDS = [["all", "All"], ["film", "Films"], ["episode", "Episodes"], ["game", "Games"], ["book", "Books"], ["story", "Doctor Who"]];
+  function openDiary() {
+    const f = ui.diaryF || "all", n = ui.diaryN || 200;
+    const all = activity().filter(e => !e.bulk);
+    const ev = Activity.grouped(all.filter(e => f === "all" || e.kind === f || (f === "film" && e.kind === "rewatch")));
+    const MONTH = d => new Date(d.slice(0, 7) + "-15T12:00:00").toLocaleDateString(lang() === "it" ? "it-IT" : "en-GB", { month: "long", year: "numeric" });
+    const ic = e => e.app === "games" ? "pad" : e.app === "books" ? "book" : e.app === "watch" ? "eye" : "check";
+    let html = "", cur = "";
+    for (const e of ev.slice(0, n)) {
+      const mk = e.d.slice(0, 7);
+      if (mk !== cur) { cur = mk; html += `<div class="kicker" style="margin:16px 0 6px">${esc(MONTH(e.d))}</div>`; }
+      const what = e.kind === "rewatch" ? "Rewatched" : e.kind === "film" ? "Film" : e.kind === "episode" ? "Episode" : e.kind === "game" ? "Game" : e.kind === "book" ? "Book" : "Story";
+      html += `<div class="item" ${openAttrs(e)}><span class="xic ${e.app === "games" ? "games" : e.app === "books" ? "books" : "canon"}">${icon(ic(e))}</span>
+        <div class="grow"><div class="row"><b class="grow ell">${esc(e.t)}</b><span class="small muted">${esc(shortDay(e.d))}</span></div><div class="small muted ell">${esc(what)}${e.sub ? " · " + esc(e.sub) : ""}${e.rating ? ` · ★ ${e.rating / 2}` : ""}</div></div></div>`;
     }
-    for (const g of games.visible()) g.plays.forEach(d => { if (String(d).startsWith(ys)) { gamesN++; gameHours += g.hours || 0; mo(d); if (g.rating >= 8) top.push({ t: g.title, r: g.rating, img: g.steam ? GC.COVER(g.steam) : "", act: `data-action="gopen" data-id="${esc(g.id)}"`, kind: "game" }); } });
-    for (const b of books.books) for (const r of BC.readsOf(b)) { const d = r.finished ? new Date(r.finished).toISOString().slice(0, 10) : ""; if (d.startsWith(ys)) { booksN++; pages += b.pages || 0; mo(d); if (b.rating >= 8) top.push({ t: b.title, r: b.rating, img: (b.cover || "").replace(/^http:/, "https:"), act: `data-action="bopen" data-id="${esc(b.id)}"`, kind: "book" }); } }
-    if (secOn("timeline")) for (const x of Kit.mods.timeline.recent(9999)) if (x.date.startsWith(ys)) { stories++; mo(x.date); }
-    return { year, months: m, films, episodes, bulkEps, rewatches, hours: Math.round(minutes / 60), games: gamesN, gameHours: Math.round(gameHours), books: booksN, pages, stories, top: top.sort((a, b) => b.r - a.r).slice(0, 20) };
+    const bulk = activity().filter(e => e.bulk).length;
+    sheet(`<h3 style="font:800 24px/1.1 var(--display);margin:4px 0 6px">Diary</h3>
+      <p class="small muted" style="margin:0 0 10px">${fmt(all.length)} things watched, played and read, newest first${bulk ? `. ${fmt(bulk)} episodes ticked in bulk without a date aren't listed` : ""}.</p>
+      <div class="chips">${DIARY_KINDS.map(([k, l]) => `<button class="chip" data-action="diaryf" data-v="${k}" aria-pressed="${f === k}">${l}</button>`).join("")}</div>
+      ${html || '<p class="muted">Nothing here yet.</p>'}
+      ${ev.length > n ? `<button class="btn block" style="margin-top:12px" data-action="diarymore">Show more (${fmt(ev.length - n)} left)</button>` : ""}`);
   }
   function renderYear() {
     const y = ui.year || new Date().getFullYear(), c = yearCounts(y), max = Math.max(1, ...c.months);
@@ -2664,6 +2720,17 @@
       if (kept) { db.set("restore_undo_at", String(Date.now())); db.flush(); }
     });
   }
+  // Every import keeps a copy of the data from just before it, so the latest one can be undone (Settings › Import).
+  function keepBeforeImport(what) {
+    if (SH.write("before_import.json", bundle(false))) { db.set("import_undo_at", String(Date.now())); db.set("import_undo_what", what || "import"); db.flush(); }
+  }
+  function undoImport() {
+    const t = SH.read("before_import.json");
+    if (!t) { toast("The copy from before that import is no longer on this phone"); db.set("import_undo_at", ""); render(); return; }
+    confirmDialog("Undo the last import?", `Everything goes back to how it was just before the ${db.get("import_undo_what", "import")} import of ${new Date(+db.get("import_undo_at")).toLocaleString()}. Changes you made after it are undone too.`, "Undo import", () => {
+      try { applyBackup(readBackup2(t)); SH.remove("before_import.json"); db.set("import_undo_at", ""); db.flush(); render(); toast("Import undone"); } catch (e) { toast(e.message); }
+    });
+  }
   function undoRestore() {
     const t = SH.read("before_restore.json");
     if (!t) { toast("The copy from before the restore is no longer on this phone"); db.set("restore_undo_at", ""); render(); return; }
@@ -2815,6 +2882,7 @@
     const files = await Native.pick(kind !== "trakt" && kind !== "refract", kind === "trakt" ? TRAKT_SKIP : "");
     if (!files.length) return;
     await runJob("Import", async progress => {
+      keepBeforeImport(kind === "trakt" ? "Trakt" : kind === "refract" ? "Refract" : kind === "franchise" ? "franchise file" : "IMDb");
       let total = 0;
       const errs = [];
       for (let i = 0; i < files.length; i++) {
@@ -2977,6 +3045,7 @@
       case "backupfile": if (window.Android && Android.pickBackupFile) Android.pickBackupFile(`saga-backup.json`); else toast("Only in the app"); break;
       case "backupnow": backupToFile(true).then(ok => { toast(ok ? "Backup written" : "Couldn't write the backup file: choose it again"); render(); }); break;
       case "undorestore": undoRestore(); break;
+      case "undoimport": undoImport(); break;
       case "tab": closeOverlay(); if (el.dataset.tab === "settings") ui.setGroup = SET_ANCHOR[el.dataset.scroll] || ""; setTab(el.dataset.tab); if (el.dataset.scroll) setTimeout(() => { const t = document.getElementById(el.dataset.scroll); if (t) t.scrollIntoView({ block: "start" }); }, 30); break;
       case "sync": doSync(); break;
       case "import": doImport(el.dataset.kind); break;
@@ -3078,9 +3147,11 @@
       case "orderget": orderGet(el.dataset.via); break;
       case "trakt": { const c = ui.sheetC; closeOverlay(); if (c) traktDo(c, el.dataset.k); break; }
       case "backupsave": saveBackup(); break;
-      case "hubpick": Native.pick(true).then(files => { if (!files.length) return; runJob("Import", async () => (await hubImport(files)).join(" · ")); }); break;
+      case "hubpick": Native.pick(true).then(files => { if (!files.length) return; previewImport(files); }); break;
       case "hubsteam": hubSteam(); break;
-      case "recentall": sheet(`<h3 style="font:800 24px/1.1 var(--display);margin:4px 0 14px">Recently watched, played and read</h3>${Kit.grid(recentAll(90).map(recentTile)) || '<p class="muted">Nothing yet.</p>'}`); break;
+      case "diaryf": ui.diaryF = el.dataset.v; ui.diaryN = 200; openDiary(); break;
+      case "diarymore": ui.diaryN = (ui.diaryN || 200) + 300; openDiary(); break;
+      case "recentall": openDiary(); break;
       case "backuppick": Native.pick(false).then(files => { const f = files[0]; if (!f) return; if (f.text === undefined) return toast("That's a ZIP, not a backup file"); restoreFrom(f.text); }); break;
       case "backupauto": { const t = SH.read(`auto_backup_${el.dataset.slot}.json`); if (t) restoreFrom(t); else toast("That copy is no longer on this phone"); break; }
       case "mvlist": ui.mvOpen = !ui.mvOpen; render(); break;

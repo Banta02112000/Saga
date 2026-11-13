@@ -266,7 +266,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.5.4.7", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.5.4.8", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();
@@ -373,10 +373,30 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     { name: "letterboxd.zip", zip: { "diary.csv": "Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date\n2024-01-02,Heat,1995,https://boxd.it/x,4.5,,,2024-01-01\n" }, zipOther: [] },
     { name: "HLTB.csv", text: "Title,Platform,Playing,Backlog,Replay,Custom,Completed,Retired,Review,Completion Date\nZzz Imported Quest,PC,0,0,0,0,1,0,80,2024-05-05\n" },
     { name: "goodreads_library_export.csv", text: "Book Id,Title,Author,ISBN13,My Rating,Exclusive Shelf,Date Read\n1,Hyperion,Dan Simmons,,5,read,2020/01/02\n" }]; (__app.ui.setGroup = "*", __app.go("settings")); });
+  const gamesBefore = await A(() => __app.games.games.length);
   await pg.click('[data-action="hubpick"]');
+  // 0.5.4.8: a preview first, nothing written until Import is tapped
+  await pg.waitForSelector("#dlgOk");
+  const pv = await A(() => document.querySelector("#overlay .dialog").textContent);
+  ok(/Letterboxd[^:]*: 1 films and series, 1 already in your library, 0 new/.test(pv) && /1 games, 0 already in Games, 1 new/.test(pv), "import preview: " + pv.slice(0, 300));
+  const heatBefore = await A(() => JSON.stringify((__app.lib.all().find(x => x.title === "Heat") || {}).watches || null));
+  ok(heatBefore.indexOf("2024-01-01") < 0 && await A(() => !__app.games.games.some(g => g.title === "Zzz Imported Quest")), "nothing written before Import is tapped");
+  await pg.click("#dlgOk");
   await pg.waitForFunction(() => !__app.ui.job && /Library:/.test(__app.db.get("hub_last") || ""), null, { timeout: 8000 });
   ok(await A(() => __app.games.games.some(g => g.title === "Zzz Imported Quest" && g.status === "done" && g.plays[0] === "2024-05-05") && __app.books.books.some(b => b.title === "Hyperion") && __app.lib.all().find(x => x.title === "Heat").watches.includes("2024-01-01")), "hub put each file in the right section: " + await A(() => __app.db.get("hub_last")));
 
+  // 0.5.4.8: the import can be undone
+  { await A(() => (__app.ui.setGroup = "*", __app.go("settings")));
+    await pg.click('[data-action="undoimport"]'); await pg.click("#dlgOk");
+    const u = await A(() => ({ heat: JSON.stringify((__app.lib.all().find(x => x.title === "Heat") || {}).watches || null).indexOf("2024-01-01") >= 0, quest: __app.games.games.some(g => g.title === "Zzz Imported Quest"), hyp: __app.books.books.some(b => b.title === "Hyperion"), btn: !!document.querySelector('[data-action="undoimport"]') }));
+    ok(!u.heat && !u.quest && !u.hyp && !u.btn, "undo import: " + JSON.stringify(u));
+    ok(await A(() => __app.games.games.length) === gamesBefore, "games back to before the import"); }
+  // 0.5.4.8: the diary lists everything, newest first, and Your year agrees with it
+  { const d = await A(() => { __app.go("home"); const b = document.querySelector('[data-action="recentall"]'); b.click();
+      const txt = document.querySelector("#overlay").textContent, items = document.querySelectorAll("#overlay .item").length;
+      document.querySelector('[data-action="diaryf"][data-v="game"]').click(); const g = document.querySelectorAll("#overlay .item").length; window.Saga.close();
+      return { diary: /Diary/.test(txt), items, g }; });
+    ok(d.diary && d.items >= 5 && d.g >= 1 && d.g < d.items, "diary: " + JSON.stringify(d)); }
   // ---- backup: file, round trip
   await A(() => (__app.ui.setGroup = "*", __app.go("settings")));
   await pg.click('[data-action="backupfile"]');

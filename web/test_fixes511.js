@@ -1,6 +1,20 @@
 const assert = require("assert");
 const C = require("./core.js"), L = require("./library.js"), I = require("./imports.js");
 (async () => {
+  // one activity history across media; Your year adds it up; bulk ticks left out; a day's episodes grouped
+  { const Act = require("./activity.js"); const lb = new L.Library(null);
+    const m = lb.add({ type: "movie", title: "Heat", year: 1995, runtime: 170 }, "watchlist").item; lb.setStatus(m, "watched", "2025-03-01"); m.watches.push("2025-06-01"); m.rating = 9;
+    const sh = lb.add({ type: "show", title: "Show", year: 2020, runtime: 50 }, "watching").item; sh.epl = [[1, 1, "2020-01-01"], [1, 2, "2020-01-08"], [1, 3, "2020-01-15"]];
+    lb.toggleEp(sh, 1, 1, "2025-04-02"); lb.toggleEp(sh, 1, 2, "2025-04-02"); sh.eps["1:3"] = "2025-04-05"; L.markBulk(sh, "1:3");
+    const games = { visible: () => [{ id: "g1", title: "Hades", plays: ["2025-02-02", "2025-07-07"], hours: 20, rating: 8 }] };
+    const books = { books: [{ id: "b1", title: "Dune", status: "read", finished: Date.parse("2025-05-05T12:00:00Z"), pages: 600, rating: 10 }] };
+    const ev = Act.build({ library: lb, games, books, readsOf: b => [{ finished: b.finished }], stories: [{ k: "s1", t: "Rose", date: "2025-01-01" }] });
+    const y = Act.year(ev, 2025);
+    assert.deepStrictEqual([y.films, y.rewatches, y.episodes, y.bulkEps, y.games, y.books, y.pages, y.stories, y.hours, y.gameHours], [2, 1, 2, 1, 2, 1, 600, 1, 7, 40]);
+    assert.strictEqual(y.months.reduce((a, b) => a + b, 0), 8);
+    assert.deepStrictEqual(y.top.map(e => e.t), ["Dune", "Heat", "Hades"]);
+    const g = Act.grouped(ev.filter(e => !e.bulk)); const ep = g.find(e => e.kind === "episode"); assert.ok(ep.n === 2 && /S1 E1–E2/.test(ep.sub), ep.sub);
+    assert.strictEqual(ev[0].d, "2025-07-07"); }
   // IMDb lists come straight from IMDb's API first (no page on the screen's engine); the page is the fallback
   { let browsed = 0;
     const edges = n => Array.from({ length: n }, (_, i) => ({ listItem: { id: "tt" + (7000000 + i), titleText: { text: "T" + i }, releaseYear: { year: 2001 }, titleType: { id: "movie" }, releaseDate: { year: 2001, month: 5, day: 4 }, runtime: { seconds: 5400 } } }));

@@ -5,7 +5,7 @@ const OUT = process.argv[2] || "/tmp/shots";
 const STAGE = path.join(OUT, "blank-stage");
 fs.rmSync(STAGE, { recursive: true, force: true }); fs.mkdirSync(STAGE, { recursive: true });
 execSync(`python3 ${path.join(__dirname, "../legacy/prepare.py")} --out ${STAGE} --scheme canonsyncstarter --blank`);
-for (const f of ["index.html", "style.css", "saga.css", "core.js", "extras.js", "app.js", "library.js", "imports.js", "kit.js", "images.js", "games.js", "games-ui.js", "books-ui.js", "timeline.js", "dw-data.js"]) fs.copyFileSync(path.join(__dirname, f), path.join(STAGE, f));
+for (const f of ["index.html", "style.css", "saga.css", "core.js", "extras.js", "app.js", "library.js", "activity.js", "imports.js", "kit.js", "images.js", "games.js", "games-ui.js", "books-ui.js", "timeline.js", "dw-data.js"]) fs.copyFileSync(path.join(__dirname, f), path.join(STAGE, f));
 for (const f of ["core.js", "app.js"]) fs.writeFileSync(path.join(STAGE, f), fs.readFileSync(path.join(STAGE, f), "utf8").replace(/PKCE \/ Public Client \(App 000001\)/g, "PKCE (your own Trakt app)").replace(/OAuth OOB \(App 000002\)/g, "OAuth with secret (your own Trakt app)"));
 fs.writeFileSync(path.join(STAGE, "preset.js"), "window.CANONSYNC_PRESET = {};\n");
 fs.writeFileSync(path.join(STAGE, "core.js"), fs.readFileSync(path.join(STAGE, "core.js"), "utf8").replace(/client_id: "YOUR_TRAKT_CLIENT_ID_PKCE"/, 'client_id: ""').replace(/client_id: "YOUR_TRAKT_CLIENT_ID_OOB"/, 'client_id: ""'));
