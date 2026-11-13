@@ -3037,11 +3037,35 @@ ${blocks.join("\n\n")}`;
     groq: { label: "Groq", base: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile", keys: "console.groq.com › API keys (free tier)" },
     openrouter: { label: "OpenRouter", base: "https://openrouter.ai/api/v1", model: "openrouter/auto", keys: "openrouter.ai › Keys. The default lets OpenRouter pick, which can be a paid model: type a model ending in :free to stay free" },
     deepseek: { label: "DeepSeek", base: "https://api.deepseek.com/v1", model: "deepseek-chat", keys: "platform.deepseek.com › API keys (paid, cheap)" },
+    // your own server (on your network or through Tailscale): no key for Ollama, an API key from Open WebUI
+    ollama: { label: "Ollama (your own server)", base: "", model: "", keys: "", local: true, noKey: true, api: "ollama", hintBase: "http://your-pi.your-tailnet.ts.net:11434" },
+    openwebui: { label: "Open WebUI (your own server)", base: "", model: "", keys: "Open WebUI › Settings › Account › API keys", local: true, api: "openwebui", hintBase: "https://your-pi.your-tailnet.ts.net" },
     custom: { label: "Other (OpenAI-compatible)", base: "", model: "", keys: "the service's own site" },
   };
+  // the address as typed (with or without a trailing /v1 or /api), reduced to the server's own address
+  const serverBase = b => String(b || "").trim().replace(/\/+$/, "").replace(/\/(v1|api|ollama)$/i, "");
+  // which models the server has; also the connection test in Settings
+  async function localModels(http, cfg) {
+    const p = AI_PRESETS[cfg.preset] || {}, base = serverBase(cfg.base), key = String(cfg.key || "").trim();
+    if (!base) throw new Error("Type your server's address first");
+    const url = p.api === "ollama" ? `${base}/api/tags` : `${base}/api/models`;
+    const r = await http("GET", url, { timeout: 20000, headers: key ? { Authorization: `Bearer ${key}` } : {} });
+    if (r.status === 0) throw new Error(localNetHint(r.error, base));
+    if (r.status === 401 || r.status === 403) throw new Error(p.api === "openwebui" ? "Open WebUI refused the API key (create one in Open WebUI › Settings › Account › API keys)" : "the server refused the request");
+    if (r.status !== 200) throw new Error(`the server answered HTTP ${r.status} at ${url}`);
+    const j = JSON.parse(r.body || "{}");
+    const list = p.api === "ollama" ? (j.models || []).map(m => m.name || m.model) : (j.data || j.models || []).map(m => m.id || m.name);
+    return list.filter(Boolean);
+  }
+  function localNetHint(err, base) {
+    const e = String(err || "");
+    if (/cleartext|not permitted/i.test(e)) return `plain http:// is only allowed to Tailscale names (….ts.net) and this phone. Use your server's MagicDNS name, e.g. http://pi.your-tailnet.ts.net:11434, or turn on HTTPS with "tailscale serve" and use https://`;
+    return `can't reach ${base} (${e || "no connection"}). Is Tailscale on, on this phone and on the server? Is the server running?`;
+  }
   function compatProvider(db, http, cfg) {
     const p = AI_PRESETS[cfg.preset] || AI_PRESETS.openai;
     const base = String(cfg.base || p.base || "").replace(/\/+$/, ""), key = String(cfg.key || "").trim(), model = String(cfg.model || p.model || "").trim();
+    if (p.local) return localProvider(db, http, p, serverBase(base), key, model);
     if (!key) throw new Error(`Enter an API key for ${p.label} in Settings first.`);
     if (!base || !model) throw new Error("Enter the service's address and model in Settings first.");
     return {
@@ -3062,7 +3086,41 @@ ${blocks.join("\n\n")}`;
       },
     };
   }
-  async function compatScan(db, http, cfg, progress, only) { return canonScan(db, compatProvider(db, http, cfg), progress, 40, 25, only); }
+  // A model on your own server: Ollama's own chat API (so the context window can be set: its default is too small for
+  // the canon prompts and would cut them off silently), or Open WebUI's OpenAI-style one. Local models are slower,
+  // so each call may take up to 10 minutes and batches are smaller.
+  function localProvider(db, http, p, base, key, model) {
+    if (!base) throw new Error(`Type your ${p.label.replace(/ \(.*/, "")} server's address in Settings › AI first.`);
+    if (!model) throw new Error(`Pick a model in Settings › AI (Find models lists what ${p.label.replace(/ \(.*/, "")} has).`);
+    if (p.api === "openwebui" && !key) throw new Error("Open WebUI needs an API key: Open WebUI › Settings › Account › API keys.");
+    const SYS = "You are a precise transmedia canon expert. Follow the output format exactly.";
+    return {
+      origin: "ai", label: p.label.replace(/ \(.*/, ""), model, local: true,
+      prepare: async () => { db.set("ai_model_used", `${p.label.replace(/ \(.*/, "")} · ${model}`); },
+      call: async prompt => {
+        const ollama = p.api === "ollama";
+        const url = ollama ? `${base}/api/chat` : `${base}/api/chat/completions`;
+        const body = ollama
+          ? { model, stream: false, options: { temperature: 0.2, num_ctx: 16384, num_predict: 6000 }, messages: [{ role: "system", content: SYS }, { role: "user", content: prompt }] }
+          : { model, stream: false, temperature: 0.2, max_tokens: 6000, messages: [{ role: "system", content: SYS }, { role: "user", content: prompt }] };
+        const h = { "Content-Type": "application/json" };
+        if (key) h.Authorization = `Bearer ${key}`;
+        const r = await http("POST", url, { timeout: 600000, headers: h, body: JSON.stringify(body) });
+        if (r.status === 0) throw new Error(`${p.label}: ${localNetHint(r.error, base)}`);
+        let j = null; try { j = JSON.parse(r.body || "{}"); } catch (e) { /* not JSON */ }
+        if (r.status === 401 || r.status === 403) throw new Error(`${p.label} refused the API key`);
+        if (r.status === 404) throw new Error(`${p.label}: model “${model}” not found${ollama ? ` (pull it first: ollama pull ${model})` : ""}`);
+        if (r.status !== 200) throw new Error(`${p.label}: HTTP ${r.status}${j && j.error ? ` (${String(j.error.message || j.error).slice(0, 160)})` : ""}`);
+        const text = ollama ? j && j.message && j.message.content : j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+        if (!text) throw new Error(`${p.label} sent an empty answer`);
+        return String(text).replace(/<think>[\s\S]*?<\/think>/g, "").trim(); // reasoning models: keep only the answer
+      },
+    };
+  }
+  async function compatScan(db, http, cfg, progress, only) {
+    const pr = compatProvider(db, http, cfg);
+    return canonScan(db, pr, progress, pr.local ? 15 : 40, pr.local ? 40 : 25, only);
+  }
   async function claudeScan(db, http, key, model, progress, opts = {}) {
     key = String(key || "").trim();
     if (!key) throw new Error("Enter a Claude API key in Settings first.");
@@ -3303,7 +3361,7 @@ ${blocks.join("\n\n")}`;
     parseCsv, parseImdbText, importImdbCsv, importFranchiseFile, traktEntries, routeTraktFile, storeTrakt, importTraktZip,
     breathe, consumed, Exclusion, canonStatus, franchiseProgress, upNext, missingCanon, discrepancies, computeStats,
     apiTitles, pageOrApi, gqlInfo, authorizeUrl, exchangeCode, Trakt, traktSync, imdbList, imdbRatings, imdbWatchlist, imdbUserId, listIdFrom, walkTitles, browseTitles, pageExtract, pageProbe, probeFor, TMDB, collectionScan, season0Scan,
-    CONFIG, AI_PRESETS, compatProvider, compatScan, traktOne, traktEpRatings, parseLines, parseMvGroup, relevantNames, promptLine, netHint, robust, pool, details, titleInfo, justWatch, pickDates, dateSummary, bestOffer, cachedInfo, enrichInfo, platformRatings, ratingDiffs, withTimeout, watchProgress, continueWatching, testGemini, gemError, fillPosters, posterKey, aiState, resetAi, canonScan, claudeScan, claudeCall, claudeModels, rankClaudeModel, CLAUDE_DEFAULT, upcomingEpisodes, canonKeys, parseJsonArray, multiverseScan, collectionRows, refreshCollections, tvNext, upcomingEvents, computeAlerts, backgroundRun, fmtWhen, hashId, geminiState, resetGemini, mvGroup, mvExpand, multiverses, mvMap, mvAlias, mvPending, mvDone, geminiProvider, vpnOptions, bestVpn, worldFrom, worldCountries, jwQuery, flag: FLAGS, VPN_DEFAULT, manualScan, franchiseBatches, verifyPrompt, parseVerify, newsBatches, newsPrompt, parseCanonRows, franchiseName, releaseList, releaseKey, parseDate, seeds, rankGeminiModel, resolveGeminiModel, syncAll, sleep,
+    CONFIG, AI_PRESETS, compatProvider, compatScan, localModels, serverBase, traktOne, traktEpRatings, parseLines, parseMvGroup, relevantNames, promptLine, netHint, robust, pool, details, titleInfo, justWatch, pickDates, dateSummary, bestOffer, cachedInfo, enrichInfo, platformRatings, ratingDiffs, withTimeout, watchProgress, continueWatching, testGemini, gemError, fillPosters, posterKey, aiState, resetAi, canonScan, claudeScan, claudeCall, claudeModels, rankClaudeModel, CLAUDE_DEFAULT, upcomingEpisodes, canonKeys, parseJsonArray, multiverseScan, collectionRows, refreshCollections, tvNext, upcomingEvents, computeAlerts, backgroundRun, fmtWhen, hashId, geminiState, resetGemini, mvGroup, mvExpand, multiverses, mvMap, mvAlias, mvPending, mvDone, geminiProvider, vpnOptions, bestVpn, worldFrom, worldCountries, jwQuery, flag: FLAGS, VPN_DEFAULT, manualScan, franchiseBatches, verifyPrompt, parseVerify, newsBatches, newsPrompt, parseCanonRows, franchiseName, releaseList, releaseKey, parseDate, seeds, rankGeminiModel, resolveGeminiModel, syncAll, sleep,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Core;
   else root.Core = Core;

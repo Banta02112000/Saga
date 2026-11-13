@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.5.4.9";
+  const VERSION = "0.5.5";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -235,6 +235,8 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.5.5", ["AI: your own server. Settings › AI › Other AI services › Ollama or Open WebUI: type the address (through Tailscale, the MagicDNS name ending in .ts.net), tap Find models, pick one. Nothing leaves your network and nothing is paid per use.",
+      "Home: Picks for today, across films, series, games and books, each with its reason: series nearly finished, short films, games you own that are quick to finish, short books, things you paused, and genres you rate highly."]],
     ["0.5.4.9", ["Sync lag: Saga no longer rewrites its big files over and over while syncing. Saves are spaced out, the phone writes them in the background so the screen doesn't wait, and posters, episode lists and dates live in a separate cache file that's written every 30 seconds at most.",
       "Posters are fetched after a sync or import finishes, not during it.",
       "IMDb ratings and watchlist: after the first sync, Saga asks IMDb's API directly with the page's own request instead of opening the page each time.",
@@ -1017,6 +1019,28 @@
       .map(it => ({ it, score: it.genres.reduce((a, x) => a + aff(x), 0) / it.genres.length, why: it.genres.slice().sort((a, b) => aff(b) - aff(a))[0] }))
       .filter(x => x.score > 0).sort((a, b) => b.score - a.score).slice(0, limit);
   }
+  // ---- Picks for today, across films, series, games and books, each with its reason (no AI, nothing sent anywhere).
+  // Taken in turn from each kind of reason, and shuffled by the date so the row changes from day to day.
+  function picksToday(limit = 14) {
+    const seed = +new Date().toISOString().slice(0, 10).replace(/-/g, ""), rnd = k => { let h = seed; for (const ch of String(k)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
+    const mix = a => a.sort((x, y) => rnd(x.k) - rnd(y.k));
+    const lists = [];
+    lists.push(mix(lib.all().filter(x => x.type === "show" && x.status === "watching" && x.epl).map(x => ({ x, n: lib.nextEp(x) })).filter(o => o.n && !o.n.upcoming && o.n.left <= 3)
+      .map(o => ({ k: "lib:" + o.x.id, t: o.x.title, img: o.x.poster, kind: "show", attrs: `data-action="libopen" data-id="${esc(o.x.id)}"`, why: `${o.n.left} episode${o.n.left === 1 ? "" : "s"} left` }))));
+    lists.push(forYou(8).map(o => ({ k: "lib:" + o.it.id, t: o.it.title, img: o.it.poster, kind: o.it.type, attrs: `data-action="libopen" data-id="${esc(o.it.id)}"`, why: `You rate ${o.why} highly${o.it.runtime ? ` · ${o.it.runtime} min` : ""}` })));
+    lists.push(mix(lib.all().filter(x => x.type === "movie" && x.status === "watchlist" && x.runtime && x.runtime < 100 && !isFinished(x))
+      .map(x => ({ k: "lib:" + x.id, t: x.title, img: x.poster, kind: "movie", attrs: `data-action="libopen" data-id="${esc(x.id)}"`, why: `Short: ${x.runtime} min` }))));
+    if (secOn("games")) lists.push(mix(games.visible().filter(g => g.owned && g.status === "backlog" && g.hours && g.hours <= 12)
+      .map(g => ({ k: "game:" + g.id, t: g.title, img: g.cover || (g.steam ? GC.COVER(g.steam) : ""), kind: "game", attrs: `data-action="gopen" data-id="${esc(g.id)}"`, why: `You own it · ${g.hours} h to finish` }))));
+    if (secOn("books")) lists.push(mix(books.books.filter(b => b.status === "want" && b.pages && b.pages <= 300)
+      .map(b => ({ k: "book:" + b.id, t: b.title, img: (b.cover || "").replace(/^http:/, "https:"), kind: "book", attrs: `data-action="bopen" data-id="${esc(b.id)}"`, why: `Short read · ${b.pages} pages` }))));
+    lists.push(mix([...lib.all().filter(x => x.status === "paused").map(x => ({ k: "lib:" + x.id, t: x.title, img: x.poster, kind: x.type, attrs: `data-action="libopen" data-id="${esc(x.id)}"`, why: "Paused: pick it back up?" })),
+      ...(secOn("games") ? games.visible().filter(g => g.status === "paused").map(g => ({ k: "game:" + g.id, t: g.title, img: g.cover || (g.steam ? GC.COVER(g.steam) : ""), kind: "game", attrs: `data-action="gopen" data-id="${esc(g.id)}"`, why: "Paused: pick it back up?" })) : []),
+      ...(secOn("books") ? books.books.filter(b => b.status === "paused").map(b => ({ k: "book:" + b.id, t: b.title, img: (b.cover || "").replace(/^http:/, "https:"), kind: "book", attrs: `data-action="bopen" data-id="${esc(b.id)}"`, why: "Paused: pick it back up?" })) : [])]));
+    const out = [], seen = new Set();
+    for (let i = 0; out.length < limit && lists.some(l => l.length > i); i++) for (const l of lists) { const x = l[i]; if (x && !seen.has(x.k) && out.length < limit) { seen.add(x.k); out.push(x); } }
+    return out;
+  }
   const allTags = () => { const m = new Map(); for (const it of lib.all()) for (const t of it.tags || []) m.set(t, (m.get(t) || 0) + 1); return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])); };
 
   // ------------------------------------------------------------ settings
@@ -1110,13 +1134,22 @@
       </section>
       <section class="stack">
         <h2>Other AI services</h2>
-        <p class="small muted" style="margin:0">ChatGPT, Mistral, Groq, OpenRouter, DeepSeek or any OpenAI-compatible service can run the canon scan too. Gemini stays the free default.</p>
+        <p class="small muted" style="margin:0">ChatGPT, Mistral, Groq, OpenRouter, DeepSeek, any OpenAI-compatible service, or your own Ollama or Open WebUI server can run the canon scan too. Gemini stays the free default.</p>
         <label class="field"><span>Service</span><select data-setting="ai_preset">${Object.entries(C.AI_PRESETS).map(([k, v]) => `<option value="${k}" ${db.get("ai_preset", "openai") === k ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</select></label>
-        ${(() => { const pr = C.AI_PRESETS[db.get("ai_preset", "openai")] || C.AI_PRESETS.openai; return `
+        ${(() => { const pr = C.AI_PRESETS[db.get("ai_preset", "openai")] || C.AI_PRESETS.openai;
+          if (pr.local) return `
+        <p class="small muted" style="margin:0">Your own model, on your own server: nothing leaves your network (or your tailnet) and nothing is paid per use. Saga talks to the server directly, the same way the Conduit app does for Open WebUI. Local models are slower and less sure of franchise details than the big online ones: a 7–8B model works, a bigger one is better.</p>
+        ${field("ai_base", "Server address", { placeholder: pr.hintBase, hint: pr.api === "ollama" ? "Ollama's address and port (11434 unless you changed it). Through Tailscale use the MagicDNS name (….ts.net): plain http:// works only with those names. With \"tailscale serve\" you can use https:// instead." : "The address you open Open WebUI at. Through Tailscale use the MagicDNS name (….ts.net); https:// with \"tailscale serve\"." })}
+        ${pr.noKey ? "" : field("ai_key", `${pr.label.replace(/ \(.*/, "")} API key`, { secret: true, hint: `From ${pr.keys}.` })}
+        ${field("ai_model", "Model", { placeholder: "e.g. llama3.1:8b, qwen2.5:14b", hint: `${db.get("ai_model_used") ? `Last used: ${esc(db.get("ai_model_used"))}. ` : ""}Find models lists what the server has and checks the connection.` })}
+        ${ui.aiModels && ui.aiModels.length ? `<div class="chips">${ui.aiModels.slice(0, 30).map(m => `<button class="chip" data-action="aimodelpick" data-v="${esc(m)}" aria-pressed="${db.get("ai_model") === m}">${esc(m)}</button>`).join("")}</div>` : ""}
+        <div class="row wrap"><button class="btn quiet" data-action="aimodels">Find models</button>
+        <button class="btn" data-action="aiscan" ${aiReady() ? "" : "disabled"}>${icon("spark")}Find missing canon with ${esc(pr.label.replace(/ \(.*/, ""))}</button></div>`;
+          return `
         ${field("ai_key", `${pr.label} API key`, { secret: true, hint: `From ${pr.keys}.` })}
         ${field("ai_model", "Model", { placeholder: pr.model || "model name", hint: `Leave empty for ${pr.model || "the service's default"}.${db.get("ai_model_used") ? ` Last used: ${esc(db.get("ai_model_used"))}.` : ""}` })}
         ${db.get("ai_preset") === "custom" ? field("ai_base", "Address (ends in /v1)", { placeholder: "https://example.com/v1" }) : ""}
-        <button class="btn" data-action="aiscan" ${db.get("ai_key") ? "" : "disabled"}>${icon("spark")}Find missing canon with ${esc(pr.label)}</button>`; })()}
+        <button class="btn" data-action="aiscan" ${aiReady() ? "" : "disabled"}>${icon("spark")}Find missing canon with ${esc(pr.label)}</button>`; })()}
       </section>
       <section>
         <h2>Matching</h2>
@@ -1906,6 +1939,12 @@
     if (ui.libOpen === it.id && $(".libsheet")) openLib(it.id);
     toast(`${it.title}: ${said.join("; ")}`);
   }
+  // the "Other AI" choice is ready: a key, or a local server with an address (and a key for Open WebUI)
+  function aiReady() {
+    const pr = C.AI_PRESETS[db.get("ai_preset", "openai")] || {};
+    if (pr.local) return !!db.get("ai_base") && !!db.get("ai_model") && (pr.noKey || !!db.get("ai_key"));
+    return !!db.get("ai_key");
+  }
   // One title through the AI canon finder, whatever was checked before; says what its franchise now holds.
   function libCanonOne(it) {
     const medium = it.type === "show" ? "TV Series" : "Movie";
@@ -1919,7 +1958,7 @@
     };
     if (db.get("gemini_key")) return runJob("Canon check", p => C.multiverseScan(db, Native.http, db.get("gemini_key"), db.get("gemini_model") || "auto", p, 40, 1, { search: db.get("gemini_search", "0") === "1", only }).then(done));
     if (db.get("claude_key")) return runJob("Canon check", p => C.claudeScan(db, Native.http, db.get("claude_key"), db.get("claude_model") || "auto", p, { webSearch: db.get("claude_web", "1") === "1", only }).then(done));
-    if (db.get("ai_key")) return runJob("Canon check", p => C.compatScan(db, Native.http, { preset: db.get("ai_preset", "openai"), key: db.get("ai_key"), model: db.get("ai_model"), base: db.get("ai_base") }, p, only).then(done));
+    if (aiReady()) return runJob("Canon check", p => C.compatScan(db, Native.http, { preset: db.get("ai_preset", "openai"), key: db.get("ai_key"), model: db.get("ai_model"), base: db.get("ai_base") }, p, only).then(done));
     toast("Add an AI key in Settings › AI first");
   }
   // puts one title back exactly as it was (status, episodes, rating), and takes back what was queued for Trakt
@@ -2265,7 +2304,7 @@
     const nx = st.length ? C.upNext(st, 12) : [];
     const fy = forYou();
     if (lib.all().some(x => x.status === "watchlist")) parts.push(`<section><button class="btn" data-action="librandom">${icon("sync")}Pick something from my watchlist</button></section>`);
-    if (fy.length >= 3) parts.push(`<section>${Kit.head("Picked for you from your watchlist")}${Kit.rail(fy.map(x => Kit.tile({ title: x.it.title, img: x.it.poster, kind: x.it.type, attrs: `data-action="libopen" data-id="${esc(x.it.id)}"` }, x.it.title, `Because you rate ${esc(x.why)} highly`)))}</section>`);
+    { const pk = picksToday(); if (pk.length >= 3) parts.push(`<section>${Kit.head("Picks for today")}${Kit.rail(pk.map(x => Kit.tile({ title: x.t, img: x.img, kind: x.kind, attrs: x.attrs }, x.t, esc(x.why))))}</section>`); }
     if (nx.length) parts.push(`<section>${Kit.head("Next in your canon", `<button class="btn quiet small" data-action="go" data-sec="missing">Canon</button>`)}${Kit.rail(nx.map(c => Kit.tile({ title: c.title, key: "canon:" + canonKey(c), img: cImg(c), kind: c.medium === "TV Series" ? "show" : c.medium === "Video Game" ? "game" : "movie", attrs: `data-action="sheet" data-sid="${sid(c, "canon")}"` }, c.title, `${c.franchise}${c.year ? " · " + c.year : ""}`)))}</section>`);
     const mvs = multiverseList().slice(0, 12);
     if (mvs.length) parts.push(`<section>${Kit.head("Your multiverses")}${Kit.rail(mvs.map(m => `<button class="poster wide" data-action="mvopen" data-mv="${esc(m.name)}" style="text-align:left"><span class="gen" style="--h:${Kit.hue(m.name)}"><b>${esc(m.name)}</b><small>${m.done} of ${m.total} · ${Math.round(100 * m.done / Math.max(1, m.total))}%</small></span><span class="bar"><i style="width:${Math.round(100 * m.done / Math.max(1, m.total))}%"></i></span></button>`), true)}</section>`);
@@ -3089,6 +3128,11 @@
       case "upshow": db.setUpHidden(el.dataset.key, "", false); db.flush(); render(); break;
       case "homecal": db.set("home_calendar", el.dataset.v); db.flush(); if (el.dataset.v === "0") toast("Calendar hidden from Home. Turn it back on in Settings."); render(); break;
       case "reporttoggle": ui.reportOpen = !ui.reportOpen; break;
+      case "aimodels": { commitFields(); const cfg = { preset: db.get("ai_preset"), key: db.get("ai_key"), base: db.get("ai_base") };
+        toast("Asking the server…");
+        C.localModels(C.robust(Native.http, { timeout: 20000, tries: 1 }), cfg).then(list => { ui.aiModels = list; toast(list.length ? `Connected: ${list.length} model${list.length === 1 ? "" : "s"}. Tap one to use it` : "Connected, but the server has no models yet"); render(); }, e => toast("Couldn't connect: " + e.message));
+        break; }
+      case "aimodelpick": db.set("ai_model", el.dataset.v); db.flush(); render(); break;
       case "aiscan": { commitFields(); const cfg = { preset: db.get("ai_preset", "openai"), key: db.get("ai_key"), model: db.get("ai_model"), base: db.get("ai_base") }, lbl = (C.AI_PRESETS[cfg.preset] || {}).label || "AI";
         runJob(`${lbl} scan`, p => C.compatScan(db, Native.http, cfg, p).then(n => { const g = C.aiState(db, "ai"); return `${lbl} added ${fmt(n)} canon entries. Checked ${fmt(g.sent.size)} of ${fmt(g.pool.length)} titles${g.pending.length ? ", run again to continue" : ""}`; })); break; }
       case "claude":
@@ -3282,7 +3326,8 @@
     }
     if (k === "threshold") invalidate();
     if (k.startsWith("widget_")) { widgetCache["widget_style.txt"] = null; updateWidget(); }
-    if (k === "ai_preset" || k === "ai_key") render(); // the key field and scan button follow the chosen service
+    if (k === "ai_preset") ui.aiModels = null;
+    if (k === "ai_preset" || k === "ai_key" || k === "ai_base" || k === "ai_model") render(); // the key field and scan button follow the chosen service
     if (k.startsWith("bg_")) {
       applyBackground();
       if (k === "bg_enabled" && v === "1") Native.requestNotifications();
@@ -3349,5 +3394,5 @@
   const last = parseFloat(db.get("last_sync", "0")) || 0;
   const hasSources = db.get("username") || db.get("imdb_user") || db.get("canon_urls") || db.get("imdb_lists");
   if (db.get("auto_sync") === "1" && hasSources && Date.now() / 1000 - last > AUTO_SYNC_HOURS * 3600) { db.set("sync_open", "0"); doSync(); db.set("sync_open", "1"); }
-  window.__app = { whatsNew, setLook, icsText, forYou, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
+  window.__app = { whatsNew, setLook, icsText, forYou, picksToday, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
 })();

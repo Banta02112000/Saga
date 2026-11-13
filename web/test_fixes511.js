@@ -1,6 +1,28 @@
 const assert = require("assert");
 const C = require("./core.js"), L = require("./library.js"), I = require("./imports.js");
 (async () => {
+  // 0.5.5: your own AI server (Ollama or Open WebUI, e.g. through Tailscale)
+  { const calls = [];
+    const http = async (m, url, o) => { calls.push([m, url, o]);
+      if (url.endsWith("/api/tags")) return { status: 200, body: JSON.stringify({ models: [{ name: "llama3.1:8b" }, { name: "qwen2.5:14b" }] }) };
+      if (url.endsWith("/api/models")) return (o.headers || {}).Authorization === "Bearer sk-1" ? { status: 200, body: JSON.stringify({ data: [{ id: "gemma3:12b" }] }) } : { status: 401, body: "{}" };
+      if (url.endsWith("/api/chat")) return { status: 200, body: JSON.stringify({ message: { content: "<think>hmm</think>Alien|1979|Movie" } }) };
+      if (url.endsWith("/api/chat/completions")) return { status: 200, body: JSON.stringify({ choices: [{ message: { content: "Aliens|1986|Movie" } }] }) };
+      return { status: 404, body: "" }; };
+    const store = { get: () => "", set() {} };
+    assert.deepStrictEqual(await C.localModels(http, { preset: "ollama", base: "http://pi.tail1234.ts.net:11434/v1/" }), ["llama3.1:8b", "qwen2.5:14b"]);
+    assert.strictEqual(calls[0][1], "http://pi.tail1234.ts.net:11434/api/tags");
+    await assert.rejects(C.localModels(http, { preset: "openwebui", base: "https://pi.tail1234.ts.net" }), /API key/);
+    assert.deepStrictEqual(await C.localModels(http, { preset: "openwebui", base: "https://pi.tail1234.ts.net/api", key: "sk-1" }), ["gemma3:12b"]);
+    const ol = C.compatProvider(store, http, { preset: "ollama", base: "http://pi.tail1234.ts.net:11434", model: "llama3.1:8b" });
+    assert.strictEqual(await ol.call("x"), "Alien|1979|Movie");
+    const sent = JSON.parse(calls[calls.length - 1][2].body); assert.ok(sent.options.num_ctx >= 16384 && sent.stream === false && !calls[calls.length - 1][2].headers.Authorization);
+    const ow = C.compatProvider(store, http, { preset: "openwebui", base: "https://pi.tail1234.ts.net", model: "gemma3:12b", key: "sk-1" });
+    assert.strictEqual(await ow.call("x"), "Aliens|1986|Movie");
+    assert.throws(() => C.compatProvider(store, http, { preset: "openwebui", base: "https://x.ts.net", model: "m" }), /API key/);
+    assert.throws(() => C.compatProvider(store, http, { preset: "ollama", base: "", model: "m" }), /address/);
+    const off = async () => ({ status: 0, error: "Cleartext HTTP traffic to 100.64.1.2 not permitted" });
+    await assert.rejects(C.localModels(off, { preset: "ollama", base: "http://100.64.1.2:11434" }), /MagicDNS/); }
   // 0.5.4.9: saves go to the phone's background writer; the cache has its own file; reload tells our writes from others
   { let file = "", stampN = 0, queue = [], own = "", saves = 0, cacheFile = "", cacheSaves = 0;
     const settle = () => { while (queue.length) { file = queue.shift(); stampN++; own = "s" + stampN; } };

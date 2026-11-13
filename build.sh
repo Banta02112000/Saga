@@ -119,6 +119,19 @@ cat > app/res/xml/shortcuts.xml <<XML
 </shortcuts>
 XML
 # API keys live in secrets.json, encrypted with a key that never leaves this phone: it can't be restored elsewhere, so it stays out of Android's backups
+# HTTPS everywhere, except plain http:// to your own AI server through Tailscale (MagicDNS names end in .ts.net)
+# and to this phone itself
+cat > app/res/xml/network_security_config.xml <<XML
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false"/>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">ts.net</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>
+XML
 cat > app/res/xml/backup_rules.xml <<XML
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
@@ -152,7 +165,7 @@ cat > app/AndroidManifest.xml <<XML
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <queries><package android:name="com.google.android.apps.bard"/></queries>
     <application android:largeHeap="true" android:label="Saga" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher"
-        android:allowBackup="true" android:fullBackupContent="@xml/backup_rules" android:dataExtractionRules="@xml/data_rules" android:hardwareAccelerated="true" android:supportsRtl="true" android:usesCleartextTraffic="false" android:resizeableActivity="true"
+        android:allowBackup="true" android:fullBackupContent="@xml/backup_rules" android:dataExtractionRules="@xml/data_rules" android:hardwareAccelerated="true" android:supportsRtl="true" android:usesCleartextTraffic="false" android:networkSecurityConfig="@xml/network_security_config" android:resizeableActivity="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
         <activity android:name="com.banta.canonsync.MainActivity" android:exported="true" android:enableOnBackInvokedCallback="true"
             android:windowSoftInputMode="adjustResize" android:launchMode="singleTask"
