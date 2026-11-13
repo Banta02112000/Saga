@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.5.7.1";
+  const VERSION = "0.5.8";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -270,6 +270,16 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.5.8", ["Sync: Trakt is asked what changed since the last sync, and only those parts are downloaded again (ratings, watchlist, lists, watched films or series). The 10-minute background check no longer downloads your whole account because of your own ticks, and it now works in small steps.",
+      "Universe dashboard for any franchise: films, series, games and books with progress per medium, release / in-universe / your own order, and a tier per entry (essential, recommended, optional, alternate continuity, not canon) with Essential only and Missing only.",
+      "Smart lists by rules (what, status, rating, length, owned, on your streaming services, franchise, progress), with five ready-made ones: Short & owned backlog, Streaming now on my services, Next canon entries, Paused & almost done, All-time favourites.",
+      "Games: play sessions (+30 min, +1 h, +2 h or any time). Books: chapters read are kept. Both show in the Diary, by day.",
+      "Year in review: your year in one card (hours watching, playing and reading, month by month, favourites, most explored franchises, milestones), to share as text.",
+      "Widgets: +1 chapter or +10 pages on the book you're reading; Mark watched on the main widget too; a widget not refreshed for 6 hours or more says how long ago.",
+      "Picks for today: Not for me (seen it, too long, not now, not for me) hides a pick for 90 days, or a week for Not now.",
+      "Library: Select to change many titles at once (status, list, tag, remove).",
+      "Search finds titles with a typo or two swapped letters.",
+      "Home shows a line when the last sync failed in part or is more than two days old."]],
     ["0.5.7.1", ["If a sync still hitches, the report now also watches the phone's own screen thread (where taps and scrolling are handled) and reports smaller hitches too, with what was going on at the time.",
       "Saga website: the same app in a browser, from your own machine on your Tailscale network (site/ folder; see its README)."]],
     ["0.5.7", ["Sync: nothing is saved while a sync runs (it's saved once at the end, or at once if you leave the app). Building the multi-MB save text again and again was a main cause of the lag.",
@@ -1097,6 +1107,10 @@
     lists.push(mix([...lib.all().filter(x => x.status === "paused").map(x => ({ k: "lib:" + x.id, t: x.title, img: x.poster, kind: x.type, attrs: `data-action="libopen" data-id="${esc(x.id)}"`, why: "Paused: pick it back up?" })),
       ...(secOn("games") ? games.visible().filter(g => g.status === "paused").map(g => ({ k: "game:" + g.id, t: g.title, img: g.cover || (g.steam ? GC.COVER(g.steam) : ""), kind: "game", attrs: `data-action="gopen" data-id="${esc(g.id)}"`, why: "Paused: pick it back up?" })) : []),
       ...(secOn("books") ? books.books.filter(b => b.status === "paused").map(b => ({ k: "book:" + b.id, t: b.title, img: (b.cover || "").replace(/^http:/, "https:"), kind: "book", attrs: `data-action="bopen" data-id="${esc(b.id)}"`, why: "Paused: pick it back up?" })) : [])]));
+    // 0.5.8: "not for me" hides a pick for 90 days ("not in the mood": 7 days)
+    let hide = {}; try { hide = JSON.parse(db.get("pick_hide", "{}")) || {}; } catch (e) { hide = {}; }
+    const now = Date.now();
+    for (const l of lists) for (let i = l.length - 1; i >= 0; i--) if (hide[l[i].k] && hide[l[i].k] > now) l.splice(i, 1);
     const out = [], seen = new Set();
     for (let i = 0; out.length < limit && lists.some(l => l.length > i); i++) for (const l of lists) { const x = l[i]; if (x && !seen.has(x.k) && out.length < limit) { seen.add(x.k); out.push(x); } }
     return out;
@@ -1621,13 +1635,15 @@
   // Six widgets, each with its own file (heading, optional button "@@label<TAB>payload", then lines). Android draws them.
   const widgetCache = {};
   const wday = d => { const x = new Date(d + "T12:00:00"); return d === TODAY() ? "Today" : x.toLocaleDateString(lang() === "it" ? "it-IT" : "en-GB", { weekday: "short", day: "numeric", month: "short" }); };
+  const lastTouch = b => Math.max(b.started || 0, ...((b.log || []).slice(-1).map(x => x.t || 0)));
   function widgetFiles() {
     const ne = nextEpisodes();
     const f = {};
     f["widget_style.txt"] = `alpha=${db.get("widget_alpha", "95")}\nlook=${db.get("widget_look", "dark")}\nsize=${db.get("widget_size", "14")}\n`;
-    f["widget.txt"] = (ne[0] ? `▶ ${ne[0].lib ? ne[0].it.title : ne[0].show} · S${ne[0].s} E${ne[0].e}\n` : "") + C.widgetText(status(), gamesIdx(), dwIdx(), undefined, booksIdx());
-    // next episodes, with a Mark watched button for the first
+    // next episodes, with a Mark watched button for the first (on this widget and the main one)
     const first = ne.find(x => x.lib);
+    const epBtn = first ? `@@✓ ${first.it.title.slice(0, 22)} S${first.s}E${first.e}\t${JSON.stringify({ op: "ep", id: first.it.id, s: first.s, e: first.e, at: "__NOW__" })}\n` : "";
+    f["widget.txt"] = (ne[0] ? `▶ ${ne[0].lib ? ne[0].it.title : ne[0].show} · S${ne[0].s} E${ne[0].e}\n${epBtn}` : "") + C.widgetText(status(), gamesIdx(), dwIdx(), undefined, booksIdx());
     const epLines = ne.slice(0, 7).map(x => `${x.lib ? x.it.title : x.show} · S${x.s} E${x.e}${x.left > 1 ? `  (+${x.left - 1})` : ""}`);
     f["widget_episodes.txt"] = `Next episodes${ne.length > 7 ? ` · ${ne.length} series` : ""}\n` +
       (first ? `@@✓ ${first.it.title.slice(0, 22)} S${first.s}E${first.e}\t${JSON.stringify({ op: "ep", id: first.it.id, s: first.s, e: first.e, at: "__NOW__" })}\n` : "@@\n") +
@@ -1651,8 +1667,11 @@
     } else f["widget_games.txt"] = "Games\n@@\nSwitch the Games tab on in Settings.";
     // books you're reading, with how far along
     if (secOn("books")) {
-      const rd = books.books.filter(b => b.status === "reading");
-      f["widget_books.txt"] = `Reading${rd.length > 5 ? ` · ${rd.length}` : ""}\n@@\n` + (rd.slice(0, 5).map(b => {
+      const rd = books.books.filter(b => b.status === "reading").sort((a, b) => lastTouch(b) - lastTouch(a));
+      // a button for the book you touched last: one chapter more (manga) or ten pages more
+      const top = rd[0], manga = top && (top.manga || BC.isManga(top));
+      const bBtn = top ? `@@${manga ? `+1 ch. ${top.title.slice(0, 20)}` : `+10 p. ${top.title.slice(0, 20)}`}\t${JSON.stringify({ op: "book_step", id: top.id, ch: manga ? 1 : 0, pages: manga ? 0 : 10, at: "__NOW__" })}\n` : "@@\n";
+      f["widget_books.txt"] = `Reading${rd.length > 5 ? ` · ${rd.length}` : ""}\n${bBtn}` + (rd.slice(0, 5).map(b => {
         const p = BC.percent ? BC.percent(b) : 0;
         return `${b.title}${p ? ` · ${Math.round(p)}%` : b.chapter ? ` · ch. ${b.chapter}` : ""}`;
       }).join("\n") || "Nothing on the go. Start a book to see it here.");
@@ -1835,8 +1854,12 @@
     for (const it of lib.all()) { t.titles++; if (it.rating) t.rated++; if (it.er) t.er += Object.keys(it.er).length; t.eps += Object.keys(it.eps).length; }
     return t;
   }
-  function adoptEpRatings(ieps) {
-    let n = 0;
+  // 0.5.8: these two run as generators: in one go when called plainly, or in slices with pauses during a sync
+  const runGen = g => { let r; do { r = g.next(); } while (!r.done); return r.value; };
+  async function runGenSoft(g) { let r, t = Date.now(); do { r = g.next(); if (Date.now() - t > 10) { await C.breathe(0); t = Date.now(); } } while (!r.done); return r.value; }
+  function adoptEpRatings(ieps) { return runGen(adoptEpRatingsG(ieps)); }
+  function* adoptEpRatingsG(ieps) {
+    let n = 0, Y = 0;
     const shows = lib.all().filter(x => x.type === "show");
     const byImdb = new Map(), byTmdb = new Map(), byName = new Map();
     for (const x of shows) { if (x.imdb) byImdb.set(x.imdb, x); if (x.tmdb) byTmdb.set(String(x.tmdb), x); const k = L.norm(x.title); if (!byName.has(k)) byName.set(k, x); if (x.orig) { const o = L.norm(x.orig); if (!byName.has(o)) byName.set(o, x); } }
@@ -1846,14 +1869,14 @@
     for (const p of Object.values(tr)) {
       const it = (p.tmdb && byTmdb.get(String(p.tmdb))) || (p.imdb && byImdb.get(p.imdb)) || byName.get(L.norm(p.t || ""));
       if (it) for (const [k, r] of Object.entries(p.r || {})) put(it, k, r);
+      if ((++Y & 63) === 0) yield;
     }
     for (const [sid, p] of Object.entries(ieps || {})) {
       const it = byImdb.get(sid) || byName.get(L.norm(p.t || ""));
       if (it) for (const [k, r] of Object.entries(p.r || {})) put(it, k, r);
+      if ((++Y & 63) === 0) yield;
     }
-    const stamp = db.stamp ? db.stamp() : 0;
-    if (adoptEpRatings.at !== stamp || !stamp) {
-      adoptEpRatings.at = stamp;
+    {
       const epIx = new Map(); // show -> episode name -> "s:e"
       for (const r of db.items("imdb", ["rated"])) {
         if (r.medium !== "Episode" || !r.rating) continue;
@@ -1865,6 +1888,7 @@
         if (!ix) { ix = new Map(); for (const x of it.epl) if (x[3]) { const k = L.norm(x[3]); ix.set(k, ix.has(k) ? null : L.epKey(x[0], x[1])); } epIx.set(it, ix); }
         const k = ix.get(L.norm(r.title.slice(cut + 2)));
         if (k) { put(it, k, r.rating); if (!it.eps[k] && it.status !== "watchlist") { it.eps[k] = (r.rated_at || r.date || TODAY()).slice(0, 10); n++; } }
+        if ((++Y & 255) === 0) yield;
       }
     }
     return n;
@@ -1884,9 +1908,11 @@
     await C.breathe(0);
     const n = await lib.adoptSliced(rows, () => C.breathe(0));
     await C.breathe(0);
-    return libAdoptRest(n);
+    return runGenSoft(libAdoptRestG(n));
   }
-  function libAdoptRest(n) {
+  function libAdoptRest(n) { return runGen(libAdoptRestG(n)); }
+  function* libAdoptRestG(n) {
+    let Y = 0;
     // episodes you've watched on Trakt, with the day you watched each one, merged into the library every time
     let prog = {}, changed = 0;
     try { prog = JSON.parse(db.get("trakt_progress", "{}")) || {}; } catch (e) { prog = {}; }
@@ -1894,8 +1920,9 @@
     const byTmdb = new Map(), byImdb = new Map(), byName = new Map();
     const index = x => { if (x.type !== "show") return; if (x.tmdb && !byTmdb.has(String(x.tmdb))) byTmdb.set(String(x.tmdb), x); if (x.imdb && !byImdb.has(x.imdb)) byImdb.set(x.imdb, x);
       const k = L.norm(x.title); if (k) { const a = byName.get(k); if (a) a.push(x); else byName.set(k, [x]); } };
-    for (const x of lib.all()) index(x);
+    for (const x of lib.all()) { index(x); if ((++Y & 1023) === 0) yield; }
     for (const [tmdbId, p] of Object.entries(prog)) {
+      if ((++Y & 31) === 0) yield;
       let it = byTmdb.get(String(tmdbId)) || (p.imdb && byImdb.get(p.imdb)) || null;
       if (!it) it = (byName.get(L.norm(p.t)) || []).find(x => !p.y || !x.year || Math.abs(x.year - p.y) <= 1) || null;
       if (!it) { if (lib.adopted[p.imdb || `show|${L.norm(p.t)}|${p.y || ""}`]) continue; it = lib.add({ type: "show", title: p.t, year: p.y || null, imdb: p.imdb || null, tmdb: +tmdbId || null, src: "trakt" }, "watching").item; index(it); }
@@ -1911,6 +1938,7 @@
     let ieps = {};
     try { ieps = JSON.parse(db.get("imdb_eps", "{}")) || {}; } catch (e) { ieps = {}; }
     for (const [sid, p] of Object.entries(ieps)) {
+      if ((++Y & 31) === 0) yield;
       let it = byImdb.get(sid) || null; // through the maps above: a scan of the whole library per series froze the screen
       if (!it && p.t) it = (byName.get(L.norm(p.t)) || []).find(x => !p.y || !x.year || Math.abs(x.year - p.y) <= 1) || null;
       if (it && lib.items[it.id] !== it) it = null;
@@ -1919,11 +1947,15 @@
       for (const [k, d] of Object.entries(p.eps || {})) if (!it.eps[k]) { it.eps[k] = typeof d === "string" ? d : TODAY(); changed++; }
       if (it.status === "watchlist") it.status = "watching";
     }
-    changed += adoptEpRatings(ieps);
+    yield;
+    changed += yield* adoptEpRatingsG(ieps);
+    yield;
     // a series marked watched elsewhere but with no episodes yet waits in Watching, unless it's known to have ended
     lib.all().forEach(it => { if (it.type === "show" && it.status === "watched" && !it.ended && !Object.keys(it.eps).length && !it.watches.length) { it.status = "watching"; it.autoWatching = true; } });
+    yield;
     changed += lib.settleAll();
-    for (const it of lib.all()) if (it.status === "watchlist" && it.type === "movie" && seenElsewhere(it)) { it.status = "watched"; changed++; }
+    yield;
+    for (const it of lib.all()) { if (it.status === "watchlist" && it.type === "movie" && seenElsewhere(it)) { it.status = "watched"; changed++; } if ((++Y & 511) === 0) yield; }
     if (n || changed) libSave();
     return n;
   }
@@ -1964,7 +1996,7 @@
     const s = ui.libF === "watchlist" || ui.libF === "services" ? streamsFor(it) : null;
     const badge = n ? (n.upcoming ? (n.date ? shortDay(n.date).replace(/ \d{4}$/, "") : "Soon") : `S${n.s} E${n.e}`) : s && s.mine ? shortName(s.o.name) : s && s.vpn ? `VPN ${s.vpn.flag}` : "";
     return Kit.tile({ key: "lib:" + it.id, title: it.title, img: it.poster, kind: it.type, badge, badgeAcc: !!(n && !n.upcoming) || !!(s && s.mine), badgeR: it.type === "movie" && it.watches.length > 1 ? `${it.watches.length}×` : it.rating ? `★ ${it.rating / 2}` : "",
-      progress: it.type === "show" && it.status === "watching" ? progressOf(it) : null, done: it.status === "watched", attrs: `data-action="libopen" data-id="${esc(it.id)}"` },
+      progress: it.type === "show" && it.status === "watching" ? progressOf(it) : null, done: it.status === "watched" || (ui.sel && ui.sel.has(it.id)), attrs: ui.sel ? `data-action="libsel" data-id="${esc(it.id)}" aria-pressed="${ui.sel.has(it.id)}"` : `data-action="libopen" data-id="${esc(it.id)}"` },
       it.title, [it.year, it.type === "show" ? "Series" : "Film"].filter(Boolean).join(" · "));
   }
   function renderAnime() { return renderLibrary(true); }
@@ -2010,6 +2042,8 @@
         <select data-libtype="1" aria-label="Type">${[["all", "Films & series"], ["movie", "Films"], ["show", "Series"]].map(([k, l]) => `<option value="${k}" ${ty === k ? "selected" : ""}>${l}</option>`).join("")}</select>
         <select data-libsort="1" aria-label="Sort">${[["recent", "Recent"], ["title", "Title"], ["rating", "Rating"], ["year", "Year"]].map(([k, l]) => `<option value="${k}" ${(ui.libSort || "recent") === k ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       ${f === "services" ? `<p class="small muted">Watchlist titles on ${esc(myServices().join(", "))}${feat("vpn") ? ", or elsewhere with a VPN" : ""}. Where things stream is looked up after each sync (needs a TMDB key).</p>` : ""}
+      <div class="row" style="margin:0 0 10px;gap:8px">${ui.sel ? `<b class="grow">${fmt(ui.sel.size)} selected</b><button class="btn quiet small" data-action="libselall">Select all ${fmt(Math.min(list.length, lim))}</button><button class="btn quiet small" data-action="libselend">Done</button>` : `<span class="grow"></span><button class="btn quiet small" data-action="libselstart">Select</button>`}</div>
+      ${ui.sel && ui.sel.size ? `<div class="chips" style="position:sticky;top:0;z-index:5;background:var(--bg);padding:6px 0;margin-bottom:8px">${[["watched", "Watched"], ["watchlist", "Watchlist"], ["watching", "Watching"], ["paused", "Paused"], ["dropped", "Dropped"]].map(([v, l]) => `<button class="chip" data-action="libbulk" data-v="${v}">${l}</button>`).join("")}<button class="chip" data-action="libbulk" data-v="list">${icon("plus")}List</button><button class="chip" data-action="libbulk" data-v="tag">Tag</button><button class="chip" data-action="libbulk" data-v="remove">Remove</button></div>` : ""}
       ${list.length ? Kit.grid(list.slice(0, lim).map(libTile)) : `<p class="muted">Nothing here yet.</p>`}
       ${list.length > lim ? `<button class="btn block" style="margin-top:16px" data-action="libmore">Show more (${fmt(list.length - lim)})</button>` : ""}
       <p class="small muted" style="margin-top:16px">${fmt(c.movie)} film${c.movie === 1 ? "" : "s"} · ${fmt(c.show)} series · ${fmt(c.eps)} episode${c.eps === 1 ? "" : "s"} ticked${c.rewatches ? ` · ${fmt(c.rewatches)} rewatch${c.rewatches === 1 ? "" : "es"}` : ""}</p>`;
@@ -2282,27 +2316,134 @@
     ["s_owned", "Games you own and haven't started", () => secOn("games") ? games.visible().filter(g => g.owned && (g.status === "backlog" || g.status === "wishlist")).map(g => "game:" + g.id) : []],
     ["s_top", "Rated 9 or 10, anything", () => [...lib.all().filter(x => x.rating >= 9).map(x => "lib:" + x.id), ...(secOn("games") ? games.visible().filter(g => g.rating >= 9).map(g => "game:" + g.id) : []), ...(secOn("books") ? books.books.filter(b => b.rating >= 9).map(b => "book:" + b.id) : [])]],
   ];
+  // ---- 0.5.8: lists by rules. Every film, series, game and book as one row the rules can read.
+  const STATUS_GROUP = { watchlist: "want", want: "want", wishlist: "want", backlog: "want", watching: "doing", playing: "doing", reading: "doing",
+    watched: "done", done: "done", read: "done", paused: "paused", dropped: "dropped", dnf: "dropped" };
+  function ruleRows() {
+    const out = [];
+    for (const it of lib.all()) {
+      const inf = it.tmdb ? db.cacheGet(`info:${it.type === "show" ? "tv" : "m"}${it.tmdb}`) : null;
+      const n = it.type === "show" && it.epl ? lib.nextEp(it) : null;
+      const total = it.type === "show" && it.epl ? it.epl.filter(e => e[0] > 0).length : 0;
+      out.push({ k: "lib:" + it.id, media: it.type, title: it.title, status: STATUS_GROUP[it.status] || it.status, rating: it.rating || 0, mins: it.type === "movie" ? it.runtime || 0 : 0,
+        hours: 0, pages: 0, owned: !!it.owned, franchise: it.franchise || "", added: it.added || 0, year: it.year || 0,
+        progress: total ? Math.round(Object.keys(it.eps || {}).length / total * 100) : 0, left: n && !n.upcoming ? n.left : null,
+        offers: inf && inf.offers ? inf.offers.filter(o => /flatrate|free|ads/.test(o.type)).map(o => o.name) : null });
+    }
+    if (secOn("games")) for (const g of games.visible()) out.push({ k: "game:" + g.id, media: "game", title: g.title, status: STATUS_GROUP[g.status] || g.status, rating: g.rating || 0, mins: 0, hours: g.hours || 0, pages: 0,
+      owned: !!g.owned, franchise: g.franchise || g.multiverse || "", added: g.added || 0, year: +(g.date || "").slice(0, 4) || 0, progress: 0, left: null, offers: null });
+    if (secOn("books")) for (const b of books.books) out.push({ k: "book:" + b.id, media: "book", title: b.title, status: STATUS_GROUP[b.status] || b.status, rating: b.rating || 0, mins: 0, hours: 0, pages: b.pages || 0,
+      owned: !!(b.owned || b.format), franchise: b.series || "", added: b.added || 0, year: +(b.published || "").slice(0, 4) || 0, progress: BC.percent ? BC.percent(b) : 0, left: null, offers: null });
+    return out;
+  }
+  // a rule: { media: [], status: [], minRating, maxMins, maxHours, maxPages, ownedOnly, onMyServices, franchise, unrated, minProgress, sort }
+  function applyRule(rule, rows = ruleRows()) {
+    const r = rule || {}, svc = myServices().map(x => x.toLowerCase());
+    let unknown = 0;
+    let out = rows.filter(x => {
+      if (r.media && r.media.length && !r.media.includes(x.media)) return false;
+      if (r.status && r.status.length && !r.status.includes(x.status)) return false;
+      if (r.minRating && x.rating < r.minRating) return false;
+      if (r.unrated && x.rating) return false;
+      if (r.maxMins && x.media === "movie" && !(x.mins && x.mins <= r.maxMins)) return false;
+      if (r.maxHours && x.media === "game" && !(x.hours && x.hours <= r.maxHours)) return false;
+      if (r.maxPages && x.media === "book" && !(x.pages && x.pages <= r.maxPages)) return false;
+      if (r.ownedOnly && (x.media === "game" || x.media === "book") && !x.owned) return false;
+      if (r.minProgress && !(x.progress >= r.minProgress || x.status === "paused")) return false;
+      if (r.franchise && !x.franchise.toLowerCase().includes(String(r.franchise).toLowerCase())) return false;
+      if (r.onMyServices) {
+        if (x.media !== "movie" && x.media !== "show") return false;
+        if (!x.offers) { unknown++; return false; }
+        if (!x.offers.some(o => svc.some(s2 => o.toLowerCase().includes(s2)))) return false;
+      }
+      return true;
+    });
+    const by = { rating: (a, b) => b.rating - a.rating, title: (a, b) => a.title.localeCompare(b.title), added: (a, b) => b.added - a.added,
+      short: (a, b) => ((a.mins || a.hours * 60 || a.pages) || 1e9) - ((b.mins || b.hours * 60 || b.pages) || 1e9), year: (a, b) => b.year - a.year, progress: (a, b) => b.progress - a.progress }[r.sort || "rating"];
+    if (by) out.sort(by);
+    if (r.nextCanon) out = nextCanonKeys().map(k => rows.find(x => x.k === k)).filter(Boolean);
+    applyRule.unknown = unknown;
+    return out.map(x => x.k);
+  }
+  // the earliest entry you haven't seen of each franchise you've started (films and series from the canon lists, games by franchise, books by series)
+  function nextCanonKeys() {
+    const out = [];
+    try {
+      const st = memo || [];
+      const byF = new Map();
+      for (const c of st) { const f = c.franchise; if (!f || f === "Unsorted") continue; const a = byF.get(f) || []; a.push(c); byF.set(f, a); }
+      for (const [, list] of byF) {
+        if (!list.some(c => c.state === "seen" || c.status === "seen")) continue;
+        const next = list.filter(c => (c.state || c.status) !== "seen" && c.date && c.date <= TODAY()).sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
+        if (!next) continue;
+        const it = lib.all().find(x => (next.imdb && x.imdb === next.imdb) || L.norm(x.title) === L.norm(next.title));
+        if (it) out.push("lib:" + it.id);
+      }
+    } catch (e) { /* the canon part needs the canon check */ }
+    if (secOn("games")) {
+      const byF = new Map();
+      for (const g of games.visible()) { const f = g.franchise || g.multiverse; if (!f) continue; const a = byF.get(f) || []; a.push(g); byF.set(f, a); }
+      for (const [, list] of byF) { if (!list.some(g => g.status === "done" || g.status === "playing")) continue; const n = list.filter(g => g.status === "backlog" || g.status === "wishlist").sort((a, b) => String(a.date || "9").localeCompare(String(b.date || "9")))[0]; if (n) out.push("game:" + n.id); }
+    }
+    if (secOn("books")) {
+      const byS = new Map();
+      for (const b of books.books) { if (!b.series) continue; const a = byS.get(b.series) || []; a.push(b); byS.set(b.series, a); }
+      for (const [, list] of byS) { if (!list.some(b => b.status === "read" || b.status === "reading")) continue; const n = list.filter(b => b.status === "want").sort((a, b) => (a.seriesNum || 999) - (b.seriesNum || 999))[0]; if (n) out.push("book:" + n.id); }
+    }
+    return out;
+  }
+  const RULE_PRESETS = [
+    ["Short & owned backlog", { media: ["game", "book"], status: ["want"], maxHours: 12, maxPages: 250, ownedOnly: true, sort: "short" }],
+    ["Streaming now on my services", { media: ["movie", "show"], status: ["want"], onMyServices: true, sort: "rating" }],
+    ["Next canon entries", { nextCanon: true }],
+    ["Paused & almost done", { media: ["show", "book", "game"], status: ["doing", "paused"], minProgress: 70, sort: "progress" }],
+    ["All-time favourites (9–10)", { minRating: 9, status: ["done", "doing", "paused"], sort: "rating" }],
+  ];
   function listItems(id) {
-    const sm = SMART.find(x => x[0] === id);
-    const keys = sm ? sm[2]() : ((myLists().find(l => l.id === id) || {}).items || []);
+    const sm = SMART.find(x => x[0] === id), l = sm ? null : myLists().find(x => x.id === id);
+    const keys = sm ? sm[2]() : l && l.rule ? applyRule(l.rule) : ((l || {}).items || []);
     return keys.map(entryOf).filter(Boolean);
   }
   function listsSection() {
     const mine = myLists(), smart = SMART.map(([id, name]) => ({ id, name, n: listItems(id).length, smart: true })).filter(x => x.n);
     const all = [...mine.map(l => ({ id: l.id, name: l.name, n: listItems(l.id).length })), ...smart];
     if (!all.length) return "";
-    return `<section>${Kit.head("Your lists", `<button class="btn quiet small" data-action="mlistnew">New list</button>`)}${Kit.rail(all.map(l => `<button class="poster wide" data-action="mlistopen" data-l="${esc(l.id)}" style="text-align:left"><span class="gen" style="--h:${Kit.hue(l.name)}"><b>${esc(l.name)}</b><small>${fmt(l.n)} ${l.n === 1 ? "entry" : "entries"}${l.smart ? " · fills itself" : ""}</small></span></button>`))}</section>`;
+    return `<section>${Kit.head("Your lists", `<button class="btn quiet small" data-action="mlistnew">New list</button><button class="btn quiet small" data-action="mrulenew">Smart list</button>`)}${Kit.rail(all.map(l => `<button class="poster wide" data-action="mlistopen" data-l="${esc(l.id)}" style="text-align:left"><span class="gen" style="--h:${Kit.hue(l.name)}"><b>${esc(l.name)}</b><small>${fmt(l.n)} ${l.n === 1 ? "entry" : "entries"}${l.smart ? " · fills itself" : ""}</small></span></button>`))}</section>`;
   }
   function openMyList(id) {
     const sm = SMART.find(x => x[0] === id), l = sm ? null : myLists().find(x => x.id === id);
     if (!sm && !l) return;
     const items = listItems(id);
-    sheet(`<h3>${esc(sm ? sm[1] : l.name)}</h3><p class="small muted">${fmt(items.length)} ${items.length === 1 ? "entry" : "entries"}${sm ? ". This list fills itself from your library." : ""}</p>
-      ${items.length ? Kit.grid(items.map(x => Kit.tile({ title: x.title, img: x.img, kind: x.kind, attrs: x.attrs }, x.year ? String(x.year) : ""))) : `<p class="muted">Empty. Open a film, series, game or book and tap Add to a list.</p>`}
+    const unk = l && l.rule && l.rule.onMyServices ? applyRule.unknown : 0;
+    sheet(`<h3>${esc(sm ? sm[1] : l.name)}</h3><p class="small muted">${fmt(items.length)} ${items.length === 1 ? "entry" : "entries"}${sm || (l && l.rule) ? ". This list fills itself from your library by its rules." : ""}${unk ? ` ${fmt(unk)} titles have no streaming details yet (open them, or Settings › Fill in details) and aren't counted.` : ""}</p>
+      ${l && l.rule ? `<button class="btn small" style="margin-bottom:10px" data-action="mrule" data-l="${esc(id)}">${icon("edit")}Edit rules</button>` : ""}
+      ${items.length ? Kit.grid(items.slice(0, ui.listLim || 120).map(x => Kit.tile({ title: x.title, img: x.img, kind: x.kind, attrs: x.attrs }, x.year ? String(x.year) : ""))) + (items.length > (ui.listLim || 120) ? `<button class="btn block" data-action="mlistmore" data-l="${esc(id)}">Show more</button>` : "") : `<p class="muted">${l && l.rule ? "Nothing matches these rules right now." : "Empty. Open a film, series, game or book and tap Add to a list."}</p>`}
       ${l ? `<div style="margin-top:12px"><button class="sheetbtn" data-action="mlistcsv" data-l="${esc(id)}">${icon("open")}Save as a CSV file</button><button class="sheetbtn" data-action="mlistrename" data-l="${esc(id)}">${icon("edit")}Rename</button><button class="sheetbtn" data-action="mlistdel" data-l="${esc(id)}">${icon("notcanon")}<span>Delete this list</span></button></div>` : ""}`);
   }
+  function ruleSheet(l) {
+    const r = (l && l.rule) || { media: [], status: ["want"], sort: "rating" }, has = (a, x) => (a || []).includes(x);
+    const chk = (attr, val, label, a) => `<label class="chip" style="cursor:pointer"><input type="checkbox" ${attr} value="${val}" ${has(a, val) ? "checked" : ""} style="margin-right:6px">${label}</label>`;
+    const n = (id2, label, val, ph) => `<label class="field"><span>${label}</span><input id="${id2}" type="number" inputmode="decimal" min="0" value="${val || ""}" placeholder="${ph || "any"}"></label>`;
+    sheet(`<h3>${l ? "Edit smart list" : "New smart list"}</h3>
+      ${l ? "" : `<p class="small muted" style="margin:0 0 6px">Start from one of these, or set your own rules below.</p><div class="chips" style="margin-bottom:10px">${RULE_PRESETS.map((p, i) => `<button class="chip" data-action="mrulepreset" data-i="${i}">${esc(p[0])}</button>`).join("")}</div>`}
+      <label class="field"><span>Name</span><input id="mr_name" maxlength="60" value="${esc(l ? l.name : "")}" placeholder="e.g. Short films for tonight"></label>
+      <div class="kicker" style="margin:10px 0 4px">What (none ticked = everything)</div><div class="chips">${[["movie", "Films"], ["show", "Series"], ["game", "Games"], ["book", "Books"]].map(([v2, t]) => chk("data-mrm", v2, t, r.media)).join("")}</div>
+      <div class="kicker" style="margin:10px 0 4px">Status (none ticked = any)</div><div class="chips">${[["want", "To watch / play / read"], ["doing", "In progress"], ["paused", "Paused"], ["done", "Finished"], ["dropped", "Dropped"]].map(([v2, t]) => chk("data-mrs", v2, t, r.status)).join("")}</div>
+      ${n("mr_rating", "Your rating at least (1–10)", r.minRating)}${n("mr_mins", "Films no longer than (minutes)", r.maxMins)}${n("mr_hours", "Games no longer than (hours to beat)", r.maxHours)}${n("mr_pages", "Books no longer than (pages)", r.maxPages)}${n("mr_prog", "At least this far along (%; paused always counts)", r.minProgress)}
+      <label class="field"><span>Franchise, multiverse or book series contains</span><input id="mr_fr" value="${esc(r.franchise || "")}" placeholder="any"></label>
+      <label class="switch"><input type="checkbox" id="mr_owned" ${r.ownedOnly ? "checked" : ""}><span>Only games and books you own</span></label>
+      <label class="switch"><input type="checkbox" id="mr_svc" ${r.onMyServices ? "checked" : ""}><span>Only films and series on my streaming services<small class="muted" style="display:block">${esc(myServices().join(", "))} (Settings)</small></span></label>
+      <label class="switch"><input type="checkbox" id="mr_unrated" ${r.unrated ? "checked" : ""}><span>Only things you haven't rated</span></label>
+      <label class="field"><span>Order</span><select id="mr_sort">${[["rating", "Your rating"], ["short", "Shortest first"], ["progress", "Furthest along"], ["added", "Recently added"], ["year", "Newest"], ["title", "Title"]].map(([v2, t]) => `<option value="${v2}" ${r.sort === v2 ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+      <button class="btn primary block" style="margin-top:10px" data-action="mrulesave" data-l="${esc(l ? l.id : "")}">Save</button>`);
+  }
+  function bulkListSheet(ids) {
+    ui.bulkIds = ids;
+    const mine = myLists().filter(l => !l.rule);
+    sheet(`<h3>Add ${fmt(ids.length)} titles to a list</h3>${mine.map(l => `<button class="sheetbtn" data-action="bulklistput" data-l="${esc(l.id)}">${icon("plus")}${esc(l.name)} <span class="muted small">(${l.items.length})</span></button>`).join("") || `<p class="muted">No lists yet: make one from Home › Your lists › New list.</p>`}`);
+  }
   function addToListSheet(k) {
-    const mine = myLists(), e = entryOf(k);
+    const mine = myLists().filter(l => !l.rule), e = entryOf(k);
     if (!e) return;
     sheet(`<h3>Add ${esc(e.title)} to a list</h3>
       ${mine.map(l => `<button class="sheetbtn" data-action="mlistput" data-l="${esc(l.id)}" data-k="${esc(k)}" aria-pressed="${l.items.includes(k)}">${icon(l.items.includes(k) ? "check" : "plus")}${esc(l.name)} <span class="muted small">(${l.items.length})</span></button>`).join("") || `<p class="muted small">No lists yet.</p>`}
@@ -2312,12 +2453,27 @@
   function myListAct(a, el) {
     const L2 = myLists(), l = L2.find(x => x.id === el.dataset.l);
     switch (a) {
-      case "mlistopen": openMyList(el.dataset.l); return true;
+      case "mlistopen": ui.listLim = 120; openMyList(el.dataset.l); return true;
+      case "mlistmore": ui.listLim = (ui.listLim || 120) + 120; openMyList(el.dataset.l); return true;
+      case "mrulenew": ruleSheet(null); return true;
+      case "mrule": ruleSheet(l); return true;
+      case "mrulepreset": { const p = RULE_PRESETS[+el.dataset.i]; if (!p) return true; const nl = { id: "l" + Date.now().toString(36), name: p[0], rule: JSON.parse(JSON.stringify(p[1])), items: [] };
+        L2.push(nl); saveMyLists(L2); toast(`Smart list ${p[0]} added`); openMyList(nl.id); render(); return true; }
+      case "mrulesave": {
+        const v = id2 => document.getElementById(id2), on = sel => [...document.querySelectorAll(sel)].filter(x => x.checked).map(x => x.value);
+        const num = id2 => { const n = parseFloat(((v(id2) || {}).value || "").replace(",", ".")); return Number.isFinite(n) && n > 0 ? n : 0; };
+        const name = ((v("mr_name") || {}).value || "").trim() || "My smart list";
+        const rule = { media: on("[data-mrm]"), status: on("[data-mrs]"), minRating: num("mr_rating"), maxMins: num("mr_mins"), maxHours: num("mr_hours"), maxPages: num("mr_pages"),
+          minProgress: num("mr_prog"), ownedOnly: !!(v("mr_owned") || {}).checked, onMyServices: !!(v("mr_svc") || {}).checked, unrated: !!(v("mr_unrated") || {}).checked,
+          franchise: ((v("mr_fr") || {}).value || "").trim(), sort: (v("mr_sort") || {}).value || "rating" };
+        let target = l;
+        if (target) { target.name = name; target.rule = rule; } else { target = { id: "l" + Date.now().toString(36), name, rule, items: [] }; L2.push(target); }
+        saveMyLists(L2); openMyList(target.id); render(); return true; }
       case "mlistadd": addToListSheet(el.dataset.k); return true;
       case "mlistput": if (l) { const k = el.dataset.k, i = l.items.indexOf(k); if (i >= 0) l.items.splice(i, 1); else l.items.push(k); saveMyLists(L2); toast(i >= 0 ? `Removed from ${l.name}` : `Added to ${l.name}`); addToListSheet(k); } return true;
       case "mlistnewadd": case "mlistnew": {
         const inp = $("#mlistname"), name = ((inp && inp.value) || "").trim();
-        if (a === "mlistnew") { sheet(`<h3>New list</h3><label class="field"><span>Name</span><input id="mlistname" maxlength="60" placeholder="e.g. Comfort watches"></label><button class="btn" data-action="mlistnewadd" data-k="">Create</button>`); return true; }
+        if (a === "mlistnew") { sheet(`<h3>New list</h3><label class="field"><span>Name</span><input id="mlistname" maxlength="60" placeholder="e.g. Comfort watches"></label><button class="btn" data-action="mlistnewadd" data-k="">Create</button><p class="small muted" style="margin-top:14px">Or a list that fills itself by rules:</p><button class="btn" data-action="mrulenew">New smart list</button>`); return true; }
         if (!name) { toast("Give the list a name"); return true; }
         const nl = { id: "l" + Date.now().toString(36), name, items: el.dataset.k ? [el.dataset.k] : [] };
         L2.push(nl); saveMyLists(L2); toast(`List ${name} created`);
@@ -2327,7 +2483,7 @@
       case "mlistrenamesave": if (l) { const v = (($("#mlistname") || {}).value || "").trim(); if (v) { l.name = v; saveMyLists(L2); } openMyList(l.id); render(); } return true;
       case "mlistdel": if (l) { if (el.dataset.sure) { saveMyLists(L2.filter(x => x !== l)); closeOverlay(); toast(`Deleted ${l.name}`); render(); } else { el.dataset.sure = "1"; el.lastChild.textContent = "Tap again to delete"; } } return true;
       case "mlistcsv": if (l) { const q = v => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
-        const rows = [["Title", "Year", "Type", "IMDb ID"].join(",")].concat(l.items.map(k => { const [kind, ...r] = k.split(":"), id = r.join(":"); const it = kind === "lib" ? lib.get(id) : kind === "game" ? games.get(id) : books.get(id); if (!it) return null;
+        const rows = [["Title", "Year", "Type", "IMDb ID"].join(",")].concat((l.rule ? listItems(l.id).map(e => e.k) : l.items).map(k => { const [kind, ...r] = k.split(":"), id = r.join(":"); const it = kind === "lib" ? lib.get(id) : kind === "game" ? games.get(id) : books.get(id); if (!it) return null;
           return [q(it.title), q(it.year || (it.date || "").slice(0, 4)), q(kind === "lib" ? (it.type === "show" ? "Series" : "Film") : kind === "game" ? "Game" : "Book"), q(it.imdb || "")].join(","); }).filter(Boolean));
         Native.saveAs(`${l.name.replace(/[^\w ]+/g, "").trim() || "list"}.csv`, rows.join("\n") + "\n").then(ok => toast(ok ? "Saved" : "Not saved")); } return true;
     }
@@ -2405,6 +2561,10 @@
   }
   function renderHome() {
     const st = status(), parts = [];
+    // 0.5.8: a line when the last sync failed in part or is old, with the way to it
+    { const last = parseFloat(db.get("last_sync", "0")) || 0, fails = failedLabels(), h = last ? (Date.now() / 1000 - last) / 3600 : null;
+      if (!ui.job && (db.get("username") || db.get("imdb_user")) && (fails.length || h == null || h > 48))
+        parts.push(`<div class="nextbox" style="margin-bottom:12px" data-action="go" data-sec="sync"><div class="grow small">${h == null ? "Not synced yet" : `Last sync ${h > 48 ? `${Math.round(h / 24)} days ago` : `${Math.max(1, Math.round(h))} h ago`}`}${fails.length ? ` · ${fails.length} part${fails.length === 1 ? "" : "s"} failed: ${esc(fails.slice(0, 3).join(", "))}` : ""}</div><span class="small">Open ›</span></div>`); }
     const empty = !lib.all().length && !st.length && !games.games.length && !books.books.length;
     if (empty) {
       return `<section class="hero2"><div class="bg gen" style="--h:32"></div><div class="in"><div class="kicker">Welcome</div><h1>Everything you watch, play and read</h1>
@@ -2428,7 +2588,9 @@
     const nx = st.length ? C.upNext(st, 12) : [];
     const fy = forYou();
     if (lib.all().some(x => x.status === "watchlist")) parts.push(`<section><button class="btn" data-action="librandom">${icon("sync")}Pick something from my watchlist</button></section>`);
-    { const pk = picksToday(); if (pk.length >= 3) parts.push(`<section>${Kit.head("Picks for today")}${Kit.rail(pk.map(x => Kit.tile({ title: x.t, img: x.img, kind: x.kind, attrs: x.attrs }, x.t, esc(x.why))))}</section>`); }
+    { const pk = picksToday(); if (pk.length >= 3) parts.push(`<section>${Kit.head("Picks for today", `<button class="btn quiet small" data-action="pickedit">${ui.pickEdit ? "Done" : "Not for me…"}</button>`)}${ui.pickEdit
+      ? `<div class="listcard">${pk.map(x => `<div class="item"><div class="grow" style="min-width:0"><b class="ell">${esc(x.t)}</b><div class="small muted ell">${esc(x.why)}</div></div>${[["seen", "Seen it"], ["long", "Too long"], ["mood", "Not now"], ["no", "Not for me"]].map(([r, l]) => `<button class="btn quiet small" data-action="pickhide" data-k="${esc(x.k)}" data-v="${r}">${l}</button>`).join("")}</div>`).join("")}</div>`
+      : Kit.rail(pk.map(x => Kit.tile({ title: x.t, img: x.img, kind: x.kind, attrs: x.attrs }, x.t, esc(x.why))))}</section>`); }
     if (nx.length) parts.push(`<section>${Kit.head("Next in your canon", `<button class="btn quiet small" data-action="go" data-sec="missing">Canon</button>`)}${Kit.rail(nx.map(c => Kit.tile({ title: c.title, key: "canon:" + canonKey(c), img: cImg(c), kind: c.medium === "TV Series" ? "show" : c.medium === "Video Game" ? "game" : "movie", attrs: `data-action="sheet" data-sid="${sid(c, "canon")}"` }, c.title, `${c.franchise}${c.year ? " · " + c.year : ""}`)))}</section>`);
     const mvs = multiverseList().slice(0, 12);
     if (mvs.length) parts.push(`<section>${Kit.head("Your multiverses")}${Kit.rail(mvs.map(m => `<button class="poster wide" data-action="mvopen" data-mv="${esc(m.name)}" style="text-align:left"><span class="gen" style="--h:${Kit.hue(m.name)}"><b>${esc(m.name)}</b><small>${m.done} of ${m.total} · ${Math.round(100 * m.done / Math.max(1, m.total))}%</small></span><span class="bar"><i style="width:${Math.round(100 * m.done / Math.max(1, m.total))}%"></i></span></button>`), true)}</section>`);
@@ -2465,19 +2627,99 @@
     if (secOn("games")) for (const g of games.visible()) { const k = C.norm(g.multiverse || g.franchise); if (!k || !m.has(k)) continue; const x = m.get(k); x.total++; if (g.status === "done") x.done++; }
     return [...m.values()].filter(x => x.total >= 3).sort((a, b) => (b.done > 0) - (a.done > 0) || b.total - a.total);
   }
+  // ---- 0.5.8: Universe dashboard. Any franchise or multiverse: completion per medium, three orders (release,
+  // in-universe, your own) and a tier per entry (essential … not canon), with "essential only" and "missing only".
+  const TIERS = [["", "No tier"], ["essential", "Essential"], ["recommended", "Recommended"], ["optional", "Optional / spin-off"], ["alternate", "Alternate continuity"], ["notcanon", "Not canon"]];
+  const TIER_SHORT = { essential: "Essential", recommended: "Recommended", optional: "Optional", alternate: "Alternate", notcanon: "Not canon" };
+  const uKey = name => C.norm(name);
+  const uGet = (k, name) => { try { return JSON.parse(db.get(`u_${k}:${uKey(name)}`, k === "order" ? "[]" : "{}")); } catch (e) { return k === "order" ? [] : {}; } };
+  const uSet = (k, name, v) => db.set(`u_${k}:${uKey(name)}`, JSON.stringify(v));
+  function universeEntries(name) {
+    const n = uKey(name), out = [];
+    const MED = c => c.medium === "TV Series" ? "show" : c.medium === "Video Game" ? "game" : "movie";
+    for (const c of status()) if (C.norm(c.franchise) === n && MED(c) !== "game") out.push({ key: "canon:" + canonKey(c), title: c.title, medium: MED(c), date: c.date || (c.year ? c.year + "-07-01" : ""), done: !!c.have && c.state !== "listed",
+      img: cImg(c), attrs: `data-action="sheet" data-sid="${sid(c, "canon")}"`, sub: [c.year, c.medium].filter(Boolean).join(" · "), canon: c });
+    if (secOn("games")) for (const g of games.visible()) if (C.norm(g.multiverse) === n || C.norm(g.franchise) === n) out.push({ key: "game:" + g.id, title: g.title, medium: "game", date: g.date || "", done: g.status === "done",
+      img: g.cover || (g.steam ? GC.COVER(g.steam) : ""), attrs: `data-action="gopen" data-id="${esc(g.id)}"`, sub: [G_YEAR(g), g.platform].filter(Boolean).join(" · ") });
+    if (secOn("books")) for (const b of books.books) if (b.series && (C.norm(b.series).includes(n) || n.includes(C.norm(b.series)))) out.push({ key: "book:" + b.id, title: b.title, medium: "book", date: String(b.published || "").slice(0, 10), done: b.status === "read",
+      img: (b.cover || "").replace(/^http:/, "https:"), attrs: `data-action="bopen" data-id="${esc(b.id)}"`, sub: [(b.authors || [])[0], b.seriesNum ? `#${b.seriesNum}` : ""].filter(Boolean).join(" · ") });
+    return out;
+  }
+  const G_YEAR = g => (g.date || "").slice(0, 4);
+  function universeOrdered(name, mode, list) {
+    const byDate = (a, b) => String(a.date || "9999").localeCompare(String(b.date || "9999"));
+    if (mode === "custom") {
+      const ord = uGet("order", name), pos = new Map(ord.map((k, i) => [k, i]));
+      return list.slice().sort((a, b) => (pos.has(a.key) ? pos.get(a.key) : 1e6) - (pos.has(b.key) ? pos.get(b.key) : 1e6) || byDate(a, b));
+    }
+    if (mode === "chrono") {
+      let o = null; try { o = C.watchOrder(db, name, status(), "chrono"); } catch (e) { o = null; }
+      if (o && o.chrono) {
+        const pos = new Map(o.rows.map((c, i) => [canonKey(c), i]));
+        const canon = list.filter(e => e.canon && pos.has(canonKey(e.canon))).sort((a, b) => pos.get(canonKey(a.canon)) - pos.get(canonKey(b.canon)));
+        const rest = list.filter(e => !(e.canon && pos.has(canonKey(e.canon)))).sort(byDate);
+        // games and books go after the last canon entry released before them
+        const out = canon.slice();
+        for (const e of rest) { let at = out.length; if (e.date) { let last = -1; out.forEach((x, i) => { if (x.date && x.date <= e.date) last = i; }); at = last + 1; } out.splice(at, 0, e); }
+        return out;
+      }
+    }
+    return list.slice().sort(byDate);
+  }
   function renderMv() {
-    const name = ui.mv || "", n = C.norm(name), t = TODAY();
-    const rows = [];
-    for (const c of status()) if (C.norm(c.franchise) === n) rows.push({ date: c.date || (c.year ? c.year + "-07-01" : "9999"), done: !!c.have, html: Kit.tile({ title: c.title, key: "canon:" + canonKey(c), img: cImg(c), kind: c.medium === "TV Series" ? "show" : c.medium === "Video Game" ? "game" : "movie", done: !!c.have, badge: c.year || "", attrs: `data-action="sheet" data-sid="${sid(c, "canon")}"` }, c.title, c.medium) });
-    if (secOn("games")) for (const g of games.visible()) if (C.norm(g.multiverse) === n || C.norm(g.franchise) === n) rows.push({ date: g.date || "9999", done: g.status === "done", html: Kit.mods.games.tileOf(g) });
-    if (secOn("books")) for (const b of books.books) if (b.series && (C.norm(b.series).includes(n) || n.includes(C.norm(b.series)))) rows.push({ date: String(b.published || "9999").slice(0, 10), done: b.status === "read", html: Kit.mods.books.tileOf(b) });
-    const done = rows.filter(r => r.done).length;
-    rows.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const name = ui.mv || "", u = ui.u || (ui.u = { mode: "release", tier: "all", missing: false, edit: false });
+    if (u.name !== name) Object.assign(u, { name, mode: uGet("order", name).length ? "custom" : "release", tier: "all", missing: false, edit: false });
+    const tiers = uGet("tier", name), all = universeEntries(name);
+    all.forEach(e => { e.tier = tiers[e.key] || ""; });
+    const counted = all.filter(e => e.tier !== "notcanon");
+    // completion per medium
+    const MEDS = [["movie", "Films"], ["show", "Series"], ["game", "Games"], ["book", "Books"]];
+    const bars = MEDS.map(([m, l]) => { const xs = counted.filter(e => e.medium === m); return xs.length ? { l, done: xs.filter(e => e.done).length, n: xs.length } : null; }).filter(Boolean);
+    const ess = counted.filter(e => e.tier === "essential"), done = counted.filter(e => e.done).length;
+    let list = universeOrdered(name, u.mode, all);
+    if (u.tier === "essential") list = list.filter(e => e.tier === "essential");
+    else if (u.tier === "core") list = list.filter(e => e.tier === "essential" || e.tier === "recommended");
+    else if (u.tier === "canon") list = list.filter(e => e.tier !== "notcanon");
+    if (u.missing) list = list.filter(e => !e.done);
+    const next = universeOrdered(name, u.mode, counted).find(e => !e.done && (!ess.length || e.tier === "essential" || u.tier === "all"));
     const who = /doctor ?who|whoniverse/i.test(name) && secOn("timeline");
-    return `<section><div class="kicker">Multiverse</div><h2 style="font-size:30px;margin:6px 0">${esc(name)}</h2><p class="muted">${done} of ${rows.length} · ${Math.round(100 * done / Math.max(1, rows.length))}% · in release order</p>
+    const chip = (act, v, cur, label) => `<button class="chip" data-action="${act}" data-v="${v}" aria-pressed="${cur === v}">${label}</button>`;
+    const rowHtml = (e, i) => `<div class="item" style="gap:10px"><span class="small muted" style="width:26px;text-align:right">${i + 1}</span>
+      <div class="grow" ${e.attrs} style="min-width:0"><div class="row"><b class="grow ell">${esc(e.title)}</b>${e.done ? `<span class="pbadge">${icon("check")}</span>` : ""}</div>
+        <div class="small muted ell">${esc({ movie: "Film", show: "Series", game: "Game", book: "Book" }[e.medium])}${e.sub ? " · " + esc(e.sub) : ""}${e.tier ? ` · <b>${esc(TIER_SHORT[e.tier])}</b>` : ""}</div></div>
+      ${u.edit ? `<button class="btn quiet small" data-action="utier" data-k="${esc(e.key)}" aria-label="Change tier">${esc(e.tier ? TIER_SHORT[e.tier] : "Tier")}</button>
+        <button class="iconbtn" data-action="umove" data-k="${esc(e.key)}" data-v="-1" aria-label="Move up">↑</button><button class="iconbtn" data-action="umove" data-k="${esc(e.key)}" data-v="1" aria-label="Move down">↓</button>` : ""}</div>`;
+    return `<section><div class="kicker">Universe</div><h2 style="font-size:30px;margin:6px 0">${esc(name)}</h2>
+      <p class="muted">${done} of ${counted.length} · ${Math.round(100 * done / Math.max(1, counted.length))}%${ess.length ? ` · essential: ${ess.filter(e => e.done).length} of ${ess.length}` : ""}</p>
+      ${bars.length > 1 ? `<div class="card" style="margin:10px 0">${bars.map(b => `<div class="row small" style="gap:8px;margin:4px 0"><span style="width:56px">${b.l}</span><div class="grow" style="height:8px;border-radius:4px;background:var(--line);overflow:hidden"><i style="display:block;height:100%;width:${Math.round(100 * b.done / b.n)}%;background:var(--accent)"></i></div><span class="muted" style="width:64px;text-align:right">${b.done}/${b.n}</span></div>`).join("")}</div>` : ""}
+      ${next ? `<div class="nextbox" style="margin:10px 0"><div class="grow" ${next.attrs}><div class="kicker">Next</div><b>${esc(next.title)}</b><div class="small muted">${esc(next.sub || "")}</div></div></div>` : ""}
       ${who ? `<button class="btn" data-action="go" data-sec="timeline">${icon("box")}Open the Doctor Who timeline</button>` : ""}
-      <div class="row wrap" style="margin:10px 0 18px"><button class="btn small" data-action="order" data-mv="${esc(name)}">${icon("list")}Watch order</button><button class="btn small" data-action="mvshare" data-mv="${esc(name)}">${icon("upload")}Share this list</button></div>
-      ${Kit.grid(rows.map(r => r.html))}</section>`;
+      <div class="chips" style="margin-top:10px">${chip("umode", "release", u.mode, "Release order")}${chip("umode", "chrono", u.mode, "In-universe order")}${chip("umode", "custom", u.mode, "My order")}</div>
+      ${u.mode === "chrono" ? `<p class="small muted">In-universe order comes from the canon list's order (Watch order › Get the in-universe order); games and books are placed by release date.</p>` : ""}
+      ${u.mode === "custom" ? `<p class="small muted">Tap Edit, then the arrows, to put entries in your own order.</p>` : ""}
+      <div class="chips">${chip("utierf", "all", u.tier, "100% (everything)")}${chip("utierf", "canon", u.tier, "Without not-canon")}${chip("utierf", "core", u.tier, "Essential + recommended")}${chip("utierf", "essential", u.tier, "Essential only")}
+        <button class="chip" data-action="umissing" aria-pressed="${u.missing}">Missing only</button><button class="chip" data-action="uedit" aria-pressed="${u.edit}">${icon("edit")}Edit tiers and order</button></div>
+      <div class="row wrap" style="margin:10px 0 14px"><button class="btn small" data-action="order" data-mv="${esc(name)}">${icon("list")}Watch order</button><button class="btn small" data-action="mvshare" data-mv="${esc(name)}">${icon("upload")}Share this list</button></div>
+      ${list.length ? `<div class="listcard">${list.slice(0, ui.uLim || 200).map(rowHtml).join("")}</div>${list.length > (ui.uLim || 200) ? `<button class="btn block" data-action="umore">Show more</button>` : ""}` : `<p class="muted">Nothing here with these filters.${u.tier !== "all" && !Object.keys(tiers).length ? " No tiers set yet: tap Edit tiers and order." : ""}</p>`}</section>`;
+  }
+  function universeAct(a, el) {
+    const name = ui.mv || "", u = ui.u || {};
+    switch (a) {
+      case "umode": u.mode = el.dataset.v; if (u.mode === "custom" && !uGet("order", name).length) uSet("order", name, universeOrdered(name, "release", universeEntries(name)).map(e => e.key)); render(); return true;
+      case "utierf": u.tier = el.dataset.v; render(); return true;
+      case "umissing": u.missing = !u.missing; render(); return true;
+      case "uedit": u.edit = !u.edit; render(); return true;
+      case "umore": ui.uLim = (ui.uLim || 200) + 200; render(); return true;
+      case "utier": { const t = uGet("tier", name), cur = t[el.dataset.k] || "", i = TIERS.findIndex(x => x[0] === cur), nx = TIERS[(i + 1) % TIERS.length][0];
+        if (nx) t[el.dataset.k] = nx; else delete t[el.dataset.k]; uSet("tier", name, t); render(); return true; }
+      case "umove": {
+        let ord = uGet("order", name); const list = universeOrdered(name, u.mode === "custom" ? "custom" : u.mode, universeEntries(name)).map(e => e.key);
+        if (u.mode !== "custom" || !ord.length) ord = list; else { const have = new Set(ord); for (const k of list) if (!have.has(k)) ord.push(k); }
+        const i = ord.indexOf(el.dataset.k), j = i + (+el.dataset.v);
+        if (i >= 0 && j >= 0 && j < ord.length) { [ord[i], ord[j]] = [ord[j], ord[i]]; uSet("order", name, ord); u.mode = "custom"; }
+        render(); return true; }
+    }
+    return false;
   }
 
   // ---- your year: films, episodes, games, books and stories, by month
@@ -2493,7 +2735,7 @@
     return c;
   }
   // Diary: everything, newest first, by month; a day's episodes of one series on one line
-  const DIARY_KINDS = [["all", "All"], ["film", "Films"], ["episode", "Episodes"], ["game", "Games"], ["book", "Books"], ["story", "Doctor Who"]];
+  const DIARY_KINDS = [["all", "All"], ["film", "Films"], ["episode", "Episodes"], ["game", "Games finished"], ["session", "Play sessions"], ["book", "Books finished"], ["reading", "Reading"], ["story", "Doctor Who"]];
   function openDiary() {
     const f = ui.diaryF || "all", n = ui.diaryN || 200;
     const all = activity().filter(e => !e.bulk);
@@ -2504,7 +2746,7 @@
     for (const e of ev.slice(0, n)) {
       const mk = e.d.slice(0, 7);
       if (mk !== cur) { cur = mk; html += `<div class="kicker" style="margin:16px 0 6px">${esc(MONTH(e.d))}</div>`; }
-      const what = e.kind === "rewatch" ? "Rewatched" : e.kind === "film" ? "Film" : e.kind === "episode" ? "Episode" : e.kind === "game" ? "Game" : e.kind === "book" ? "Book" : "Story";
+      const what = e.kind === "rewatch" ? "Rewatched" : e.kind === "film" ? "Film" : e.kind === "episode" ? "Episode" : e.kind === "game" ? "Game" : e.kind === "session" ? "Played" : e.kind === "reading" ? "Read" : e.kind === "book" ? "Book" : "Story";
       html += `<div class="item" ${openAttrs(e)}><span class="xic ${e.app === "games" ? "games" : e.app === "books" ? "books" : "canon"}">${icon(ic(e))}</span>
         <div class="grow"><div class="row"><b class="grow ell">${esc(e.t)}</b><span class="small muted">${esc(shortDay(e.d))}</span></div><div class="small muted ell">${esc(what)}${e.sub ? " · " + esc(e.sub) : ""}${e.rating ? ` · ★ ${e.rating / 2}` : ""}</div></div></div>`;
     }
@@ -2515,10 +2757,59 @@
       ${html || '<p class="muted">Nothing here yet.</p>'}
       ${ev.length > n ? `<button class="btn block" style="margin-top:12px" data-action="diarymore">Show more (${fmt(ev.length - n)} left)</button>` : ""}`);
   }
+  // ---- Year in review: the year in one card you can share as text (0.5.8)
+  function wrappedData(y) {
+    const ev = activity().filter(e => !e.bulk && e.d.startsWith(String(y)));
+    const c = yearCounts(y);
+    const readHours = Math.round((c.readPages / 40 + c.readChapters / 3) * 10) / 10; // estimate: 40 pages or 3 manga chapters an hour
+    const playHours = c.playedHours || c.gameHours;
+    // franchises: films and series through the canon lists, games by franchise, books by series
+    const fr = new Map(), add = (k, w) => { if (k) fr.set(k, (fr.get(k) || 0) + w); };
+    let canonBy = new Map();
+    try { for (const r of (memo || [])) { if (r.imdb) canonBy.set(r.imdb, r.franchise); canonBy.set("n:" + C.norm(r.title), r.franchise); } } catch (e) { canonBy = new Map(); }
+    for (const e of ev) {
+      if (e.app === "watch") { const it = lib.get(e.id); if (it) add(canonBy.get(it.imdb) || canonBy.get("n:" + C.norm(it.title)), e.kind === "episode" ? 0.25 : 1); }
+      else if (e.app === "games") { const g = games.get(e.id); if (g) add(g.franchise, e.kind === "session" ? 0.25 : 2); }
+      else if (e.app === "books") { const b = books.get(e.id); if (b) add(b.series, e.kind === "reading" ? 0.25 : 1); }
+      else if (e.app === "dw") add("Doctor Who", 0.5);
+    }
+    const franchises = [...fr.entries()].filter(([k]) => k && k !== "Unsorted").sort((a, b) => b[1] - a[1]).slice(0, 5).map(([k]) => k);
+    // the longest run of days with something watched, played or read
+    const days = [...new Set(ev.map(e => e.d))].sort();
+    let best = 0, run = 0, prev = null;
+    for (const d of days) { run = prev && (Date.parse(d) - Date.parse(prev)) === 864e5 ? run + 1 : 1; best = Math.max(best, run); prev = d; }
+    const busiest = c.months.indexOf(Math.max(...c.months));
+    const finishedShows = lib.all().filter(it => it.type === "show" && it.status === "watched" && Object.values(it.eps || {}).some(d => String(d).startsWith(String(y)))).length;
+    const miles = [c.films >= 50 ? `${c.films} films` : "", c.episodes >= 500 ? `${fmt(c.episodes)} episodes` : "", finishedShows ? `${finishedShows} series finished` : "",
+      c.books ? `${c.books} book${c.books === 1 ? "" : "s"} finished` : "", c.games ? `${c.games} game${c.games === 1 ? "" : "s"} finished` : "", best >= 7 ? `${best} days in a row` : ""].filter(Boolean);
+    return { y, c, total: Math.round(c.hours + playHours + readHours), watch: c.hours, play: playHours, read: readHours, franchises, best, busiest, miles, top: c.top.slice(0, 5), estPlay: !c.playedHours && c.gameHours > 0 };
+  }
+  const MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  function wrappedText(w) {
+    return [`My ${w.y} in Saga`, `${fmt(w.total)} hours of stories: ${fmt(w.watch)} watching, ${fmt(w.play)} playing, ${fmt(w.read)} reading`,
+      `${fmt(w.c.films)} films · ${fmt(w.c.episodes)} episodes · ${fmt(w.c.games)} games · ${fmt(w.c.books)} books${w.c.stories ? ` · ${fmt(w.c.stories)} Doctor Who stories` : ""}`,
+      w.top.length ? `Favourites: ${w.top.map(x => `${x.t} (★${x.r / 2})`).join(", ")}` : "", w.franchises.length ? `Most explored: ${w.franchises.join(", ")}` : "",
+      w.c.months.some(Boolean) ? `Busiest month: ${MONTHS_EN[w.busiest]}` : "", w.miles.length ? `Milestones: ${w.miles.join(" · ")}` : ""].filter(Boolean).join("\n");
+  }
+  async function openWrapped() {
+    const y = ui.year || new Date().getFullYear();
+    try { await statusSoon(); } catch (e) { /* franchises from games and books only */ }
+    const w = wrappedData(y), max = Math.max(1, ...w.c.months);
+    const MON = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
+    sheet(`<div class="wrapped"><div class="kicker">Year in review</div><h3 style="font:800 34px/1 var(--display);margin:4px 0 14px">${y}</h3>
+      <div class="bigstat">${fmt(w.total)} h</div><div class="muted" style="margin-bottom:14px">${fmt(w.watch)} h watching · ${fmt(w.play)} h playing${w.estPlay ? " (time to beat; log sessions for real time)" : ""} · ${fmt(w.read)} h reading (estimated)</div>
+      <div class="stat3"><div><b>${fmt(w.c.films)}</b><span>films</span></div><div><b>${fmt(w.c.episodes)}</b><span>episodes</span></div><div><b>${fmt(w.c.games)}</b><span>games</span></div><div><b>${fmt(w.c.books)}</b><span>books</span></div><div><b>${fmt(w.c.stories)}</b><span>Doctor Who</span></div><div><b>${fmt(w.best)}</b><span>days in a row</span></div></div>
+      <section class="card" style="margin-top:14px"><div class="kicker" style="margin-bottom:10px">Month by month${w.c.months.some(Boolean) ? ` · busiest: ${MONTHS_EN[w.busiest]}` : ""}</div><div class="months">${w.c.months.map(n => `<i style="height:${Math.round(n / max * 100)}%" title="${n}"></i>`).join("")}</div><div class="months" style="height:auto">${MON.map(m => `<span>${m}</span>`).join("")}</div></section>
+      ${w.top.length ? `<h4>Favourites</h4>${w.top.map(x => `<div class="item" ${x.act}><b class="grow ell">${esc(x.t)}</b><span class="small">★ ${x.r / 2}</span></div>`).join("")}` : ""}
+      ${w.franchises.length ? `<h4>Most explored</h4><p>${w.franchises.map(esc).join(" · ")}</p>` : ""}
+      ${w.miles.length ? `<h4>Milestones</h4><p>${w.miles.map(esc).join(" · ")}</p>` : ""}
+      <div class="row" style="margin-top:14px;gap:8px"><button class="btn primary grow" data-action="wrapshare">Share</button><button class="btn grow" data-action="wrapcopy">Copy text</button></div></div>`);
+  }
   function renderYear() {
     const y = ui.year || new Date().getFullYear(), c = yearCounts(y), max = Math.max(1, ...c.months);
     const MON = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
     return `<div class="row" style="margin-bottom:10px"><button class="iconbtn" data-action="yearstep" data-v="-1" aria-label="Previous year">‹</button><h2 class="grow" style="text-align:center;margin:0;font-size:30px">${y}</h2><button class="iconbtn" data-action="yearstep" data-v="1" aria-label="Next year" ${y >= new Date().getFullYear() ? "disabled" : ""}>›</button></div>
+      <button class="btn block" style="margin-bottom:14px" data-action="wrapped">${icon("spark")} Year in review: your ${y} in one card</button>
       <section><div class="bigstat">${fmt(c.hours + c.gameHours)}</div><div class="muted">hours of stories: ${fmt(c.hours)} watching (estimated from runtimes), ${fmt(c.gameHours)} playing (time to beat)</div></section>
       <div class="stat3"><div><b>${fmt(c.films)}</b><span>films${c.rewatches ? ` (${c.rewatches} rewatch${c.rewatches === 1 ? "" : "es"})` : ""}</span></div><div><b>${fmt(c.episodes)}</b><span>episodes${c.bulkEps ? ` (+${fmt(c.bulkEps)} ticked in bulk, not counted)` : ""}</span></div><div><b>${fmt(c.games)}</b><span>games finished</span></div>
         <div><b>${fmt(c.books)}</b><span>books read</span></div><div><b>${fmt(c.pages)}</b><span>pages</span></div><div><b>${fmt(c.stories)}</b><span>Doctor Who stories</span></div></div>
@@ -2588,7 +2879,7 @@
       catch (e) { lines.push(`FAIL ${label}: ${e.message}`); setStage(k, false, e.message, t0); }
     };
     await step("library", "Library", async () => { const b = libTotals(), n = await libAdoptSoft(), a = libTotals(); return `${n} new titles, ${fmt(a.rated - b.rated)} ratings, ${fmt(a.er - b.er)} episode ratings, ${fmt(a.eps - b.eps)} episodes ticked (now ${fmt(a.titles)} titles, ${fmt(a.rated)} rated, ${fmt(a.er)} episode ratings)`; });
-    if (feat("trakt") && db.get("token") && db.get("trakt_push", "1") === "1") await step("push", "Trakt", async () => { const m = await L.traktPush(lib, http, db.get("client_id"), db.get("token")); libTouch(); return m; });
+    if (feat("trakt") && db.get("token") && db.get("trakt_push", "1") === "1") await step("push", "Trakt", async () => { const m = await L.traktPush(lib, http, db.get("client_id"), db.get("token")); libTouch(); ownTraktChange(); return m; });
     else setStage("push", true, db.get("token") ? "switched off in Settings" : "not signed in to Trakt (only needed to send changes)");
     const svc = [["anilist_user", "AniList", u => Imports.anilist(http, u)], ["mal_user", "MyAnimeList", u => Imports.malLists(http, u)],
       ["letterboxd_user", "Letterboxd", async u => ({ anime: await Imports.letterboxdRss(http, u), books: [] })], ["goodreads_user", "Goodreads", async u => ({ anime: [], books: await Imports.goodreadsRss(http, u) })]]
@@ -2774,12 +3065,16 @@
       if (ui.job || liveBusy) return pushSoon();
       liveBusy = true;
       const t0 = Date.now();
-      try { const m = await L.traktPush(lib, C.robust(Native.http, { timeout: 30000, tries: 2 }), db.get("client_id"), db.get("token")); libTouch(); setStage("push", true, m, t0); db.set("live_push_at", String(Date.now())); }
+      try { const m = await L.traktPush(lib, C.robust(Native.http, { timeout: 30000, tries: 2 }), db.get("client_id"), db.get("token")); libTouch(); ownTraktChange(); setStage("push", true, m, t0); db.set("live_push_at", String(Date.now())); }
       catch (e) { setStage("push", false, e.message, t0); }
       liveBusy = false;
       if (ui.sec === "sync") render();
     }, 8000);
   }
+  // 0.5.8: what Saga itself just sent to Trakt isn't news: note Trakt's "last change" right after a push,
+  // so the next check doesn't download your whole account again because of your own tick.
+  let ownPushAt = 0;
+  function ownTraktChange() { ownPushAt = Date.now(); }
   async function livePull(force) {
     if (!liveOn() || ui.job || liveBusy) return;
     const last = parseFloat(db.get("live_pull_at", "0")) || 0;
@@ -2790,13 +3085,22 @@
       if (db.get("token")) {
         const r = await C.robust(Native.http, { timeout: 20000, tries: 2 })("GET", "https://api.trakt.tv/sync/last_activities", { headers: { "Content-Type": "application/json", "trakt-api-version": "2", "trakt-api-key": db.get("client_id"), Authorization: `Bearer ${db.get("token")}` } });
         if (r.status === 200) { try { all = JSON.parse(r.body || "{}").all || ""; } catch (e) { all = ""; } changed = !all || all !== db.get("trakt_last_all"); }
+        // the only change since the last check came from a push this app made in that time: nothing to fetch
+        // (at least every 3 hours it fetches anyway, in case something else changed in the same minutes)
+        const at = Date.parse(all), realPull = parseFloat(db.get("live_real_pull_at", "0")) || 0;
+        if (changed && ownPushAt > last && at && at <= ownPushAt + 30000 && Date.now() - realPull < 3 * 3600000) { changed = false; db.set("trakt_last_all", all); }
       }
       db.set("live_pull_at", String(Date.now()));
-      if (changed) {
-        const res = await C.syncAll(db, Native.http, () => {}, new Set(["Trakt account"]));
-        if (res.ok) {
-          if (all) db.set("trakt_last_all", all);
-          libAdopt(); invalidate(); db.flush();
+      if (changed && !ui.job) {
+        db.set("live_real_pull_at", String(Date.now()));
+        C.BUSY.on = true; // no saves in the middle; the library step in small slices
+        let res;
+        try {
+          res = await C.syncAll(db, Native.http, () => {}, new Set(["Trakt account"]));
+          if (res.ok) { if (all) db.set("trakt_last_all", all); await C.breathe(0); await libAdoptSoft(); }
+        } finally { C.BUSY.on = false; }
+        if (res && res.ok) {
+          invalidate(); libTouch(); db.touch();
           const a = document.activeElement;
           if (!document.querySelector("#overlay .sheet") && !(a && a.dataset && a.dataset.input)) render();
         }
@@ -2834,12 +3138,16 @@
     try { acts = JSON.parse(SH.read("pending_actions.json") || "[]"); } catch (e) { acts = []; }
     if (!acts.length) return;
     SH.write("pending_actions.json", "[]");
-    let n = 0;
+    let n = 0, nb = 0;
     for (const a of acts) {
       const it = lib.get(a.id);
       if (a.op === "ep" && it && !it.eps[L.epKey(a.s, a.e)]) { lib.toggleEp(it, a.s, a.e, (a.at || "").slice(0, 10) || TODAY()); n++; }
+      if (a.op === "book_step") { const b = books.get(a.id); if (b) { const t = Date.parse((a.at || "") + "T12:00:00") || Date.now(); const when = (a.at || "").slice(0, 10) === TODAY() ? Date.now() : t;
+        if (a.ch) BC.setChapter(b, (b.chapter || 0) + a.ch, null, when); else if (a.pages) BC.setPage(b, (b.currentPage || 0) + a.pages, when); nb++; } }
     }
-    if (n) { libSave(); toast(`${n} episode${n === 1 ? "" : "s"} marked from notifications`); }
+    if (nb) { books.save(); }
+    if (n) libSave();
+    if (n || nb) toast([n ? `${n} episode${n === 1 ? "" : "s"} marked` : "", nb ? `${nb} reading step${nb === 1 ? "" : "s"} saved` : ""].filter(Boolean).join(", ") + " from the widget or notifications");
   }
 
   // ---- backup: one file with everything, by hand or automatically to a file you choose
@@ -3235,7 +3543,7 @@
     const a = el.dataset.action;
     if (a === "dismiss") { if (e.target === el) closeOverlay(); return; }
     if (a.startsWith("lib") && libAct(a, el)) { if (a === "libseasonopen") return; e.preventDefault(); return; }
-    if (a.startsWith("mlist") && myListAct(a, el)) { e.preventDefault(); return; }
+    if ((a.startsWith("mlist") || a.startsWith("mrule")) && myListAct(a, el)) { e.preventDefault(); return; }
     if (a === "imdbfull") { e.preventDefault(); doSync(false, true); return; }
     for (const m of Object.values(Kit.mods)) if (m.act && m.act(a, el, e)) { e.preventDefault(); return; }
     switch (a) {
@@ -3265,8 +3573,35 @@
       case "nettest": netTest(); break;
       case "copydiag": Native.copy(`Saga ${VERSION} sync report\n${ui.report || ""}\n${db.get("stage_report", "")}\n\n${(db.get("sync_log", "") || "").replace(/(api_key|key|token)=[^&\s]+/gi, "$1=…")}`); toast("Report and log copied"); break;
       case "mvopen": closeOverlay(); ui.mv = el.dataset.mv; go("mv"); break;
+      case "umode": case "utierf": case "umissing": case "uedit": case "umore": case "utier": case "umove": universeAct(a, el); break;
       case "tlhome": closeOverlay(); go("timeline"); Kit.mods.timeline.openStory(el.dataset.k); break;
       case "yearstep": ui.year = (ui.year || new Date().getFullYear()) + (+el.dataset.v); render(); break;
+      case "wrapped": openWrapped(); break;
+      case "pickedit": ui.pickEdit = !ui.pickEdit; render(); break;
+      // 0.5.8: select many titles in the library and change them together
+      case "libselstart": ui.sel = new Set(); render(); break;
+      case "libselend": ui.sel = null; render(); break;
+      case "libsel": if (ui.sel) { const id = el.dataset.id; if (ui.sel.has(id)) ui.sel.delete(id); else ui.sel.add(id); render(); } break;
+      case "libselall": if (ui.sel) { for (const t of document.querySelectorAll('#view [data-action="libsel"]')) ui.sel.add(t.dataset.id); render(); } break;
+      case "libbulk": if (ui.sel && ui.sel.size) {
+        const ids = [...ui.sel].filter(id => lib.get(id)), v = el.dataset.v;
+        if (v === "list") { bulkListSheet(ids); break; }
+        if (v === "tag") { sheet(`<h3>Tag ${fmt(ids.length)} titles</h3><label class="field"><span>Tag</span><input id="bulktag" maxlength="40" placeholder="e.g. comfort"></label><button class="btn primary" data-action="libbulktag">Add the tag</button>`); break; }
+        if (v === "remove" && !el.dataset.sure) { el.dataset.sure = "1"; el.textContent = `Tap again to remove ${ids.length}`; break; }
+        for (const id of ids) { const it = lib.get(id); if (!it) continue; if (v === "remove") lib.remove ? lib.remove(id) : delete lib.items[id]; else lib.setStatus(it, v); }
+        libSave(); toast(v === "remove" ? `Removed ${ids.length}` : `${ids.length} marked ${LST[v] || v}`); ui.sel = null; render(); }
+        break;
+      case "libbulktag": { const t = (($("#bulktag") || {}).value || "").trim(); if (!t || !ui.sel) break; for (const id of ui.sel) { const it = lib.get(id); if (it) { it.tags = it.tags || []; if (!it.tags.includes(t)) it.tags.push(t); } }
+        libSave(); closeOverlay(); toast(`Tagged ${ui.sel.size}`); ui.sel = null; render(); break; }
+      case "bulklistput": { const L2 = myLists(), l = L2.find(x => x.id === el.dataset.l); if (l && ui.bulkIds) { for (const id of ui.bulkIds) { const k = "lib:" + id; if (!l.items.includes(k)) l.items.push(k); } saveMyLists(L2); toast(`Added ${ui.bulkIds.length} to ${l.name}`); closeOverlay(); ui.sel = null; render(); } break; }
+      case "pickhide": { let h = {}; try { h = JSON.parse(db.get("pick_hide", "{}")) || {}; } catch (e2) { h = {}; }
+        const days = el.dataset.v === "mood" ? 7 : 90, now = Date.now();
+        for (const k of Object.keys(h)) if (h[k] < now) delete h[k];
+        h[el.dataset.k] = now + days * 864e5; db.set("pick_hide", JSON.stringify(h));
+        if (el.dataset.v === "seen" && el.dataset.k.startsWith("lib:")) { const it = lib.get(el.dataset.k.slice(4)); if (it && it.type === "movie" && it.status === "watchlist") { lib.setStatus ? lib.setStatus(it, "watched") : (it.status = "watched"); libSave(); } }
+        toast(days === 7 ? "Hidden for a week" : "Hidden for 90 days"); render(); break; }
+      case "wrapshare": { const t = wrappedText(wrappedData(ui.year || new Date().getFullYear())); let ok = false; try { ok = !!(window.Banta && Banta.share && Banta.share(`My year in Saga`, t)); } catch (e) { ok = false; } if (!ok) { Native.copy(t); toast("Copied: paste it anywhere"); } break; }
+      case "wrapcopy": Native.copy(wrappedText(wrappedData(ui.year || new Date().getFullYear()))); toast("Copied"); break;
       case "export": exportFile(el.dataset.v); break;
       case "classic": if (window.Android && Android.openClassic) Android.openClassic(el.dataset.v); else toast("Only in the app"); break;
       case "reimport": confirmDialog("Bring it over again?", el.dataset.v === "games" ? "Your games here are replaced by the old Games screen's list, marks and playthroughs." : "Your Doctor Who marks here are replaced by the old screen's.", "Replace", () => {
@@ -3562,5 +3897,5 @@
   const last = parseFloat(db.get("last_sync", "0")) || 0;
   const hasSources = db.get("username") || db.get("imdb_user") || db.get("canon_urls") || db.get("imdb_lists");
   if (db.get("auto_sync") === "1" && hasSources && Date.now() / 1000 - last > AUTO_SYNC_HOURS * 3600) { db.set("sync_open", "0"); doSync(); db.set("sync_open", "1"); }
-  window.__app = { whatsNew, setLook, icsText, forYou, picksToday, imgState, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
+  window.__app = { whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
 })();

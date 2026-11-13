@@ -30,7 +30,8 @@ public class ActionReceiver extends BroadcastReceiver {
                     if (a >= 0) {
                         int b = t.indexOf('\n', a + 1);
                         String rest = b < 0 ? "" : t.substring(b + 1);
-                        Shared.writeFile(c, f, t.substring(0, a) + "\n@@\n✓ Marked watched. Open Saga to see what's next.\n" + rest);
+                        String done = p != null && p.indexOf("\"book_step\"") >= 0 ? "✓ Progress saved. Open Saga to see it." : "✓ Marked watched. Open Saga to see what's next.";
+                        Shared.writeFile(c, f, t.substring(0, a) + "\n@@\n" + done + "\n" + rest);
                     }
                 }
                 Widget.refresh(c);

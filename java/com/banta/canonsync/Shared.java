@@ -146,6 +146,24 @@ public class Shared {
         }
     }
 
+    // 0.5.8: the phone's own share sheet, for any app the person picks
+    @JavascriptInterface
+    public boolean share(String title, String text) {
+        try {
+            if (text == null || text.length() > 120000) return false;
+            Intent i = new Intent("android.intent.action.SEND");
+            i.setType("text/plain");
+            i.putExtra("android.intent.extra.TEXT", text);
+            if (title != null) i.putExtra("android.intent.extra.SUBJECT", title);
+            Intent c = Intent.createChooser(i, title);
+            c.addFlags(0x10000000);
+            ctx.startActivity(c);
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     @JavascriptInterface
     public void notify(int id, String title, String text, String tab) {
         Notifier.post(ctx, id, title, text, tab);

@@ -273,7 +273,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.5.7.1", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.5.8", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();
@@ -458,6 +458,63 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
       try { __app.go("missing"); const r = document.querySelector('#view [data-action="sheet"]'); if (r) { r.click(); scan("sheet"); window.Saga.close(); } } catch (e) {}
       return Object.keys(out); });
     ok(!miss.length, "every control has a spoken name: " + JSON.stringify(miss.slice(0, 10))); await A(() => __app.go("home")); }
+  // ---- 0.5.8: universe dashboard, smart lists by rules, Year in review, widget reading button
+  const uv = await A(() => {
+    const G = Kit.mods.games, gl = __app.games; const g = gl.add({ title: "Alien: Isolation", date: "2014-10-07", franchise: "Alien", multiverse: "Alien" }, "backlog").game;
+    __app.db.replaceCanon("tmdb", [{ franchise: "Alien", title: "Alien", year: 1979, medium: "Movie", date: "1979-05-25" }, { franchise: "Alien", title: "Aliens", year: 1986, medium: "Movie", date: "1986-07-18" }, { franchise: "Alien", title: "Prometheus", year: 2012, medium: "Movie", date: "2012-05-30" }]);
+    __app.invalidate(); __app.ui.mv = "Alien"; __app.go("mv"); __app.render();
+    const t1 = document.querySelector("#view").textContent;
+    return { ok: /Universe/.test(t1) && /Films/.test(t1) && /Games/.test(t1) && /Alien: Isolation/.test(t1), n: __app.universeEntries("Alien").length, gid: g.id };
+  });
+  ok(uv.ok && uv.n === 4, "universe dashboard: films and games together with bars per medium: " + JSON.stringify(uv));
+  await pg.click('[data-action="uedit"]');
+  await pg.click('[data-action="utier"][data-k^="canon:"]');
+  const tierT = await A(() => document.querySelector("#view").textContent);
+  ok(/Essential/.test(tierT), "an entry's tier set from the dashboard");
+  await pg.click('[data-action="utierf"][data-v="essential"]');
+  ok(await A(() => document.querySelectorAll("#view .listcard .item").length === 1), "Essential only shows the one essential entry");
+  await pg.click('[data-action="utierf"][data-v="all"]');
+  const before = await A(() => [...document.querySelectorAll("#view .listcard .item b.grow")].map(b => b.textContent));
+  await pg.click(`[data-action="umove"][data-v="1"]`);
+  const after = await A(() => [...document.querySelectorAll("#view .listcard .item b.grow")].map(b => b.textContent));
+  ok(after[0] === before[1] && after[1] === before[0] && await A(() => __app.ui.u.mode === "custom"), "moving an entry makes your own order: " + JSON.stringify([before, after]));
+  await pg.click('[data-action="umode"][data-v="release"]');
+  const rel = await A(() => [...document.querySelectorAll("#view .listcard .item b.grow")].map(b => b.textContent));
+  ok(rel[0] === "Alien" && rel.indexOf("Alien: Isolation") === rel.length - 1, "release order puts the 2014 game last: " + rel);
+  const rl = await A(() => {
+    const r1 = __app.applyRule({ media: ["game"], status: ["want"], maxHours: 12, ownedOnly: false, sort: "short" });
+    const r2 = __app.applyRule({ minRating: 9 });
+    const r3 = __app.applyRule(__app.RULE_PRESETS[0][1]);
+    return { r1: r1.length, games: r1.every(k => k.startsWith("game:")), r2: r2.length, r3: Array.isArray(r3) };
+  });
+  ok(rl.games && rl.r3, "smart list rules: " + JSON.stringify(rl));
+  await A(() => { __app.go("home"); __app.render(); });
+  await pg.click('[data-action="mrulenew"]');
+  await pg.click('[data-action="mrulepreset"][data-i="4"]');
+  ok(await A(() => /All-time favourites/.test(document.querySelector("#overlay").textContent) && JSON.parse(__app.db.get("my_lists")).some(l => l.rule && l.rule.minRating === 9)), "a smart list preset saved and opened");
+  await A(() => { document.querySelector("#overlay").innerHTML = ""; });
+  const wr = await A(async () => { await __app.openWrapped(); const t = document.querySelector("#overlay").textContent; const w = __app.wrappedText(__app.wrappedData(new Date().getFullYear())); document.querySelector("#overlay").innerHTML = ""; return { card: /Year in review/.test(t) && /Month by month/.test(t), text: w }; });
+  ok(wr.card && /^My \d{4} in Saga\n.+hours of stories/.test(wr.text), "Year in review card and share text: " + wr.text.slice(0, 120));
+  const wb = await A(() => {
+    const b = __app.books.add ? __app.books.add({ title: "Vagabond", manga: true, chapters: 300, chapter: 10 }, "reading") : null;
+    const bk = (b && (b.book || b)) || __app.books.books.find(x => x.status === "reading");
+    bk.manga = true; bk.status = "reading"; bk.chapter = 10; bk.log = [{ t: Date.now(), c: 10 }]; __app.books.save();
+    const f = __app.widgetFiles()["widget_books.txt"];
+    const line = f.split("\n")[1]; const payload = JSON.parse(line.split("\t")[1]);
+    localStorage.setItem("f:pending_actions.json", JSON.stringify([Object.assign(payload, { at: new Date().toISOString().slice(0, 10) })])); window.__resumed();
+    return { line: line.slice(0, 40), ch: __app.books.get(payload.id).chapter, main: (() => { const f = __app.widgetFiles(); return /\n@@✓ /.test(f["widget.txt"]) === /\n@@✓ /.test(f["widget_episodes.txt"]); })() };
+  });
+  ok(/^@@\+1 ch\. /.test(wb.line) && wb.ch === 11, "books widget: +1 chapter button works: " + JSON.stringify(wb));
+  ok(wb.main, "main widget has the same Mark watched button as the episodes widget");
+  // bulk: select two titles in the library and pause them together
+  await A(() => { document.querySelector("#overlay").innerHTML = ""; __app.ui.libF = "all"; __app.ui.libRes = null; __app.ui.libBusy = false; __app.ui.libTag = ""; __app.ui.libFilterQ = ""; });
+  await pg.click('nav#tabs [data-sec="watch"]');
+  await A(() => { __app.ui.tab = "library"; __app.render(); });
+  await pg.click('[data-action="libselstart"]');
+  const ids = await A(() => [...document.querySelectorAll('#view [data-action="libsel"]')].slice(0, 2).map(t => t.dataset.id));
+  for (const id of ids) await pg.click(`[data-action="libsel"][data-id="${id}"]`);
+  await pg.click('[data-action="libbulk"][data-v="paused"]');
+  ok(await A(ids => ids.every(id => __app.lib.get(id).status === "paused") && !__app.ui.sel, ids), "bulk: two titles paused together");
   console.log("SAGA 5 UI TESTS PASSED");
   await browser.close(); srv.close();
 })().catch(e => { console.error(e); process.exit(1); });

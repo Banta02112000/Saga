@@ -1234,22 +1234,47 @@
     return out;
   }
 
-  async function traktSync(db, http, clientId, username, token, progress) {
+  // 0.5.8: with a sign-in, Trakt says when each part of your account last changed (/sync/last_activities);
+  // parts that haven't changed since the last sync aren't downloaded again. Nothing stored is removed by a skip.
+  const LA_KEYS = {
+    "Watched movies": la => [la.movies && la.movies.watched_at],
+    "Watched shows": la => [la.episodes && la.episodes.watched_at, la.shows && la.shows.hidden_at],
+    "Ratings": la => ["movies", "shows", "seasons", "episodes"].map(k => la[k] && la[k].rated_at),
+    "Watchlist": la => ["movies", "shows", "seasons", "episodes"].map(k => la[k] && la[k].watchlisted_at).concat([la.watchlist && la.watchlist.updated_at]),
+    "lists": la => [la.lists && la.lists.updated_at, la.lists && la.lists.commented_at],
+  };
+  function laStamp(la, label) { try { const v = LA_KEYS[label](la || {}); return v.some(Boolean) ? v.map(x => x || "").join("|") : ""; } catch (e) { return ""; } }
+  async function traktSync(db, http, clientId, username, token, progress, opt = {}) {
     const t = new Trakt(http, clientId, token);
     const u = `/users/${encodeURIComponent(username)}`;
     const steps = [["Watched movies", `${u}/watched/movies`, "watched"], ["Watched shows", `${u}/watched/shows`, "watched"],
                    ["Ratings", `${u}/ratings`, "rated"], ["Watchlist", `${u}/watchlist`, "watchlist"]];
-    let total = 0;
+    let total = 0, la = null, seen = {};
+    const skipped = [];
+    if (token && !opt.full) {
+      try { la = await t.get("/sync/last_activities"); } catch (e) { la = null; }
+      try { seen = JSON.parse(db.get("trakt_la", "{}")) || {}; } catch (e) { seen = {}; }
+    }
+    const fresh = {};
+    const same = label => { if (!la) return false; const st = laStamp(la, label); fresh[label] = st; return !!st && seen[label] === st; };
     const n = steps.length + 1;
     for (let i = 0; i < steps.length; i++) {
       const [label, path, kind] = steps[i];
       progress(i / n, `Trakt: ${label}`);
+      if (same(label) && (label !== "Watched shows" || db.get("trakt_progress"))) { skipped.push(label.toLowerCase()); continue; }
       const data = await t.get(path);
       if (!Array.isArray(data)) throw new Error(`Trakt: ${label} came back empty`);
       total += storeTrakt(db, data, kind, "");
       if (label === "Watched shows" && Array.isArray(data)) db.set("trakt_progress", JSON.stringify(watchProgress(data)));
     }
     progress(steps.length / n, "Trakt: your lists");
+    if (same("lists") && db.get("trakt_lists")) skipped.push("lists");
+    else total += await traktLists();
+    if (la) db.set("trakt_la", JSON.stringify(Object.assign(seen, fresh)));
+    traktSync.skipped = skipped;
+    return total;
+    async function traktLists() {
+    let total = 0;
     const lists = await t.get(`${u}/lists`);
     db.set("trakt_lists", JSON.stringify(lists.map(l => l.name)));
     for (let j = 0; j < lists.length; j++) {
@@ -1260,6 +1285,7 @@
       total += storeTrakt(db, await t.get(`${u}/lists/${lid}/items`), "list", name);
     }
     return total;
+    }
   }
 
   // Episodes you've watched per show (from Trakt's watched/shows), keyed by TMDB show id.
@@ -3322,10 +3348,11 @@ ${blocks.join("\n\n")}`;
     const user = db.get("username"), cid = db.get("client_id");
     if (user && cid) {
       add("trakt", "Trakt account", async () => {
-        const n = await traktSync(db, http, cid, user, db.get("token") || null, (f, t) => L(t));
+        const n = await traktSync(db, http, cid, user, db.get("token") || null, (f, t) => L(t), { full: !!opt.fullTrakt });
         let names = [];
         try { names = JSON.parse(db.get("trakt_lists", "[]")); } catch (e) { /* ignore */ }
-        return `${n} records, ${names.length} list${names.length === 1 ? "" : "s"}${names.length ? ` (${names.join(", ")})` : ""}`;
+        const sk = traktSync.skipped || [];
+        return `${n} records, ${names.length} list${names.length === 1 ? "" : "s"}${names.length ? ` (${names.join(", ")})` : ""}${sk.length ? `; unchanged since the last sync, not downloaded again: ${sk.join(", ")}` : ""}`;
       }, 300000);
     }
     const partial = route => /first (page|batch) only/.test(route);

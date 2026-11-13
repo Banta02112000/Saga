@@ -26,8 +26,17 @@
   function blank(o) {
     return Object.assign({ id: newId(), title: "", date: "", dateText: "", platform: "", franchise: "", multiverse: "", owned: "", remake: null,
       imdbR: null, hours: null, hoursRemake: null, status: "backlog", next: false, plays: [], rating: 0, notes: "", steam: null, imdb: null,
-      hidden: false, added: Date.now(), src: "", price: null, target: null, cover: "", oldId: "" }, o || {});
+      hidden: false, added: Date.now(), src: "", price: null, target: null, cover: "", oldId: "", sessions: [] }, o || {});
   }
+  // 0.5.8: play sessions ({ d: "YYYY-MM-DD", mins, note }); starting one moves a backlog game to Playing
+  function logSession(g, mins, d, note = "") {
+    mins = Math.round(+mins || 0);
+    if (mins <= 0) return g;
+    g.sessions = (g.sessions || []).concat([{ d: String(d || new Date().toISOString()).slice(0, 10), mins, note: String(note || "") }]).slice(-1000);
+    if (g.status === "backlog" || g.status === "wishlist") g.status = "playing";
+    return g;
+  }
+  const playedMins = g => (g.sessions || []).reduce((a, x) => a + (x.mins || 0), 0);
 
   class Games {
     constructor(persist) {
@@ -320,7 +329,7 @@
       games: lib.visible().map(g => ({ id: g.id, t: g.title, f: g.franchise, m: g.multiverse, done: g.status === "done", date: g.date })) };
   }
 
-  const API = { STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, franchiseGuess, fromOld, hasOld, COVER, HEADER,
+  const API = { STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, franchiseGuess, fromOld, hasOld, COVER, HEADER,
     steamSearch, linkSteam, steamPrices, storePrices, steamDates, importRows, fromImdb, storeLinks, indexFor, yearOf, NA };
   if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
   root.GamesCore = API;

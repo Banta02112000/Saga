@@ -6,7 +6,7 @@
   const DAY = 864e5;
   const GB = "https://www.googleapis.com/books/v1/volumes";
   const OL = "https://openlibrary.org";
-  const UA = { "User-Agent": "Saga/0.5.7.1 (+https://github.com/Banta02112000/Saga)", Accept: "application/json" };
+  const UA = { "User-Agent": "Saga/0.5.8 (+https://github.com/Banta02112000/Saga)", Accept: "application/json" };
   const STATUSES = ["reading", "paused", "want", "read", "dnf"];
   const STATUS_LABEL = { reading: "Reading", paused: "Paused", want: "Want to read", read: "Read", dnf: "Did not finish" };
   const FORMATS = ["Paper", "Ebook", "Audio"];
@@ -136,8 +136,10 @@
     if (r.status !== 200) throw new Error(`MyAnimeList: HTTP ${r.status || r.error || "error"}`);
     return ((JSON.parse(r.body || "{}").data) || []).map(fromJikanManga);
   }
-  function setChapter(b, ch, vol) {
-    b.chapter = Math.max(0, parseInt(ch, 10) || 0);
+  function setChapter(b, ch, vol, now = Date.now()) {
+    const c = Math.max(0, parseInt(ch, 10) || 0);
+    if (c !== (b.chapter || 0)) b.log = (b.log || []).concat([{ t: now, c }]).slice(-400); // 0.5.8: chapters read show in the Diary
+    b.chapter = c;
     if (vol != null && vol !== "") b.volume = Math.max(0, parseInt(vol, 10) || 0);
     if (b.chapter && b.status === "want") { b.status = "reading"; if (!b.started) b.started = Date.now(); }
     if (b.chapters && b.chapter >= b.chapters && !b.ongoing && b.status !== "read") setStatus(b, "read");

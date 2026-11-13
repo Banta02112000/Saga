@@ -88,6 +88,15 @@ public class Widget extends AppWidgetProvider {
                     if (tb > 0) { btn = head.substring(0, tb); payload = head.substring(tb + 1); }
                 }
             }
+            // 0.5.8: if the app hasn't refreshed this widget for a while, the heading says how long ago
+            if (text != null && text.length() > 0) {
+                try {
+                    long age = System.currentTimeMillis() - new java.io.File(ctx.getFilesDir(), Shared.safe(file(kind))).lastModified();
+                    long h = age / 3600000L;
+                    if (h >= 6) title = title + (h >= 48 ? " · " + (h / 24) + " days ago" : " · " + h + " h ago");
+                } catch (Throwable ignored) {
+                }
+            }
             RemoteViews v = new RemoteViews(pkg, layout);
             v.setTextViewText(idTitle, title);
             v.setTextViewText(idBody, body);

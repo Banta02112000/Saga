@@ -236,8 +236,26 @@
     const n = norm(q);
     if (n.length < 2) return [];
     const words = n.split(" ").filter(Boolean);
-    const hit = t => { const x = norm(t); return words.every(w => x.includes(w)); };
-    const rank = t => { const x = norm(t); return x === n ? 0 : x.startsWith(n) ? 1 : 2; };
+    // 0.5.8: a word with a typo still matches a word of the title (one letter off from 4 letters, two from 8)
+    const near = (a, b, max) => {
+      if (Math.abs(a.length - b.length) > max) return false;
+      let prev2 = null, prev = Array.from({ length: b.length + 1 }, (_, j) => j); // two letters swapped count as one mistake
+      for (let i = 1; i <= a.length; i++) {
+        const cur = [i]; let best = i;
+        for (let j = 1; j <= b.length; j++) {
+          cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+          if (prev2 && i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) cur[j] = Math.min(cur[j], prev2[j - 2] + 1);
+          if (cur[j] < best) best = cur[j];
+        }
+        if (best > max) return false;
+        prev2 = prev; prev = cur;
+      }
+      return prev[b.length] <= max;
+    };
+    const fuzzy = {};
+    const wordHit = (w, x) => x.includes(w) || (w.length >= 4 && x.split(" ").some(t => near(w, t.slice(0, Math.max(w.length, t.length)), w.length >= 8 ? 2 : 1) || (t.length > w.length && near(w, t.slice(0, w.length), w.length >= 8 ? 2 : 1))));
+    const hit = t => { const x = norm(t); if (words.every(w => x.includes(w))) return true; if (words.every(w => wordHit(w, x))) { fuzzy[x] = 1; return true; } return false; };
+    const rank = t => { const x = norm(t); return x === n ? 0 : x.startsWith(n) ? 1 : fuzzy[x] ? 3 : 2; };
     const out = [], seen = new Set();
     for (const c of status || []) if (hit(c.title)) { seen.add(c.norm + "|" + (c.year || "")); out.push({ app: "canon", c, title: c.title, sub: [c.franchise, c.year, c.medium].filter(Boolean).join(" · "), done: c.have && c.state !== "listed", state: c.state, r: rank(c.title) }); }
     for (const i of items || []) if (!seen.has(i.norm + "|" + (i.year || "")) && hit(i.title)) { seen.add(i.norm + "|" + (i.year || "")); out.push({ app: "canon", item: i, title: i.title, sub: [i.year, i.medium, i.kind === "watchlist" || i.kind === "list" ? "on your list" : "seen"].filter(Boolean).join(" · "), done: i.kind === "watched" || i.kind === "rated", r: rank(i.title) }); }

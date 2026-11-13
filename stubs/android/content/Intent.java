@@ -18,5 +18,6 @@ public class Intent {
     public int getFlags() { return 0; }
     public Intent addFlags(int f) { return this; }
     public Uri getData() { return null; }
+    public static Intent createChooser(Intent target, CharSequence title) { return target; }
     public ClipData getClipData() { return null; }
 }

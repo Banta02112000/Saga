@@ -78,6 +78,7 @@
       <button class="btn block" style="margin-top:16px" data-action="gmanual">${K.icon("plus")}Not on Steam? Add it by hand</button>`;
   }
 
+  const hm = m => (m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ""}` : `${m} min`);
   function sheetHtml(g) {
     const t = today(), L = Saga.lang();
     const plays = g.plays.map((d, i) => `<div class="logrow"><span class="grow">${i + 1}. ${esc(K.when(d, L))}</span><button class="btn quiet small" data-action="gunplay" data-i="${i}" aria-label="Remove this playthrough">✕</button></div>`).join("");
@@ -90,6 +91,11 @@
       <div class="seg2" style="grid-template-columns:repeat(3,1fr);margin:6px 0 12px">${G.STATUSES.map(s => `<button data-action="gst" data-v="${s}" aria-pressed="${g.status === s}">${G.LABEL[s]}</button>`).join("")}</div>
       <div class="row" style="margin-bottom:6px"><span class="small muted grow">Your rating</span>${K.stars(g.rating, "grate")}</div>
       <label class="switch"><input type="checkbox" data-gnext="1" ${g.next ? "checked" : ""}><span>Next up<small class="muted" style="display:block">Shows on Home and at the top of Games</small></span></label>
+      <h4>Play sessions <span class="muted small">${(g.sessions || []).length ? `· ${hm(G.playedMins(g))} in ${g.sessions.length}` : ""}</span></h4>
+      ${(g.sessions || []).slice(-4).reverse().map((x, j) => `<div class="logrow"><span class="grow">${esc(K.when(x.d, L))} · ${hm(x.mins)}${x.note ? ` · ${esc(x.note)}` : ""}</span><button class="btn quiet small" data-action="gunsess" data-i="${g.sessions.length - 1 - j}" aria-label="Remove this session">✕</button></div>`).join("")}
+      <div class="row" style="margin:6px 0 4px;flex-wrap:wrap;gap:6px">${[[30, "+30 min"], [60, "+1 h"], [120, "+2 h"]].map(([m, l]) => `<button class="btn small" data-action="gsess" data-m="${m}">${l}</button>`).join("")}
+        <input type="number" inputmode="decimal" step="0.25" min="0" id="gSessH" placeholder="hours" style="width:84px" aria-label="Hours played"><button class="btn small" data-action="gsess">Log</button></div>
+      <p class="small muted" style="margin:0 0 12px">Sessions count as played today (or the date above) and show in the Diary.</p>
       <h4>Playthroughs <span class="muted small">${g.plays.length ? `· ${g.plays.length}×` : ""}</span></h4>
       ${plays || `<p class="small muted">Not finished yet.</p>`}
       <div class="row" style="margin:6px 0 12px"><input type="date" id="gDate" value="${t}" max="${t}" aria-label="Date"><button class="btn" data-action="gplay">${K.icon("plus")}${g.plays.length ? "Finished again" : "Finished"}</button></div>
@@ -148,6 +154,10 @@
     if (!g) return false;
     switch (a) {
       case "gst": G.setStatus(g, el.dataset.v, (document.getElementById("gDate") || {}).value); reopen(); return true;
+      case "gsess": { const h = document.getElementById("gSessH"), mins = el.dataset.m ? +el.dataset.m : Math.round((parseFloat(String(h && h.value || "").replace(",", ".")) || 0) * 60);
+        if (!mins) { K.toast("Type the hours played"); return true; }
+        G.logSession(g, mins, (document.getElementById("gDate") || {}).value || today()); reopen(); K.toast(`Logged ${hm(mins)}`); return true; }
+      case "gunsess": { g.sessions.splice(+el.dataset.i, 1); reopen(); return true; }
       case "grate": { const v = +el.dataset.v * 2; g.rating = g.rating === v ? v - 1 : g.rating === v - 1 ? 0 : v; reopen(); return true; }
       case "gsync1": (async () => {
         K.toast(`Syncing ${g.title}…`); const said = [];
