@@ -125,7 +125,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
 
   // ---- Watch › Library poster grid, search, film watched twice
   await pg.click('nav#tabs [data-sec="watch"]');
-  ok(await pg.waitForFunction(() => document.querySelectorAll("#view .grid .poster").length >= 2, null, { timeout: 8000 }).then(() => true, () => false), "library posters: " + await A(() => (document.querySelector("#view") || {}).textContent.slice(0, 300)));
+  ok(await pg.waitForFunction(() => document.querySelectorAll("#view .grid .poster").length >= 2, null, { timeout: 8000 }).then(() => true, () => false), "library posters: " + await A(() => JSON.stringify({ tab: __app.ui.tab, sec: __app.ui.sec, f: __app.ui.libF, n: __app.lib.all().length, html: (document.querySelector("#view") || {}).innerHTML.slice(0, 900) })));
   await pg.fill('[data-input="libQ"]', "Alien"); await pg.press('[data-input="libQ"]', "Enter");
   await pg.waitForFunction(() => document.querySelectorAll('[data-action="libpeek"]').length);
   await pg.click('[data-action="libpeek"]');
