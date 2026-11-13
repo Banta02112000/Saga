@@ -20,7 +20,7 @@
   });
 
   async function main() {
-    const db = new C.Store({ load: () => A.load("canonsync.json"), save: t => A.save("canonsync.json", t), cache: { load: () => A.load("cache.json"), save: t => A.save("cache.json", t) }, secrets: A.secretsLoad ? { load: () => A.secretsLoad(), save: t => A.secretsSave(t) } : null });
+    const db = new C.Store({ load: () => A.load("canonsync.json"), save: t => A.save("canonsync.json", t), cache: { load: () => A.load("cache.json"), save: t => A.save("cache.json", t), loadLog: () => A.load("cache.log") }, secrets: A.secretsLoad ? { load: () => A.secretsLoad(), save: t => A.secretsSave(t) } : null });
     if (db.get("bg_enabled", "1") !== "1") return "background checks are off";
     const { report, notes } = await C.backgroundRun(db, http);
     for (const n of notes) A.notify(n.id, n.title, n.text, n.tab || "home");
@@ -93,7 +93,7 @@
 
   main().then(r => A.done(String(r || "")), e => {
     try {
-      const db = new C.Store({ load: () => A.load("canonsync.json"), save: t => A.save("canonsync.json", t), cache: { load: () => A.load("cache.json"), save: t => A.save("cache.json", t) }, secrets: A.secretsLoad ? { load: () => A.secretsLoad(), save: t => A.secretsSave(t) } : null });
+      const db = new C.Store({ load: () => A.load("canonsync.json"), save: t => A.save("canonsync.json", t), cache: { load: () => A.load("cache.json"), save: t => A.save("cache.json", t), loadLog: () => A.load("cache.log") }, secrets: A.secretsLoad ? { load: () => A.secretsLoad(), save: t => A.secretsSave(t) } : null });
       db.set("bg_report", `FAIL background check: ${e && e.message}`);
       db.flush();
     } catch (x) { /* nothing else to do */ }

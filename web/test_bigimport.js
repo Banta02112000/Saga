@@ -46,12 +46,16 @@ const mock = (seed) => {
     if (/openlibrary\.org\/search\.json\?author=/.test(url)) return J({ docs: [{ key: "/works/A", title: "Dune Messiah", author_name: ["Frank Herbert"], first_publish_year: 1969 }] });
     return { status: 404, body: "" };
   };
-  const file = n => LS.getItem("f:" + n) || "";
+  const file = n => (window.__files && n in window.__files ? window.__files[n] : LS.getItem("f:" + n) || "");
   window.Banta = { app: () => "canon", read: n => file(n), write: (n, t) => { LS.setItem("f:" + n, String(t)); return true; }, remove: n => { LS.removeItem("f:" + n); return true; },
     stamp: n => file(n).length + ":" + file(n).slice(-16), post: () => {}, take: () => "", busy: () => {}, paste: () => "", shareTo: () => true, notify: () => {}, widget: () => {} };
   window.Android = { load: file, save: (n, t) => { LS.setItem("f:" + n, t); return true; },
     // 0.5.4.9: background writes (here: done at once), and the stamp the writer left
-    saveLater: (n, t) => { LS.setItem("f:" + n, t); window.__own = window.__own || {}; window.__own[n] = file(n).length + ":" + file(n).slice(-16); return true; },
+    saveLater: (n, t) => { window.__files = window.__files || {}; window.__files[n] = t; window.__own = window.__own || {}; window.__own[n] = t.length + ":" + t.slice(-16); return true; },
+    bufAdd: (k, t) => { window.__buf = window.__buf || {}; window.__buf[k] = (window.__buf[k] || "") + t; window.__bufCalls = (window.__bufCalls || 0) + 1; }, bufDrop: k => { delete (window.__buf || {})[k]; },
+    saveBuf: (n, k) => { const t = (window.__buf || {})[k]; if (t == null) return false; delete window.__buf[k]; window.__files = window.__files || {}; window.__files[n] = t; window.__own = window.__own || {}; window.__own[n] = t.length + ":" + t.slice(-16); return true; },
+    appendLater: (n, t) => { window.__files = window.__files || {}; window.__files[n] = (window.__files[n] || "") + t; return true; },
+    writeUriBuf: (id, uri, k) => { const t = (window.__buf || {})[k]; delete window.__buf[k]; window.__backupFile = t; setTimeout(() => { results[id] = "true"; window.__saveDone(id); }, 50); },
     ownStamp: n => (window.__own || {})[n] || "", stamp: n => file(n).length + ":" + file(n).slice(-16), take: id => { const r = results[id]; delete results[id]; return r || ""; },
     http: (id, m, url, h, body) => { window.__http.push(url); setTimeout(() => { results[id] = JSON.stringify(Object.assign({ headers: {} }, reply(m, url, body))); window.__httpDone(id); }, 3); },
     browse: (id) => setTimeout(() => { results[id] = JSON.stringify({ status: 0, value: "NETERR:Web page not available", error: "x" }); window.__httpDone(id); }, 3),
@@ -75,7 +79,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   await pg.waitForFunction(() => window.__app && window.__app.db.get("saga5_migrated"), null, { timeout: 8000 });
   const A = (f, arg) => pg.evaluate(f, arg);
   // the phone saves to files, not to the browser's 5 MB storage
-  await A(() => { const mem = {}, ld = Android.load; Android.save = (n, t) => { mem[n] = t; return true; }; Android.load = n => n in mem ? mem[n] : ld(n); Banta.write = (n, t) => { mem[n] = String(t); return true }; Banta.read = n => n in mem ? mem[n] : ""; });
+  await A(() => { window.__files = window.__files || {}; const mem = window.__files, ld = Android.load; Android.save = (n, t) => { mem[n] = t; return true; }; Android.load = n => n in mem ? mem[n] : ld(n); Banta.write = (n, t) => { mem[n] = String(t); return true }; Banta.read = n => n in mem ? mem[n] : ""; });
   const types = ["Movie", "TV Series", "TV Episode", "TV Mini Series", "Video Game", "Short", "TV Movie"];
   const rows = ["Const,Your Rating,Date Rated,Title,Original Title,URL,Title Type,IMDb Rating,Runtime (mins),Year,Genres,Num Votes,Release Date,Directors"];
   for (let i = 0; i < 10500; i++) rows.push(`tt${1000000 + i},${1 + i % 10},2023-01-${String(1 + i % 28).padStart(2, "0")},"Title, number ${i}","Title, number ${i}",https://www.imdb.com/title/tt${1000000 + i}/,${types[i % 7]},7.1,${90 + i % 40},${1950 + i % 70},"Drama, Comedy",1234,${1950 + i % 70}-05-01,"Someone"`);
@@ -117,6 +121,11 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     window.__big = u => /watched\/movies/.test(u) ? M : /watched\/shows/.test(u) ? S : /ratings/.test(u) ? R : /watchlist/.test(u) ? M.slice(0, 500).map(x => ({ type: "movie", movie: x.movie })) : null; __app.db.set("token", "x"); __app.db.set("client_id", "c"); window.__lt = []; window.__marks = [];
     new PerformanceObserver(l => { for (const e of l.getEntries()) window.__lt.push([Math.round(e.startTime), Math.round(e.duration)]); }).observe({ entryTypes: ["longtask"] });
     const orig = __app.setProgress; });
+  // what crosses to the phone during the sync: never one huge text (that's what froze the screen), and a backup file is set
+  await A(() => { window.__maxCall = {}; for (const [o, fns] of [[Android, ["save", "saveLater", "bufAdd", "writeUri", "appendLater"]], [Banta, ["write"]]]) for (const f of fns) { const orig = o[f]; if (!orig) continue;
+      o[f] = function (a, b) { const t = String(f === "write" || f === "save" || f === "saveLater" || f === "bufAdd" || f === "writeUri" || f === "appendLater" ? b : ""); window.__maxCall[f] = Math.max(window.__maxCall[f] || 0, t.length); return orig.apply(o, arguments); }; }
+    for (let i = 0; i < 6000; i++) __app.db.cacheSet("k" + i, { tmdb_id: i, poster: "/p" + i + ".jpg", overview: "x".repeat(150) });
+    __app.db.set("backup_uri", "content://backup"); __app.db.set("backup_file_at", "0"); });
   const tS = await A(() => performance.now());
   await A(() => { const b = document.querySelector('[data-action="sync"]'); if (b) b.click(); });
   await pg.waitForTimeout(200); await A(() => { if (!__app.ui.job) { const b = document.querySelector('[data-action="sync"]'); if (b) b.click(); } });
@@ -124,6 +133,19 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   const lt = (await A(() => window.__lt)).filter(x => x[0] > tS).sort((a, b) => b[1] - a[1]);
   console.log("sync: longest blocking steps", JSON.stringify(lt.slice(0, 4)), await A(() => (__app.ui.report || "").slice(0, 80)));
   ok(/OK  Trakt account: 9300 records/.test(await A(() => __app.ui.report)), "big Trakt sync ran");
+  await pg.waitForFunction(() => window.__backupFile && window.__files["library.json"] && window.__files["canonsync.json"] && !__app.db._flushing && !__app.db._timer, null, { timeout: 60000 });
+  await pg.waitForTimeout(4500);
+  const st = await A(() => { const c = JSON.parse(window.__files["canonsync.json"]), l = JSON.parse(window.__files["library.json"]), b = JSON.parse(window.__backupFile);
+    return { max: window.__maxCall, canon: c.items.length === __app.db.itemsMap.size && c.items.length > 20000, noCacheInMain: !c.tmdbCache.length, lib: Object.keys(l.items).length === __app.lib.all().length && __app.lib.all().length > 10000,
+      backup: b.canon.items.length === c.items.length && Object.keys(b.library.items).length === Object.keys(l.items).length && !!b.games && !!b.books, log: (window.__files["cache.log"] || "").split("\n").filter(Boolean).length }; });
+  console.log("storage after the sync", JSON.stringify(st));
+  ok(st.canon && st.lib && st.backup && st.noCacheInMain, "files written in pieces are whole: " + JSON.stringify(st));
+  ok(st.log >= 6000, "cache entries went to the journal: " + st.log);
+  ok(Object.values(st.max).every(n => n < 400000), "no single huge text crossed to the phone: " + JSON.stringify(st.max));
+  // leaving the app right after a change: written at once, whole
+  const left = await A(() => { const it = __app.lib.all()[0]; it.notes = "left the app"; __app.db.set("left_at", "now"); window.__paused();
+    return { lib: /left the app/.test(window.__files["library.json"]), canon: JSON.parse(window.__files["canonsync.json"]).settings.left_at === "now" }; });
+  ok(left.canon, "leaving the app saves at once: " + JSON.stringify(left));
   ok(!lt.length || lt[0][1] < 1200, "sync never blocks the screen for long: " + JSON.stringify(lt.slice(0, 3)));
   console.log("errors", errors); ok(!errors.length, "no page errors"); console.log("BIG IMPORT TESTS PASSED");
   await browser.close(); srv.close();

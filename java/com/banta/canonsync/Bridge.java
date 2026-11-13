@@ -35,7 +35,7 @@ import java.util.zip.ZipInputStream;
 
 public class Bridge {
     static final int PICK = 4242;
-    static final String UA = "Saga/0.5.5 (Android)";
+    static final String UA = "Saga/0.5.6 (Android)";
     final Context ctx;
     final MainActivity act;       // null when running inside the background job
     final SyncJobService job;     // null in the app
@@ -74,17 +74,25 @@ public class Bridge {
 
     static class Writer implements Runnable {
         final Bridge b;
-        final String name, text;
+        final String name;
+        final CharSequence text;
+        final boolean append;
 
-        Writer(Bridge b, String name, String text) {
+        Writer(Bridge b, String name, CharSequence text) {
+            this(b, name, text, false);
+        }
+
+        Writer(Bridge b, String name, CharSequence text, boolean append) {
             this.b = b;
             this.name = name;
             this.text = text;
+            this.append = append;
         }
 
         public void run() {
             try {
-                b.writeFile(name, text);
+                if (append) b.appendFile(name, text.toString());
+                else b.writeFile(name, text.toString());
                 File f = new File(b.ctx.getFilesDir(), safe(name));
                 OWN.put(name, f.exists() ? f.lastModified() + ":" + f.length() : "");
             } finally {
@@ -110,6 +118,86 @@ public class Bridge {
                     return;
                 }
             }
+        }
+    }
+
+    // ---- big texts in pieces: a 10 MB string in one call holds the screen up while it crosses over; 250 KB pieces don't ----
+    static final Map<String, StringBuilder> BUF = new ConcurrentHashMap<String, StringBuilder>();
+
+    @JavascriptInterface
+    public void bufAdd(String key, String part) {
+        StringBuilder sb = BUF.get(key);
+        if (sb == null) {
+            sb = new StringBuilder(Math.max(1 << 16, part.length() * 4));
+            BUF.put(key, sb);
+        }
+        sb.append(part);
+    }
+
+    @JavascriptInterface
+    public void bufDrop(String key) {
+        BUF.remove(key);
+    }
+
+    // the pieces become the file, written in the background like saveLater
+    @JavascriptInterface
+    public boolean saveBuf(String name, String key) {
+        StringBuilder sb = BUF.remove(key);
+        if (sb == null) return false;
+        return queue(name, sb, false);
+    }
+
+    // adds text to the end of a file, in the background (the lookup journal)
+    @JavascriptInterface
+    public boolean appendLater(String name, String text) {
+        return queue(name, text, true);
+    }
+
+    // the pieces go to a file the person chose (the backup file), in the background; answers through __saveDone
+    @JavascriptInterface
+    public void writeUriBuf(String id, String uri, String key) {
+        StringBuilder sb = BUF.remove(key);
+        new Thread(new UriWriter(this, id, uri, sb)).start();
+    }
+
+    static class UriWriter implements Runnable {
+        final Bridge b;
+        final String id, uri;
+        final StringBuilder sb;
+
+        UriWriter(Bridge b, String id, String uri, StringBuilder sb) {
+            this.b = b;
+            this.id = id;
+            this.uri = uri;
+            this.sb = sb;
+        }
+
+        public void run() {
+            boolean ok = false;
+            try {
+                if (sb != null) ok = b.writeUri(uri, sb.toString());
+            } catch (Throwable t) {
+                ok = false;
+            }
+            b.deliver("__saveDone", id, ok ? "true" : "false");
+        }
+    }
+
+    boolean queue(String name, CharSequence text, boolean append) {
+        synchronized (WLOCK) {
+            Integer n = PENDING.get(name);
+            PENDING.put(name, n == null ? 1 : n + 1);
+        }
+        try {
+            WRITER.execute(new Writer(this, name, text, append));
+            return true;
+        } catch (Throwable t) {
+            synchronized (WLOCK) {
+                Integer n = PENDING.get(name);
+                PENDING.put(name, n == null || n <= 1 ? 0 : n - 1);
+                WLOCK.notifyAll();
+            }
+            return append ? appendFile(name, text.toString()) : writeFile(name, text.toString());
         }
     }
 
@@ -170,6 +258,17 @@ public class Bridge {
     public boolean save(String name, String text) {
         awaitWrites(name);
         return writeFile(name, text);
+    }
+
+    boolean appendFile(String name, String text) {
+        try {
+            OutputStream o = new FileOutputStream(new File(ctx.getFilesDir(), safe(name)), true);
+            o.write(text.getBytes("UTF-8"));
+            o.close();
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     boolean writeFile(String name, String text) {
@@ -636,7 +735,7 @@ public class Bridge {
                 s.setJavaScriptEnabled(true);
                 s.setDomStorageEnabled(true);
                 s.setBlockNetworkImage(true);
-                w.setWebViewClient(new WebViewClient());
+                w.setWebViewClient(new Lean());
                 // Full-size so pages lay out and lazy-load like on screen, but kept behind the app's own view:
                 // invisible and never receives taps.
                 w.setAlpha(0f);
@@ -689,6 +788,43 @@ public class Bridge {
             } catch (Throwable ignored) {
             }
             b.deliver("__httpDone", id, json);
+        }
+    }
+
+    // The hidden page runs on the same browser engine as the app's own screen, so everything it loads and runs
+    // slows the app down. Adverts, trackers, pictures, fonts and video are answered with nothing: only the page
+    // itself, its scripts and its data requests go through.
+    static class Lean extends WebViewClient {
+        static final String[] HOSTS = { "amazon-adsystem.com", "doubleclick.net", "googlesyndication.com", "google-analytics.com", "googletagmanager.com",
+            "googletagservices.com", "googleadservices.com", "scorecardresearch.com", "adsrvr.org", "criteo.com", "criteo.net", "pubmatic.com", "rubiconproject.com",
+            "casalemedia.com", "openx.net", "taboola.com", "outbrain.com", "media.net", "adnxs.com", "advertising.com", "moatads.com", "krxd.net", "demdex.net",
+            "bluekai.com", "quantserve.com", "facebook.net", "facebook.com", "twitter.com", "branch.io", "app.link", "chartbeat.com", "newrelic.com", "nr-data.net",
+            "bidswitch.net", "3lift.com", "sharethrough.com", "smartadserver.com", "indexww.com", "lijit.com", "yieldmo.com", "teads.tv", "amazon-adsystem.cn",
+            "fls-na.amazon.com", "fls-eu.amazon.com", "unagi.amazon.com", "unagi-na.amazon.com", "aax-us-east.amazon-adsystem.com", "aax-eu.amazon-adsystem.com",
+            "s.amazon-adsystem.com", "c.amazon-adsystem.com", "mads.amazon-adsystem.com", "ib.adnxs.com", "tpc.googlesyndication.com" };
+        static final java.util.regex.Pattern MEDIA = java.util.regex.Pattern.compile("\\.(?:png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|eot|mp4|webm|m3u8|ts|mp3|m4a)(?:$|[?#])", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+        static boolean blocked(String url) {
+            try {
+                if (url == null || !url.startsWith("http")) return false;
+                String host = Uri.parse(url).getHost();
+                if (host == null) return false;
+                host = host.toLowerCase(java.util.Locale.ROOT);
+                for (int i = 0; i < HOSTS.length; i++) if (host.equals(HOSTS[i]) || host.endsWith("." + HOSTS[i])) return true;
+                return MEDIA.matcher(url).find();
+            } catch (Throwable t) {
+                return false;
+            }
+        }
+
+        @Override
+        public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view, android.webkit.WebResourceRequest request) {
+            try {
+                if (request != null && !request.isForMainFrame() && blocked(String.valueOf(request.getUrl())))
+                    return new android.webkit.WebResourceResponse("text/plain", "utf-8", new java.io.ByteArrayInputStream(new byte[0]));
+            } catch (Throwable ignored) {
+            }
+            return null;
         }
     }
 
@@ -831,7 +967,7 @@ public class Bridge {
 
     @JavascriptInterface
     public String version() {
-        return "0.5.5";
+        return "0.5.6";
     }
 
     // ---------- background sync & notifications ----------

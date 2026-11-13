@@ -37,7 +37,7 @@
     }
     fromJSON(j) { this.games = (j.games || []).map(blank); this.removed = j.removed || {}; this.settings = Object.assign(this.settings, j.settings || {}); this.meta = j.meta || {}; }
     toJSON() { return { app: "games", v: 1, games: this.games, removed: this.removed, settings: this.settings, meta: this.meta }; }
-    save() { this.ver++; this._idx = null; this._fi = null; if (this.persist) this.persist.save(JSON.stringify(this.toJSON())); }
+    save() { this.ver++; this._idx = null; this._fi = null; if (this.persist) { if (this.persist.saveLazy) this.persist.saveLazy(); else this.persist.save(JSON.stringify(this.toJSON())); } }
     get(id) { return this.games.find(g => g.id === id) || null; }
     // Look-ups go through maps (steam id, IMDb id, title), rebuilt whenever the list changed: a 1,000-game list
     // checked against a 10,000-title sync no longer scans every game for every row.

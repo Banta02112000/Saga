@@ -6,7 +6,7 @@
   const DAY = 864e5;
   const GB = "https://www.googleapis.com/books/v1/volumes";
   const OL = "https://openlibrary.org";
-  const UA = { "User-Agent": "Saga/0.5.5 (+https://github.com/Banta02112000/Saga)", Accept: "application/json" };
+  const UA = { "User-Agent": "Saga/0.5.6 (+https://github.com/Banta02112000/Saga)", Accept: "application/json" };
   const STATUSES = ["reading", "paused", "want", "read", "dnf"];
   const STATUS_LABEL = { reading: "Reading", paused: "Paused", want: "Want to read", read: "Read", dnf: "Did not finish" };
   const FORMATS = ["Paper", "Ebook", "Audio"];
@@ -77,7 +77,7 @@
       if (j.settings) this.settings = Object.assign(this.settings, j.settings);
     }
     toJSON() { return { app: "books", v: 1, books: this.books, goal: this.goal, settings: this.settings }; }
-    save() { this.ver++; if (this.persist) this.persist.save(JSON.stringify(this.toJSON())); }
+    save() { this.ver++; if (this.persist) { if (this.persist.saveLazy) this.persist.saveLazy(); else this.persist.save(JSON.stringify(this.toJSON())); } }
     get(id) { return this.books.find(b => b.id === id) || null; }
     // Same book already in the library: by ISBN, Google/Open Library id, or title + first author.
     find(b) {

@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.5.5";
+  const VERSION = "0.5.6";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -21,7 +21,7 @@
   const Native = (() => {
     const A = window.Android || null;
     const pending = new Map();
-    let seq = 0;
+    let seq = 0, browsing = 0;
     const settle = (id, fallback) => {
       const cb = pending.get(id);
       pending.delete(id);
@@ -90,7 +90,8 @@
       if (!A || !A.browse) return Promise.resolve({ status: 0, value: null, error: "in-app browser unavailable" });
       return new Promise(res => {
         const id = "b" + (++seq);
-        pending.set(id, res);
+        browsing++;
+        pending.set(id, r => { browsing = Math.max(0, browsing - 1); res(r); });
         A.browse(id, url, probe, timeoutMs || 35000);
       });
     }
@@ -119,6 +120,26 @@
       // written by the phone in the background: the screen doesn't wait for the disk (falls back to save)
       saveLater: (n, t) => { try { return A && A.saveLater ? A.saveLater(n, t) : A ? A.save(n, t) : (mem[n] = t, true); } catch (e) { logError("save", `${n}: ${e.message}`); return false; } },
       later: !!(A && A.saveLater && A.ownStamp),
+      browsing: () => browsing > 0,
+      // 0.5.6: big files go to the phone in pieces, with a pause between pieces, and are written in the background.
+      // `still` says whether this save is still the newest one; if not it's dropped.
+      parts: !!(A && A.bufAdd && A.saveBuf && A.saveLater && A.ownStamp),
+      saveParts: async (n, parts, still) => {
+        const key = n + "#" + (++seq);
+        try {
+          for (let i = 0; i < parts.length; i++) { A.bufAdd(key, parts[i]); await new Promise(r => setTimeout(r, 0)); if (still && !still()) { A.bufDrop(key); return false; } }
+          return !!A.saveBuf(n, key);
+        } catch (e) { try { A.bufDrop(key); } catch (e2) { /* gone */ } logError("save", `${n}: ${e.message}`); return false; }
+      },
+      append: (n, t) => A.appendLater(n, t),
+      canAppend: !!(A && A.appendLater && A.bufAdd && A.saveBuf),
+      // the backup file the person chose: handed over in pieces, written in the background
+      writeUriParts: (uri, parts) => new Promise(async res => {
+        if (!(A && A.writeUriBuf && A.bufAdd)) { let ok = false; try { ok = A.writeUri(uri, parts.join("")); } catch (e) { ok = false; } return res(ok); }
+        const id = "s" + (++seq), key = "uri#" + id;
+        try { for (const p of parts) { A.bufAdd(key, p); await new Promise(r => setTimeout(r, 0)); } pending.set(id, res); A.writeUriBuf(id, uri, key); }
+        catch (e) { try { A.bufDrop(key); } catch (e2) { /* gone */ } res(false); }
+      }),
       ownStamp: n => (A && A.ownStamp ? String(A.ownStamp(n) || "") : ""),
       openUrl: u => (A ? A.openUrl(u) : window.open(u, "_blank")),
       copy: t => (A ? A.copy(t) : navigator.clipboard && navigator.clipboard.writeText(t)),
@@ -139,7 +160,9 @@
   // ------------------------------------------------------------ state
   const db = new C.Store({ load: () => Native.load("canonsync.json"), save: t => Native.save("canonsync.json", t),
                            saveLater: Native.later ? t => Native.saveLater("canonsync.json", t) : null, ownStamp: () => Native.ownStamp("canonsync.json"),
-                           cache: { load: () => Native.load("cache.json"), save: t => Native.saveLater("cache.json", t) },
+                           saveParts: Native.parts ? (parts, still) => Native.saveParts("canonsync.json", parts, still) : null,
+                           cache: Object.assign({ load: () => Native.load("cache.json"), save: t => Native.saveLater("cache.json", t) },
+                             Native.canAppend ? { loadLog: () => Native.load("cache.log"), append: t => Native.append("cache.log", t), clearLog: () => Native.saveLater("cache.log", ""), saveParts: parts => Native.saveParts("cache.json", parts) } : {}),
                            stamp: () => (window.Android && Android.stamp ? Android.stamp("canonsync.json") : ""),
                            // keys and tokens: encrypted with the phone's Keystore when this Android build offers it
                            secrets: window.Android && Android.secretsLoad ? { load: () => Android.secretsLoad(), save: t => Android.secretsSave(t) } : null });
@@ -165,7 +188,7 @@
     cmpView: "imdb", cmpQ: "", cmpLimit: 150, s0all: false,
   };
   let memo = null;
-  const status = () => (memo = memo || C.canonStatus(db, threshold()));
+  const status = () => { if (!memo && typeof mirrorNow === "function") mirrorNow(); return (memo = memo || C.canonStatus(db, threshold())); };
   const invalidate = () => { memo = null; };
   const threshold = () => Math.max(0.7, Math.min(1, (parseFloat(db.get("threshold", "90")) || 90) / 100));
 
@@ -235,6 +258,11 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.5.6", ["Sync no longer holds the screen while it saves. Before, each save turned your whole collection into one text of many MB and handed it to the phone in one go, every few seconds during a sync; the same for the library and, at the end, the backup file. Now saves are built a few entries at a time and handed over in small pieces, written in the background, and spaced far apart while a sync runs.",
+      "The look-up cache (posters, dates, episode lists) is now a journal: new entries are added to the end of a small file instead of rewriting the whole cache.",
+      "IMDb's page in the hidden browser shares the browser engine with the app's screen, so it slows the app while it's open: adverts, trackers, pictures, fonts and video on it are no longer loaded.",
+      "Sync: the library step runs in small steps with pauses; series with rated IMDb episodes are looked up through an index instead of scanning the library for each one.",
+      "If the screen still pauses, the Sync screen shows it in a card with a Copy button, and says when IMDb's page was open at the time."]],
     ["0.5.5", ["AI: your own server. Settings › AI › Other AI services › Ollama or Open WebUI: type the address (through Tailscale, the MagicDNS name ending in .ts.net), tap Find models, pick one. Nothing leaves your network and nothing is paid per use.",
       "Home: Picks for today, across films, series, games and books, each with its reason: series nearly finished, short films, games you own that are quick to finish, short books, things you paused, and genres you rate highly."]],
     ["0.5.4.9", ["Sync lag: Saga no longer rewrites its big files over and over while syncing. Saves are spaced out, the phone writes them in the background so the screen doesn't wait, and posters, episode lists and dates live in a separate cache file that's written every 30 seconds at most.",
@@ -325,6 +353,7 @@
     if (ui.job) { toast(`${ui.job} is still running`); return; }
     commitFields();
     ui.job = name;
+    C.BUSY.on = true; // saves are spaced out while it runs
     BantaShell.shared.busy(true, "job");
     ui.jobStart = Date.now();
     C.CONFIG.cancelled = false;
@@ -341,8 +370,8 @@
     // with the step it happened in, and listed in the report, so a freeze on the phone says where it came from.
     // Shorter hitches (over 0.15 s) are added up per step: many small ones are what makes the screen feel laggy.
     const stalls = [], jank = {}; let beat = Date.now();
-    const stepOf = () => String(ui.status || name).replace(/\s*\(\d+ s\)$/, "").replace(/\d[\d,.]*/g, "#").slice(0, 60);
-    const watch = setInterval(() => { const now = Date.now(), gap = now - beat - 250; beat = now; if (gap > 150) { const k = stepOf(); jank[k] = (jank[k] || 0) + gap; } if (gap > 700) stalls.push([gap, ui.status || name]); }, 250);
+    const stepOf = () => (Native.browsing() ? "IMDb page (hidden browser): " : "") + String(ui.status || name).replace(/\s*\(\d+ s\)$/, "").replace(/\d[\d,.]*/g, "#").slice(0, 60);
+    const watch = setInterval(() => { const now = Date.now(), gap = now - beat - 250; beat = now; if (gap > 150) { const k = stepOf(); jank[k] = (jank[k] || 0) + gap; } if (gap > 700) stalls.push([gap, (Native.browsing() ? "IMDb page (hidden browser): " : "") + (ui.status || name)]); }, 250);
     // ticking elapsed time so a slow step never looks frozen
     const tick = setInterval(() => {
       const el = $("#status");
@@ -381,6 +410,9 @@
       } else ui.stalls = "";
       if (notes) Native.status(ok ? `${name} finished` : `${name} failed`, ui.status, -1, false);
       ui.job = null;
+      C.BUSY.on = false;
+      if (db._timer) db.touch(); // back to the normal pace: what the job changed is saved soon
+      if (libTimer) { clearTimeout(libTimer); libTimer = null; libTouch(); }
       BantaShell.shared.busy(false, "job");
       $("#syncTop").classList.remove("spin");
       setProgress(null);
@@ -1627,27 +1659,55 @@
   const TODAY = () => new Date().toISOString().slice(0, 10);
   const shortDay = d => (d ? new Date(d + "T12:00:00").toLocaleDateString(lang() === "it" ? "it-IT" : "en-GB", { day: "numeric", month: "short", year: "numeric" }) : "date unknown");
   // the sync store gets a copy (source "app"), so the canon finder counts what you track here
-  function libMirror() {
+  // 0.5.6: done a moment later and once for a burst of changes (it walks every row of both stores); anything that
+  // reads the rows (the canon check, a save, a backup) brings it up to date first.
+  let mirrorDirty = false, mirrorTimer = null;
+  function libMirror() { mirrorDirty = true; invalidate(); if (!mirrorTimer) mirrorTimer = setTimeout(mirrorNow, 1500); }
+  function mirrorNow(quiet) {
+    clearTimeout(mirrorTimer); mirrorTimer = null;
+    if (!mirrorDirty) return;
+    mirrorDirty = false;
+    const hadTimer = !!db._timer;
     for (const [k, r] of db.itemsMap) if (r.source === "app") db.itemsMap.delete(k);
     const rows = lib.dbRows();
     db.addItems(rows.watched, "app", "watched");
     db.addItems(rows.watchlist, "app", "watchlist", "Library");
+    if (quiet === true && !hadTimer) { clearTimeout(db._timer); db._timer = null; } // called by a save: these rows are in it already
     invalidate();
   }
+  { const items = db.items.bind(db), toJSON = db.toJSON.bind(db);
+    db.items = (a, b) => { mirrorNow(); return items(a, b); };
+    db.toJSON = () => { mirrorNow(true); return toJSON(); }; }
+  // a small file (games, books) saved a moment later, in pieces; leaving the app writes it at once
+  function lazyFile(name, obj) {
+    let timer = null, gen = 0, busy = false;
+    const write = () => { timer = null; const g = ++gen; busy = true;
+      C.jsonParts(obj().toJSON()).then(parts => (g === gen ? Native.saveParts(name, parts, () => g === gen) : false)).catch(() => {}).then(() => { if (g === gen) busy = false; }); };
+    return { lazy: () => { if (!timer) timer = setTimeout(write, C.BUSY.on ? 8000 : 700); },
+      now: () => { if (!timer && !busy) return; clearTimeout(timer); timer = null; gen++; busy = false; Native.save(name, JSON.stringify(obj().toJSON())); } };
+  }
+  const libTouch = () => { if (!libTimer) libTimer = setTimeout(libWrite, Math.max(800, (C.BUSY.on && Native.parts ? 25000 : 4000) - (Date.now() - libLast))); };
   // The library file is written a moment later, and once for a burst of changes (a sync, ticking several episodes):
   // with a big library each write takes long enough to hold up the screen. Leaving the app writes it at once.
-  let libTimer = null, libLast = 0;
+  let libTimer = null, libLast = 0, libGen = 0, libBusy = false;
   function libWrite(sync) {
     clearTimeout(libTimer); libTimer = null; libLast = Date.now();
+    if (sync !== true && Native.parts) { // built and handed over in pieces: the screen stays free
+      const gen = ++libGen; libBusy = true;
+      C.jsonParts(lib.toJSON()).then(parts => (gen === libGen ? Native.saveParts("library.json", parts, () => gen === libGen) : false))
+        .then(ok => { if (ok) libStamp = null; }, () => {}).then(() => { if (gen === libGen) libBusy = false; });
+      return;
+    }
+    libGen++; libBusy = false;
     if (!sync && Native.later) { Native.saveLater("library.json", JSON.stringify(lib.toJSON())); libStamp = null; return; }
     lib.save();
     libStamp = window.Android && Android.stamp ? String(Android.stamp("library.json") || "") : "";
   }
   // after a background write, the stamp it left (asked only when needed: asking waits for the write)
   const libOwnStamp = () => { if (libStamp === null) libStamp = Native.ownStamp("library.json"); return libStamp; };
-  const libPending = () => !!libTimer;
+  const libPending = () => !!libTimer || libBusy;
   function libSave() {
-    if (!libTimer) libTimer = setTimeout(libWrite, Math.max(800, 4000 - (Date.now() - libLast)));
+    if (!libTimer) libTimer = setTimeout(libWrite, Math.max(800, (C.BUSY.on && Native.parts ? 25000 : 4000) - (Date.now() - libLast)));
     libMirror();
     db.touch();
     if (typeof changed === "function") changed("watch");
@@ -1761,12 +1821,24 @@
     }
     return n;
   }
+  function adoptRows() {
+    listMemo = { on: {}, lists: syncedLists() };
+    try { return db.items(null, ["watched", "rated", "watchlist", "list"]).filter(r => r.source !== "app" && (r.kind !== "list" || listOn(r.source, r.list_name))); } finally { listMemo = null; }
+  }
   function libAdopt() {
     if (db.get("lib_adopt", "1") !== "1") return 0;
-    listMemo = { on: {}, lists: syncedLists() };
-    let rows;
-    try { rows = db.items(null, ["watched", "rated", "watchlist", "list"]).filter(r => r.source !== "app" && (r.kind !== "list" || listOn(r.source, r.list_name))); } finally { listMemo = null; }
-    const n = lib.adopt(rows);
+    return libAdoptRest(lib.adopt(adoptRows()));
+  }
+  // during a sync: the same in small steps, with pauses, so taps and scrolling keep working
+  async function libAdoptSoft() {
+    if (db.get("lib_adopt", "1") !== "1") return 0;
+    const rows = adoptRows();
+    await C.breathe(0);
+    const n = await lib.adoptSliced(rows, () => C.breathe(0));
+    await C.breathe(0);
+    return libAdoptRest(n);
+  }
+  function libAdoptRest(n) {
     // episodes you've watched on Trakt, with the day you watched each one, merged into the library every time
     let prog = {}, changed = 0;
     try { prog = JSON.parse(db.get("trakt_progress", "{}")) || {}; } catch (e) { prog = {}; }
@@ -1791,9 +1863,10 @@
     let ieps = {};
     try { ieps = JSON.parse(db.get("imdb_eps", "{}")) || {}; } catch (e) { ieps = {}; }
     for (const [sid, p] of Object.entries(ieps)) {
-      let it = lib.all().find(x => x.type === "show" && x.imdb === sid);
-      if (!it && p.t) it = lib.all().find(x => x.type === "show" && L.norm(x.title) === L.norm(p.t) && (!p.y || !x.year || Math.abs(x.year - p.y) <= 1));
-      if (!it) { if (!p.t || lib.adopted[sid]) continue; it = lib.add({ type: "show", title: p.t, year: p.y || null, imdb: sid, src: "imdb" }, "watching").item; }
+      let it = byImdb.get(sid) || null; // through the maps above: a scan of the whole library per series froze the screen
+      if (!it && p.t) it = (byName.get(L.norm(p.t)) || []).find(x => !p.y || !x.year || Math.abs(x.year - p.y) <= 1) || null;
+      if (it && lib.items[it.id] !== it) it = null;
+      if (!it) { if (!p.t || lib.adopted[sid]) continue; it = lib.add({ type: "show", title: p.t, year: p.y || null, imdb: sid, src: "imdb" }, "watching").item; index(it); }
       if (!it.imdb) it.imdb = sid;
       for (const [k, d] of Object.entries(p.eps || {})) if (!it.eps[k]) { it.eps[k] = typeof d === "string" ? d : TODAY(); changed++; }
       if (it.status === "watchlist") it.status = "watching";
@@ -2125,8 +2198,9 @@
 
   // ============================================================ Saga 5: one app, five sections
   const GC = window.GamesCore, BC = window.BooksCore;
-  const games = new GC.Games({ load: () => Native.load("games.json"), save: t => Native.save("games.json", t) });
-  const books = new BC.Library({ load: () => Native.load("books.json"), save: t => Native.save("books.json", t) });
+  const gamesFile = lazyFile("games.json", () => games), booksFile = lazyFile("books.json", () => books);
+  const games = new GC.Games({ load: () => Native.load("games.json"), save: t => Native.save("games.json", t), saveLazy: Native.parts ? () => gamesFile.lazy() : null });
+  const books = new BC.Library({ load: () => Native.load("books.json"), save: t => Native.save("books.json", t), saveLazy: Native.parts ? () => booksFile.lazy() : null });
   const NAV = [["home", "Home", "home"], ["watch", "Watch", "library"], ["games", "Games", "pad"], ["books", "Books", "book"], ["timeline", "Who", "box"]];
   const WATCH = [["library", "Library"], ["anime", "Anime"], ["upcoming", "Upcoming"], ["missing", "Canon"], ["stats", "Stats"]];
   const TITLES = { watch: "Watch", games: "Games", books: "Books", timeline: "Doctor Who", settings: "Settings", sync: "Sync", year: "Your year", mv: "Multiverse" };
@@ -2137,7 +2211,9 @@
   // something changed in a section: refresh the widget and the backup file a little later
   function changed(what) {
     clearTimeout(changeTimer);
-    changeTimer = setTimeout(() => { try { updateWidget(); } catch (e) { /* optional */ } try { backupToFile(false).catch(() => {}); } catch (e) { /* next time */ } }, 20000);
+    const run = () => { if (ui.job) { changeTimer = setTimeout(run, 20000); return; } // not in the middle of a sync
+      try { updateWidget(); } catch (e) { /* optional */ } try { backupToFile(false).catch(() => {}); } catch (e) { /* next time */ } };
+    changeTimer = setTimeout(run, 20000);
   }
   // ---- Your lists: films, series, games and books together; plus smart lists that fill themselves
   // An entry is "lib:<id>", "game:<id>" or "book:<id>".
@@ -2418,6 +2494,7 @@
         <b style="font:800 22px/1.2 var(--display)">${ui.job ? esc(ui.status || "Working") : last ? esc(new Date(last * 1000).toLocaleString(lang() === "it" ? "it-IT" : "en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })) : "Never"}</b></div>
         ${ui.job ? `<button class="btn" data-action="stopjob">Stop</button>` : `<button class="btn primary" data-action="sync">${icon("sync")}Sync now</button>`}</div>
         ${!ui.job && fails.length ? `<button class="btn block" style="margin-top:12px" data-action="retryfailed">Retry the ${fails.length} that failed</button>` : ""}</section>
+      ${!ui.job && ui.stalls ? `<section class="card"><div class="kicker">The screen paused during this job</div><p class="small" style="margin:6px 0 10px">${esc(ui.stalls)}</p><button class="btn small" data-action="copystalls">Copy this line</button></section>` : ""}
       <section class="card"><div class="row"><span class="st ${liveOn() ? "ok" : ""}" style="width:12px;height:12px;border-radius:50%;background:${liveOn() ? "var(--ok)" : "var(--faint)"};flex:none"></span><div class="grow"><b>Live sync with Trakt</b>
         <div class="small muted">${!db.get("username") ? "Add your Trakt username in Settings." : !liveOn() ? "Off. Switch it on in Settings › Trakt." : db.get("token") ? `On: what you log goes to Trakt within seconds; Trakt is checked every 10 minutes while the app is open, and in the background.${db.get("live_pull_at") ? ` Last check ${esc(new Date(+db.get("live_pull_at")).toLocaleTimeString(lang() === "it" ? "it-IT" : "en-GB", { hour: "2-digit", minute: "2-digit" }))}.` : ""}` : "On for reading: your public profile is checked every 3 hours. Sign in to Trakt to send what you log here."}</div></div></div></section>
       <section>${Kit.head("Sources")}<div class="listcard">${sources.length ? sources.map(l => srcRow(l, state[l], ui.job && /Syncing (.+)/.test(ui.status || "") && (ui.status || "").includes(l))).join("") : `<p class="muted small" style="padding:10px 0">No sources yet. Add your Trakt username or IMDb profile in Settings.</p>`}</div>
@@ -2462,8 +2539,8 @@
       try { const m = await C.withTimeout(Promise.resolve().then(fn), limit || 120000, "stopped after its time limit, continues next time"); lines.push(`OK   ${label}: ${m}`); setStage(k, true, m, t0); }
       catch (e) { lines.push(`FAIL ${label}: ${e.message}`); setStage(k, false, e.message, t0); }
     };
-    await step("library", "Library", () => { const b = libTotals(), n = libAdopt(), a = libTotals(); return `${n} new titles, ${fmt(a.rated - b.rated)} ratings, ${fmt(a.er - b.er)} episode ratings, ${fmt(a.eps - b.eps)} episodes ticked (now ${fmt(a.titles)} titles, ${fmt(a.rated)} rated, ${fmt(a.er)} episode ratings)`; });
-    if (feat("trakt") && db.get("token") && db.get("trakt_push", "1") === "1") await step("push", "Trakt", async () => { const m = await L.traktPush(lib, http, db.get("client_id"), db.get("token")); lib.save(); return m; });
+    await step("library", "Library", async () => { const b = libTotals(), n = await libAdoptSoft(), a = libTotals(); return `${n} new titles, ${fmt(a.rated - b.rated)} ratings, ${fmt(a.er - b.er)} episode ratings, ${fmt(a.eps - b.eps)} episodes ticked (now ${fmt(a.titles)} titles, ${fmt(a.rated)} rated, ${fmt(a.er)} episode ratings)`; });
+    if (feat("trakt") && db.get("token") && db.get("trakt_push", "1") === "1") await step("push", "Trakt", async () => { const m = await L.traktPush(lib, http, db.get("client_id"), db.get("token")); libTouch(); return m; });
     else setStage("push", true, db.get("token") ? "switched off in Settings" : "not signed in to Trakt (only needed to send changes)");
     const svc = [["anilist_user", "AniList", u => Imports.anilist(http, u)], ["mal_user", "MyAnimeList", u => Imports.malLists(http, u)],
       ["letterboxd_user", "Letterboxd", async u => ({ anime: await Imports.letterboxdRss(http, u), books: [] })], ["goodreads_user", "Goodreads", async u => ({ anime: [], books: await Imports.goodreadsRss(http, u) })]]
@@ -2624,7 +2701,7 @@
       if (ui.job || liveBusy) return pushSoon();
       liveBusy = true;
       const t0 = Date.now();
-      try { const m = await L.traktPush(lib, C.robust(Native.http, { timeout: 30000, tries: 2 }), db.get("client_id"), db.get("token")); lib.save(); setStage("push", true, m, t0); db.set("live_push_at", String(Date.now())); }
+      try { const m = await L.traktPush(lib, C.robust(Native.http, { timeout: 30000, tries: 2 }), db.get("client_id"), db.get("token")); libTouch(); setStage("push", true, m, t0); db.set("live_push_at", String(Date.now())); }
       catch (e) { setStage("push", false, e.message, t0); }
       liveBusy = false;
       if (ui.sec === "sync") render();
@@ -2730,6 +2807,19 @@
   }
   const isLocked = text => { try { const j = JSON.parse(String(text || "").replace(/^\ufeff/, "")); return j && j.app === "saga-locked" ? j : null; } catch (e) { return null; } };
   // what goes into backup files you keep outside the app: locked when a backup password is set
+  // the same backup in pieces, built without holding the screen (the backup file that's rewritten after changes)
+  async function bundleParts() {
+    const parts = await C.jsonParts({ app: "canonsync-all", v: 2, version: VERSION, at: new Date().toISOString(), canon: canonForBackup(db.get("backup_secrets", "0") === "1"), library: lib.toJSON(), games: games.toJSON(), books: books.toJSON(), dw: Kit.mods.timeline.state() }, 6, 1);
+    const pw = db.get("backup_password");
+    if (!pw) return parts;
+    if (!(window.crypto && crypto.subtle)) throw new Error("This phone can't encrypt here");
+    const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+    const data = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await lockKey(pw, salt, LOCK_ITER), new TextEncoder().encode(parts.join(""))));
+    const out = [JSON.stringify({ app: "saga-locked", v: 1, kdf: "PBKDF2-SHA256", iter: LOCK_ITER, salt: toB64(salt), iv: toB64(iv) }).slice(0, -1) + ',"data":"'];
+    for (let i = 0; i < data.length; i += 196608) { out.push(toB64(data.subarray(i, i + 196608))); await C.breathe(0); } // 196608 = 3 × 65536: each piece is whole base64
+    out.push('"}');
+    return out;
+  }
   async function bundleOut() { const t = bundle(); const pw = db.get("backup_password"); return pw ? sealBackup(t, pw) : t; }
   async function backupToFile(force) {
     if (!db.get("backup_uri") || !(window.Android && Android.writeUri)) return false;
@@ -2737,7 +2827,7 @@
     if (!force && Date.now() - last < 10 * 60000) return false;
     db.set("backup_file_at", String(Date.now())); // set first: a slow encryption must not start a second write
     let ok = false;
-    try { ok = Android.writeUri(db.get("backup_uri"), await bundleOut()); } catch (e) { logError("backup", e.message); }
+    try { ok = await Native.writeUriParts(db.get("backup_uri"), await bundleParts()); } catch (e) { logError("backup", e.message); }
     db.set("backup_file_ok", ok ? "1" : "0");
     db.flush();
     return ok;
@@ -3008,14 +3098,16 @@
         ui.report = (ui.report || "").split("\n").map(l => fresh.get(labelOf(l)) || l).join("\n");
       } else ui.report = r.report;
       db.set("last_report", ui.report);
-      if (feat("streamAlerts")) for (const n of C.streamAlerts(db, C.canonStatus(db, threshold()), myServices())) Native.notify(n.id, n.title, n.text, n.tab);
       invalidate();
+      await C.breathe();
+      if (feat("streamAlerts")) for (const n of C.streamAlerts(db, status(), myServices())) Native.notify(n.id, n.title, n.text, n.tab);
+      await C.breathe();
       progress(0.72, "Library, Trakt, games and episodes");
       const post = await postSync((f, t) => progress(null, t), http);
       db.set("stage_report", post);
-      db.flush();
+      await C.breathe();
       setTimeout(() => { runDetails(); fillImages(); }, 300);
-      try { updateWidget(); backupToFile(false).catch(() => {}); } catch (e) { /* optional */ }
+      setTimeout(() => { try { updateWidget(); backupToFile(false).catch(() => {}); } catch (e) { /* optional */ } }, 1500); // after the result is on screen
       const stageFails = (post.match(/^FAIL/gm) || []).length;
       if (!r.total && !post) return retryOnly ? "Nothing to retry" : "Nothing to sync yet. Add sources in Settings.";
       return retryOnly ? `Retried ${r.total}: ${r.ok} now OK` : `Synced ${r.ok} of ${r.total} sources${r.failed.length ? `, ${r.failed.length} with problems` : ""}${stageFails ? `, ${stageFails} later steps failed` : ""}`;
@@ -3252,6 +3344,7 @@
         });
         break;
       case "copyreport": Native.copy(ui.report); toast("Report copied"); break;
+      case "copystalls": Native.copy(`Saga ${VERSION}: ${ui.stalls}`); toast("Copied"); break;
       case "retryfailed": doSync(true); break;
       case "bgnow":
         runJob("Release check", async p => {
@@ -3305,7 +3398,7 @@
     for (const m of Object.values(Kit.mods)) if (m.change && m.change(el)) return;
     if (el.dataset && el.dataset.libsort) { ui.libSort = el.value; render(); return; }
     if (el.dataset && el.dataset.libtype) { ui.libType = el.value; render(); return; }
-    if (el.dataset && el.dataset.libnotes) { const it = lib.get(ui.libOpen); if (it) { it.notes = el.value.trim(); lib.save(); } return; }
+    if (el.dataset && el.dataset.libnotes) { const it = lib.get(ui.libOpen); if (it) { it.notes = el.value.trim(); libTouch(); } return; }
     if (el.dataset && el.dataset.accent) { setLook("saga_accent", el.value); return; }
     if (el.dataset && el.dataset.textsize) { setLook("saga_text", el.checked ? "large" : ""); return; }
     if (el.dataset && el.dataset.lang) { BantaShell.setLang(el.value); toast(el.value === "it" ? "Italiano attivo" : "English on"); render(); return; }
@@ -3337,8 +3430,11 @@
   });
 
   // leaving the app: everything written now and waited for, so a background sync starts from the latest copy
-  window.addEventListener("pagehide", () => { commitFields(); if (libPending()) libWrite(true); else libOwnStamp(); db.flush(true); });
-  document.addEventListener("visibilitychange", () => { if (document.hidden) { commitFields(); if (libPending()) libWrite(true); else libOwnStamp(); db.flush(true); } });
+  // leaving the app: everything not yet written is written at once (the background job reads these files)
+  const saveAllNow = () => { commitFields(); if (libPending()) libWrite(true); else libOwnStamp(); gamesFile.now(); booksFile.now(); if (db._timer || db._flushing || db._cacheDirty) db.flush(true); };
+  window.addEventListener("pagehide", saveAllNow);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) saveAllNow(); });
+  window.__paused = saveAllNow;
 
   function applyBackground() {
     Native.setBackground(db.get("bg_enabled", "1") === "1", parseInt(db.get("bg_hours", "12"), 10) || 12);

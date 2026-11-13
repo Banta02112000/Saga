@@ -211,6 +211,17 @@ const epKey = (s, e) => `${s}:${e}`;
     adopt(rows) {
       return this.withIndex(() => this._adopt(rows));
     }
+    // The same for a sync, a few hundred rows at a time with a pause in between, so the screen stays free.
+    async adoptSliced(rows, pause, size = 300) {
+      if (this._ix) return this._adopt(rows);
+      this._ix = { m: new Map(), ord: new Map() };
+      try {
+        let i = 0, n = 0;
+        for (const it of this.all()) { this._ix.ord.set(it, i++); this._index(it); if (i % 1000 === 0) await pause(); }
+        for (let j = 0; j < rows.length; j += size) { n += this._adopt(rows.slice(j, j + size)); await pause(); }
+        return n;
+      } finally { this._ix = null; }
+    }
     _adopt(rows) {
       let n = 0;
       for (const r of rows) {

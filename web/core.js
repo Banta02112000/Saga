@@ -201,11 +201,52 @@
   // lives in its own file (persist.cache), written at most every CACHE_GAP: it changes all the time during a sync
   // and losing a few minutes of it only means asking TMDB again.
   const FLUSH_GAP = 4000, CACHE_GAP = 30000;
+  // 0.5.6: the saves themselves no longer hold the screen. With persist.saveParts the text is built a few entries at
+  // a time (jsonParts), giving way to taps and redraws in between, and handed to the phone in pieces. While a job
+  // (a sync) runs, saves are spaced BUSY_GAP apart. The look-up cache is a journal: new entries are appended to
+  // cache.log every few seconds (a few KB), and the whole cache is only rewritten when the journal has grown.
+  const BUSY_GAP = 25000, LOG_GAP = 5000, LOG_MAX = 1500000;
+  const CONFIG_BUSY = { on: false };
+  // JSON text of a value in pieces of about 200 KB, never working longer than `budget` ms without a pause.
+  // Arrays and plain objects are written entry by entry, two levels down (a store is {key: [thousands of rows]}).
+  // `deep`: how many levels below the top are containers of stores rather than stores (a backup is {canon: store, …}: 1).
+  async function jsonParts(value, budget = 6, deep = 0) {
+    const parts = []; let buf = "", t0 = Date.now();
+    // a piece never ends between the two halves of an emoji or other paired character (that would damage it on the way over)
+    const cut = n => { const c = buf.charCodeAt(n - 1); return c >= 0xD800 && c <= 0xDBFF ? n - 1 : n; };
+    const push = t => { buf += t; while (buf.length > 200000) { const n = cut(200000); parts.push(buf.slice(0, n)); buf = buf.slice(n); } };
+    const pause = async () => { if (Date.now() - t0 >= budget) { await new Promise(r => setTimeout(r, 0)); t0 = Date.now(); } };
+    const big = v => v && typeof v === "object" && !(typeof v.toJSON === "function") && (Array.isArray(v) ? v.length > 64 : Object.keys(v).length > 64);
+    const put = async (v, depth) => {
+      if (depth < 3 + deep && v && typeof v === "object" && !(typeof v.toJSON === "function") && (depth <= deep || big(v))) {
+        if (Array.isArray(v)) {
+          push("[");
+          for (let i = 0; i < v.length; i++) { if (i) push(","); if (depth < 2 + deep && (depth < deep || big(v[i]))) await put(v[i], depth + 1); else { const t = JSON.stringify(v[i]); push(t === undefined ? "null" : t); } if ((i & 15) === 15) await pause(); }
+          push("]");
+        } else {
+          push("{"); let first = true, n = 0;
+          for (const k of Object.keys(v)) {
+            const x = v[k];
+            if (x === undefined || typeof x === "function") continue;
+            if (depth < 2 + deep && x && typeof x === "object" && (depth < deep || big(x))) { push((first ? "" : ",") + JSON.stringify(k) + ":"); first = false; await put(x, depth + 1); }
+            else { const t = JSON.stringify(x); if (t === undefined) continue; push((first ? "" : ",") + JSON.stringify(k) + ":" + t); first = false; }
+            if ((++n & 15) === 15) await pause();
+          }
+          push("}");
+        }
+      } else { const t = JSON.stringify(v); push(t === undefined ? "null" : t); }
+      await pause();
+    };
+    await put(value && typeof value.toJSON === "function" ? value.toJSON() : value, 0);
+    if (buf) parts.push(buf);
+    return parts;
+  }
   class Store {
     constructor(persist) {
       this.persist = persist || null; // {load(): string, save(text), cache?: {load, save}}
       this.reset();
       this._lastFlush = 0; this._cacheDirty = false; this._cacheTimer = null; this._timer = null;
+      this._gen = 0; this._flushing = false; this._again = false; this._log = []; this._logSize = 0; this._compacting = false;
       if (this.persist) {
         const raw = this.persist.load();
         if (raw) {
@@ -216,7 +257,10 @@
         if (cp) {
           const fromMain = this.tmdbCache.size;
           try { const t = cp.load(); if (t) for (const [k, v] of JSON.parse(t)) if (!this.tmdbCache.has(k)) this.tmdbCache.set(k, v); } catch (e) { /* a broken cache is just empty */ }
-          if (fromMain) { this._cacheDirty = true; this.touch(); } // an older file kept the cache inside: move it out
+          // the journal: entries added since the cache file was last rewritten (newer, so they win)
+          if (cp.loadLog) try { const t = cp.loadLog() || ""; this._logSize = t.length;
+            for (const line of t.split("\n")) { if (!line) continue; try { const [k, v] = JSON.parse(line); this.tmdbCache.set(k, v); } catch (e) { /* a torn last line */ } } } catch (e) { /* no journal */ }
+          if (fromMain) { this._cacheDirty = true; this._cacheFull = true; this.touch(); } // an older file kept the cache inside: move it out
         }
       }
       this._sec = this._secLoad();
@@ -280,19 +324,44 @@
     touch() {
       if (!this.persist) return;
       clearTimeout(this._timer);
-      this._timer = setTimeout(() => this.flush(), Math.max(400, FLUSH_GAP - (Date.now() - this._lastFlush)));
+      this._timer = setTimeout(() => this.flush(), Math.max(400, (CONFIG_BUSY.on && this.persist.saveParts ? BUSY_GAP : FLUSH_GAP) - (Date.now() - this._lastFlush)));
     }
     _cacheTouch() {
       if (!this.persist) return;
       if (!this.persist.cache) { this.touch(); return; }
       this._cacheDirty = true;
-      if (!this._cacheTimer) this._cacheTimer = setTimeout(() => this.flushCache(), CACHE_GAP);
+      if (!this._cacheTimer) this._cacheTimer = setTimeout(() => this.flushCache(), this.persist.cache.append ? LOG_GAP : CACHE_GAP);
     }
-    flushCache() {
+    _cacheLog(k, v) { if (this.persist && this.persist.cache && this.persist.cache.append) this._log.push(JSON.stringify([k, v])); else this._cacheFull = true; }
+    flushCache(sync = false) {
       clearTimeout(this._cacheTimer); this._cacheTimer = null;
-      if (!this.persist || !this.persist.cache || !this._cacheDirty) return;
-      this._cacheDirty = false;
+      const cp = this.persist && this.persist.cache;
+      if (!cp || !this._cacheDirty) return;
+      if (cp.append && cp.saveParts) {
+        if (this._compacting) { if (!sync) this._cacheTimer = setTimeout(() => this.flushCache(), LOG_GAP); return; } // the journal is being folded in: wait
+        if (this._log.length) {
+          const lines = this._log; this._log = [];
+          try { let t = ""; for (const l of lines) { t += l + "\n"; if (t.length > 150000) { cp.append(t); this._logSize += t.length; t = ""; } } if (t) { cp.append(t); this._logSize += t.length; } } catch (e) { /* asked again later */ }
+        }
+        this._cacheDirty = false;
+        if ((this._cacheFull || this._logSize > LOG_MAX) && !sync) this._compact();
+        return;
+      }
+      this._cacheDirty = false; this._cacheFull = false;
       try { this.persist.cache.save(JSON.stringify([...this.tmdbCache.entries()])); } catch (e) { this._cacheDirty = true; }
+    }
+    // the whole cache rewritten in pieces, then the journal emptied; not while a job is running
+    async _compact() {
+      const cp = this.persist.cache;
+      if (this._compacting) return;
+      if (CONFIG_BUSY.on) { this._cacheDirty = true; if (!this._cacheTimer) this._cacheTimer = setTimeout(() => this.flushCache(), BUSY_GAP); return; }
+      this._compacting = true;
+      try {
+        const parts = await jsonParts([...this.tmdbCache.entries()]);
+        if (await cp.saveParts(parts)) { if (cp.clearLog) cp.clearLog(); this._logSize = 0; this._cacheFull = false; }
+      } catch (e) { /* next time */ }
+      this._compacting = false;
+      if (this._log.length) this._cacheTouch();
     }
 
     // sync: wait for the disk (leaving the app); otherwise the phone writes it in the background when it can
@@ -300,12 +369,32 @@
       if (!this.persist) return;
       clearTimeout(this._timer);
       this._timer = null;
+      if (!sync && this.persist.saveParts) { this._flushParts(); return; }
+      this._gen++; // a save in pieces that's still under way is now out of date
       const text = JSON.stringify(this.toJSON());
       if (!sync && this.persist.saveLater) { this.persist.saveLater(text); this._stamp = null; }
       else { this.persist.save(text); this._stamp = this._fileStamp(); }
       this._lastFlush = Date.now();
-      if (this._cacheDirty) this.flushCache();
+      if (this._cacheDirty) this.flushCache(sync);
     }
+    // the same save without holding the screen: built and handed over in pieces. Changes made meanwhile are saved by the next one.
+    async _flushParts() {
+      if (this._flushing) { this._again = true; return; }
+      this._flushing = true;
+      try {
+        do {
+          this._again = false;
+          const gen = ++this._gen;
+          const parts = await jsonParts(this.toJSON());
+          if (gen !== this._gen) break;
+          if (await this.persist.saveParts(parts, () => gen === this._gen)) { this._stamp = null; this._lastFlush = Date.now(); }
+        } while (this._again);
+      } catch (e) { /* the next change saves again */ }
+      this._flushing = false;
+      if (this._cacheDirty && !this._cacheTimer) this.flushCache();
+    }
+    // resolves when nothing is waiting to be saved (tests, and before a backup)
+    async settled() { for (let i = 0; i < 400 && (this._flushing || this._compacting); i++) await new Promise(r => setTimeout(r, 25)); }
     // the stamp our own last write left; after a background write it's asked for only when needed
     _ownStamp() { if (this._stamp === null) this._stamp = this.persist && this.persist.ownStamp ? String(this.persist.ownStamp() || "") : this._fileStamp(); return this._stamp; }
 
@@ -492,7 +581,7 @@
     }
 
     cacheGet(k) { return this.tmdbCache.has(k) ? this.tmdbCache.get(k) : null; }
-    cacheSet(k, v) { this.tmdbCache.set(k, v); this._cacheTouch(); }
+    cacheSet(k, v) { this.tmdbCache.set(k, v); this._cacheLog(k, v); this._cacheTouch(); }
 
     // Re-read the saved file (the background job may have updated it while the app was paused).
     // Returns true when the file had changed and was re-read. Unsaved changes are written first.
@@ -503,12 +592,12 @@
       if (st && st === own) return false;
       const raw = this.persist.load();
       if (!raw) return false;
-      try { const d = JSON.parse(raw); const sec = this._secLoad(); if (sec) this._sec = sec; const keep = this.tmdbCache; this.reset(); this.fromJSON(d);
+      try { const d = JSON.parse(raw); const sec = this._secLoad(); if (sec) this._sec = sec; const keep = this.tmdbCache; this._gen++; this.reset(); this.fromJSON(d);
         for (const [k, v] of keep) if (!this.tmdbCache.has(k)) this.tmdbCache.set(k, v); // the cache file isn't part of the reload
-        if (this.persist.cache && d.tmdbCache && d.tmdbCache.length) this._cacheTouch();
+        if (this.persist.cache && d.tmdbCache && d.tmdbCache.length) { this._cacheFull = true; this._cacheTouch(); }
         this._stamp = st; return true; } catch (e) { return false; }
     }
-    cachePut(k, tmdbId, cid, cname) { this.tmdbCache.set(k, { tmdb_id: tmdbId, collection_id: cid, collection_name: cname }); this._cacheTouch(); }
+    cachePut(k, tmdbId, cid, cname) { const v = { tmdb_id: tmdbId, collection_id: cid, collection_name: cname }; this.tmdbCache.set(k, v); this._cacheLog(k, v); this._cacheTouch(); }
 
     counters() {
       const watched = new Set(), all = new Set(), listed = new Set(), games = new Set(), by = {};
@@ -3359,7 +3448,7 @@ ${blocks.join("\n\n")}`;
   const Core = {
     MEDIA, PROFILES, SECRET_RX, norm, parseYear, mediumFromImdb, mediumFromText, ratio, TitleIndex, Store,
     parseCsv, parseImdbText, importImdbCsv, importFranchiseFile, traktEntries, routeTraktFile, storeTrakt, importTraktZip,
-    breathe, consumed, Exclusion, canonStatus, franchiseProgress, upNext, missingCanon, discrepancies, computeStats,
+    breathe, jsonParts, BUSY: CONFIG_BUSY, consumed, Exclusion, canonStatus, franchiseProgress, upNext, missingCanon, discrepancies, computeStats,
     apiTitles, pageOrApi, gqlInfo, authorizeUrl, exchangeCode, Trakt, traktSync, imdbList, imdbRatings, imdbWatchlist, imdbUserId, listIdFrom, walkTitles, browseTitles, pageExtract, pageProbe, probeFor, TMDB, collectionScan, season0Scan,
     CONFIG, AI_PRESETS, compatProvider, compatScan, localModels, serverBase, traktOne, traktEpRatings, parseLines, parseMvGroup, relevantNames, promptLine, netHint, robust, pool, details, titleInfo, justWatch, pickDates, dateSummary, bestOffer, cachedInfo, enrichInfo, platformRatings, ratingDiffs, withTimeout, watchProgress, continueWatching, testGemini, gemError, fillPosters, posterKey, aiState, resetAi, canonScan, claudeScan, claudeCall, claudeModels, rankClaudeModel, CLAUDE_DEFAULT, upcomingEpisodes, canonKeys, parseJsonArray, multiverseScan, collectionRows, refreshCollections, tvNext, upcomingEvents, computeAlerts, backgroundRun, fmtWhen, hashId, geminiState, resetGemini, mvGroup, mvExpand, multiverses, mvMap, mvAlias, mvPending, mvDone, geminiProvider, vpnOptions, bestVpn, worldFrom, worldCountries, jwQuery, flag: FLAGS, VPN_DEFAULT, manualScan, franchiseBatches, verifyPrompt, parseVerify, newsBatches, newsPrompt, parseCanonRows, franchiseName, releaseList, releaseKey, parseDate, seeds, rankGeminiModel, resolveGeminiModel, syncAll, sleep,
   };

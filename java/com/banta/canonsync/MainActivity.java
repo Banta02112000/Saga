@@ -211,6 +211,11 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         foreground = false;
+        // anything not yet written is written now (the background job reads these files)
+        try {
+            if (web != null) web.evaluateJavascript("window.__paused && window.__paused()", null);
+        } catch (Throwable ignored) {
+        }
         super.onPause();
     }
 
