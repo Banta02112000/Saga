@@ -124,6 +124,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   ok(await A(() => __app.lib.outbox.some(e => e.op === "ep" && e.e === 3)), "ticked episode queued for Trakt");
 
   // ---- Watch › Library poster grid, search, film watched twice
+  await A(() => { __app.ui.libF = "all"; }); // the default filter is "watching" when a series is in progress: only one poster there
   await pg.click('nav#tabs [data-sec="watch"]');
   ok(await pg.waitForFunction(() => document.querySelectorAll("#view .grid .poster").length >= 2, null, { timeout: 8000 }).then(() => true, () => false), "library posters: " + await A(() => JSON.stringify({ tab: __app.ui.tab, sec: __app.ui.sec, f: __app.ui.libF, n: __app.lib.all().length, html: (document.querySelector("#view") || {}).innerHTML.slice(0, 900) })));
   await pg.fill('[data-input="libQ"]', "Alien"); await pg.press('[data-input="libQ"]', "Enter");
