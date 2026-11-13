@@ -750,11 +750,11 @@ public class Bridge {
 
         Beat(Handler h) {
             this.h = h;
-            this.last = android.os.SystemClock.uptimeMillis();
+            this.last = (System.nanoTime() / 1000000L);
         }
 
         public void run() {
-            long now = android.os.SystemClock.uptimeMillis(), late = now - last - 100;
+            long now = (System.nanoTime() / 1000000L), late = now - last - 100;
             last = now;
             if (late > 250) {
                 synchronized (HITCHES) {
