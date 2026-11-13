@@ -94,5 +94,23 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     assert.strictEqual(b._ix, null, "the index is dropped afterwards");
     assert.strictEqual(await b.adoptSliced(rows, async () => {}), 0, "a second time adds nothing");
   }
+  // ---- 0.5.7: canon status worked out in slices gives the same answer
+  { const db = new C.Store(null);
+    db.addItems(Array.from({ length: 6000 }, (_, i) => ({ title: "Seen Film " + i, year: 1990 + i % 30, medium: "Movie", imdb: i % 3 ? "tt" + (100000 + i) : null })), "imdb", "rated");
+    db.addItems([{ title: "Listed One", year: 2001, medium: "Movie" }], "imdb", "watchlist");
+    db.replaceCanon("tmdb", [{ franchise: "Test", title: "Seen Film 3", year: 1993, medium: "Movie" }, { franchise: "Test", title: "Listed One", year: 2001, medium: "Movie" }, { franchise: "Test", title: "Never Seen", year: 2010, medium: "Movie" }, { franchise: "Test", title: "Seen Fillm 9", year: 1999, medium: "Movie" }]);
+    let pauses = 0;
+    const a = C.canonStatus(db, 0.9), b = await C.canonStatusAsync(db, 0.9, async () => { pauses++; });
+    assert.strictEqual(JSON.stringify(a), JSON.stringify(b)); assert.strictEqual(a.length, 4);
+    assert.deepStrictEqual(a.map(c => c.state || c.status).sort(), ["listed", "missing", "seen", "seen"], JSON.stringify(a.map(c => [c.title, c.state, c.status])));
+    assert.ok(pauses >= 3, "pauses " + pauses);
+  }
+  // ---- 0.5.7: nothing is saved while a job runs; the job's end saves once
+  { let saves = 0; const db = new C.Store({ load: () => "", save: () => {}, saveParts: async () => { saves++; return true; } });
+    C.BUSY.on = true; for (let i = 0; i < 20; i++) { db.set("k" + i, "v"); await sleep(30); }
+    assert.strictEqual(saves, 0); assert.ok(db._dirty && !db._timer);
+    C.BUSY.on = false; db._lastFlush = 0; db.touch(); await sleep(500); await db.settled();
+    assert.strictEqual(saves, 1); assert.ok(!db._dirty);
+  }
   console.log("STORAGE TESTS PASSED");
 })().catch(e => { console.error(e); process.exit(1); });

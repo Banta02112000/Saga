@@ -35,7 +35,7 @@ import java.util.zip.ZipInputStream;
 
 public class Bridge {
     static final int PICK = 4242;
-    static final String UA = "Saga/0.5.6 (Android)";
+    static final String UA = "Saga/0.5.7 (Android)";
     final Context ctx;
     final MainActivity act;       // null when running inside the background job
     final SyncJobService job;     // null in the app
@@ -223,7 +223,7 @@ public class Bridge {
     // the stamp the file had right after this app's own last background write (to tell it from a background sync's)
     @JavascriptInterface
     public String ownStamp(String name) {
-        awaitWrites(name);
+        // 0.5.7: no waiting for the writer (that held the screen while a big file was written)
         String v = OWN.get(name);
         return v == null ? "" : v;
     }
@@ -245,7 +245,12 @@ public class Bridge {
     // Changes whenever the file is rewritten (by this screen or the background sync), so a resume can skip re-reading it.
     @JavascriptInterface
     public String stamp(String name) {
-        awaitWrites(name);
+        // 0.5.7: no waiting. While this app's own write of the file is queued, the file is ours: say so with our own stamp.
+        Integer n = PENDING.get(name);
+        if (n != null && n > 0) {
+            String v = OWN.get(name);
+            if (v != null) return v;
+        }
         try {
             File f = new File(ctx.getFilesDir(), safe(name));
             return f.exists() ? f.lastModified() + ":" + f.length() : "";
@@ -299,6 +304,24 @@ public class Bridge {
     @JavascriptInterface
     public void http(String id, String method, String url, String headers, String body) {
         new Thread(new HttpTask(this, id, method, url, headers, body)).start();
+    }
+
+    final Map<String, String> bodies = new ConcurrentHashMap<String, String>();
+
+    @JavascriptInterface
+    public String takeBody(String id) {
+        String r = bodies.remove(id);
+        return r == null ? "" : r;
+    }
+
+    @JavascriptInterface
+    public String takeBodyPart(String id, int start, int end) {
+        String r = bodies.get(id);
+        if (r == null) return "";
+        int e = Math.min(end, r.length());
+        String part = r.substring(Math.min(start, e), e);
+        if (e >= r.length()) bodies.remove(id);
+        return part;
     }
 
     @JavascriptInterface
@@ -377,7 +400,9 @@ public class Bridge {
                     sb.append(q(h.toLowerCase())).append(':').append(q(v));
                     first = false;
                 }
-                sb.append("},\"body\":").append(q(text)).append('}');
+                // 0.5.7: the body is handed over as it is (takeBody), not escaped into this text and parsed twice
+                b.bodies.put(id, text);
+                sb.append("},\"split\":1,\"len\":").append(text.length()).append('}');
             } catch (Throwable t) {
                 sb.setLength(0);
                 sb.append("{\"status\":0,\"headers\":{},\"body\":\"\",\"error\":").append(q(String.valueOf(t))).append('}');
@@ -802,7 +827,7 @@ public class Bridge {
             "bidswitch.net", "3lift.com", "sharethrough.com", "smartadserver.com", "indexww.com", "lijit.com", "yieldmo.com", "teads.tv", "amazon-adsystem.cn",
             "fls-na.amazon.com", "fls-eu.amazon.com", "unagi.amazon.com", "unagi-na.amazon.com", "aax-us-east.amazon-adsystem.com", "aax-eu.amazon-adsystem.com",
             "s.amazon-adsystem.com", "c.amazon-adsystem.com", "mads.amazon-adsystem.com", "ib.adnxs.com", "tpc.googlesyndication.com" };
-        static final java.util.regex.Pattern MEDIA = java.util.regex.Pattern.compile("\\.(?:png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|eot|mp4|webm|m3u8|ts|mp3|m4a)(?:$|[?#])", java.util.regex.Pattern.CASE_INSENSITIVE);
+        static final java.util.regex.Pattern MEDIA = java.util.regex.Pattern.compile("\\.(?:png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|eot|mp4|webm|m3u8|ts|mp3|m4a|css)(?:$|[?#])", java.util.regex.Pattern.CASE_INSENSITIVE);
 
         static boolean blocked(String url) {
             try {
@@ -967,7 +992,7 @@ public class Bridge {
 
     @JavascriptInterface
     public String version() {
-        return "0.5.6";
+        return "0.5.7";
     }
 
     // ---------- background sync & notifications ----------

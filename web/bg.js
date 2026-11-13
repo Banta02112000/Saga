@@ -10,7 +10,7 @@
     const cb = pending.get(id);
     pending.delete(id);
     let r;
-    try { r = JSON.parse(A.take(id)); } catch (e) { r = { status: 0, headers: {}, body: "", error: String(e) }; }
+    try { r = JSON.parse(A.take(id)); if (r && r.split === 1) { r.body = A.takeBody(id); delete r.split; delete r.len; } } catch (e) { r = { status: 0, headers: {}, body: "", error: String(e) }; }
     if (cb) cb(r);
   };
   const http = (method, url, opt = {}) => new Promise(res => {

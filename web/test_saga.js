@@ -197,7 +197,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   ok(!/Berserk/.test(await pg.textContent("#view")), "manga not on the book shelf");
   // ---- a picture that fails moves on to the next source
   const bro = await A(() => { const it = __app.lib.all().find(x => x.poster) || (() => { const x = __app.lib.all()[0]; x.poster = "https://m.media-amazon.com/images/M/z._V1_UX400_.jpg"; return x; })(); window.__imgBroken("lib:" + it.id, it.poster); return it.id; });
-  ok(await A(id => { const st = JSON.parse(__app.db.get("img_state"))["lib:" + id]; return !__app.lib.get(id).poster && st.skip.includes("imdbId"); }, bro), "broken picture: cleared, next source next time");
+  ok(await A(id => { const st = __app.imgState()["lib:" + id]; return !__app.lib.get(id).poster && st.skip.includes("imdbId"); }, bro), "broken picture: cleared, next source next time");
   // ---- live sync: the episode ticked on Home went to Trakt by itself
   await pg.waitForFunction(() => (window.__pushed || []).some(b => JSON.stringify(b).includes('"number":3')), null, { timeout: 15000 });
   ok(await A(() => !__app.lib.outbox.length), "outbox emptied by live sync");
@@ -273,7 +273,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.5.6", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.5.7", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();

@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.5.6";
+  const VERSION = "0.5.7";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -32,6 +32,8 @@
         if (n > 4000000) { const parts = []; for (let i = 0; i < n; i += 4000000) parts.push(A.takePart(id, i, i + 4000000)); text = parts.join(""); }
         else text = A.take(id);
         r = JSON.parse(text);
+        // 0.5.7: the body comes as it is, in pieces when large (no escaping, no second parse of a multi-MB text)
+        if (r && r.split === 1) { const len = r.len || 0; if (len > 4000000) { const ps = []; for (let i = 0; i < len; i += 4000000) ps.push(A.takeBodyPart(id, i, i + 4000000)); r.body = ps.join(""); } else r.body = A.takeBody(id); delete r.split; delete r.len; }
       } catch (e) { r = fallback(e); }
       if (cb) cb(r);
     };
@@ -189,7 +191,17 @@
   };
   let memo = null;
   const status = () => { if (!memo && typeof mirrorNow === "function") mirrorNow(); return (memo = memo || C.canonStatus(db, threshold())); };
-  const invalidate = () => { memo = null; };
+  let memoGen = 0, memoAsync = null;
+  const invalidate = () => { memo = null; memoGen++; };
+  // 0.5.7: the same, worked out in slices so the screen stays free (after a sync, for the widget and pictures)
+  async function statusSoon() {
+    if (memo) return memo;
+    if (memoAsync && memoAsync.gen === memoGen) return memoAsync.p;
+    const gen = memoGen;
+    const p = (async () => { if (typeof mirrorNow === "function") mirrorNow(); await C.breathe(0); const st = await C.canonStatusAsync(db, threshold()); if (gen === memoGen && !memo) memo = st; return st; })();
+    memoAsync = { gen, p };
+    try { return await p; } finally { if (memoAsync && memoAsync.p === p) memoAsync = null; }
+  }
   const threshold = () => Math.max(0.7, Math.min(1, (parseFloat(db.get("threshold", "90")) || 90) / 100));
 
   // ------------------------------------------------------------ helpers
@@ -258,6 +270,12 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.5.7", ["Sync: nothing is saved while a sync runs (it's saved once at the end, or at once if you leave the app). Building the multi-MB save text again and again was a main cause of the lag.",
+      "Answers from Trakt and IMDb reach the app as they are, instead of being wrapped and unpacked twice.",
+      "Checking a file's state no longer waits for a big file to finish writing (that could hold the screen for seconds).",
+      "After a sync: the widget, posters, release dates and the backup now run one after another instead of all at once, and the canon check behind them is worked out in small steps.",
+      "IMDb: one odd list no longer sends every other list to the slow hidden-browser route; the hidden page also skips style sheets.",
+      "Pictures that fail to load no longer rewrite a big settings entry each time."]],
     ["0.5.6", ["Sync no longer holds the screen while it saves. Before, each save turned your whole collection into one text of many MB and handed it to the phone in one go, every few seconds during a sync; the same for the library and, at the end, the backup file. Now saves are built a few entries at a time and handed over in small pieces, written in the background, and spaced far apart while a sync runs.",
       "The look-up cache (posters, dates, episode lists) is now a journal: new entries are added to the end of a small file instead of rewriting the whole cache.",
       "IMDb's page in the hidden browser shares the browser engine with the app's screen, so it slows the app while it's open: adverts, trackers, pictures, fonts and video on it are no longer loaded.",
@@ -412,7 +430,9 @@
       ui.job = null;
       C.BUSY.on = false;
       if (db._timer) db.touch(); // back to the normal pace: what the job changed is saved soon
-      if (libTimer) { clearTimeout(libTimer); libTimer = null; libTouch(); }
+      if (libTimer || libJobDirty) { clearTimeout(libTimer); libTimer = null; libJobDirty = false; libTouch(); }
+      if (db._dirty) db.touch();
+      if (mirrorDirty && !mirrorTimer) mirrorTimer = setTimeout(mirrorNow, 1500);
       BantaShell.shared.busy(false, "job");
       $("#syncTop").classList.remove("spin");
       setProgress(null);
@@ -1662,7 +1682,7 @@
   // 0.5.6: done a moment later and once for a burst of changes (it walks every row of both stores); anything that
   // reads the rows (the canon check, a save, a backup) brings it up to date first.
   let mirrorDirty = false, mirrorTimer = null;
-  function libMirror() { mirrorDirty = true; invalidate(); if (!mirrorTimer) mirrorTimer = setTimeout(mirrorNow, 1500); }
+  function libMirror() { mirrorDirty = true; invalidate(); if (!mirrorTimer && !C.BUSY.on) mirrorTimer = setTimeout(mirrorNow, 1500); } // during a job: only when something reads the rows
   function mirrorNow(quiet) {
     clearTimeout(mirrorTimer); mirrorTimer = null;
     if (!mirrorDirty) return;
@@ -1675,6 +1695,22 @@
     if (quiet === true && !hadTimer) { clearTimeout(db._timer); db._timer = null; } // called by a save: these rows are in it already
     invalidate();
   }
+  // the same in slices, before a save in pieces (0.5.7)
+  async function mirrorSoft() {
+    if (!mirrorDirty) return;
+    mirrorDirty = false; clearTimeout(mirrorTimer); mirrorTimer = null;
+    const hadTimer = !!db._timer;
+    let i = 0;
+    for (const [k, r] of db.itemsMap) { if (r.source === "app") db.itemsMap.delete(k); if ((++i & 4095) === 0) await C.breathe(0); }
+    if (mirrorDirty) return mirrorSoft();
+    const rows = lib.dbRows();
+    await C.breathe(0);
+    for (const [list, kind, ln] of [[rows.watched, "watched", ""], [rows.watchlist, "watchlist", "Library"]])
+      for (let j = 0; j < list.length; j += 1500) { db.addItems(list.slice(j, j + 1500), "app", kind, ln); await C.breathe(0); }
+    if (!hadTimer) { clearTimeout(db._timer); db._timer = null; }
+    invalidate();
+  }
+  if (db.persist) db.persist.prepare = mirrorSoft;
   { const items = db.items.bind(db), toJSON = db.toJSON.bind(db);
     db.items = (a, b) => { mirrorNow(); return items(a, b); };
     db.toJSON = () => { mirrorNow(true); return toJSON(); }; }
@@ -1683,15 +1719,17 @@
     let timer = null, gen = 0, busy = false;
     const write = () => { timer = null; const g = ++gen; busy = true;
       C.jsonParts(obj().toJSON()).then(parts => (g === gen ? Native.saveParts(name, parts, () => g === gen) : false)).catch(() => {}).then(() => { if (g === gen) busy = false; }); };
-    return { lazy: () => { if (!timer) timer = setTimeout(write, C.BUSY.on ? 8000 : 700); },
-      now: () => { if (!timer && !busy) return; clearTimeout(timer); timer = null; gen++; busy = false; Native.save(name, JSON.stringify(obj().toJSON())); } };
+    let jobDirty = false;
+    const later = () => { if (C.BUSY.on) { jobDirty = true; if (!timer) timer = setTimeout(later, 5000); return; } timer = null; jobDirty = false; write(); };
+    return { lazy: () => { if (C.BUSY.on) jobDirty = true; if (!timer) timer = setTimeout(later, 700); },
+      now: () => { if (!timer && !busy && !jobDirty) return; jobDirty = false; clearTimeout(timer); timer = null; gen++; busy = false; Native.save(name, JSON.stringify(obj().toJSON())); } };
   }
-  const libTouch = () => { if (!libTimer) libTimer = setTimeout(libWrite, Math.max(800, (C.BUSY.on && Native.parts ? 25000 : 4000) - (Date.now() - libLast))); };
+  const libTouch = () => { if (C.BUSY.on && Native.parts) { libJobDirty = true; return; } if (!libTimer) libTimer = setTimeout(libWrite, Math.max(800, (C.BUSY.on && Native.parts ? 25000 : 4000) - (Date.now() - libLast))); };
   // The library file is written a moment later, and once for a burst of changes (a sync, ticking several episodes):
   // with a big library each write takes long enough to hold up the screen. Leaving the app writes it at once.
   let libTimer = null, libLast = 0, libGen = 0, libBusy = false;
   function libWrite(sync) {
-    clearTimeout(libTimer); libTimer = null; libLast = Date.now();
+    clearTimeout(libTimer); libTimer = null; libLast = Date.now(); libJobDirty = false;
     if (sync !== true && Native.parts) { // built and handed over in pieces: the screen stays free
       const gen = ++libGen; libBusy = true;
       C.jsonParts(lib.toJSON()).then(parts => (gen === libGen ? Native.saveParts("library.json", parts, () => gen === libGen) : false))
@@ -1705,8 +1743,10 @@
   }
   // after a background write, the stamp it left (asked only when needed: asking waits for the write)
   const libOwnStamp = () => { if (libStamp === null) libStamp = Native.ownStamp("library.json"); return libStamp; };
-  const libPending = () => !!libTimer || libBusy;
+  let libJobDirty = false;
+  const libPending = () => !!libTimer || libBusy || libJobDirty;
   function libSave() {
+    if (C.BUSY.on && Native.parts) { libJobDirty = true; libMirror(); return; } // saved once when the job ends
     if (!libTimer) libTimer = setTimeout(libWrite, Math.max(800, (C.BUSY.on && Native.parts ? 25000 : 4000) - (Date.now() - libLast)));
     libMirror();
     db.touch();
@@ -2212,7 +2252,7 @@
   function changed(what) {
     clearTimeout(changeTimer);
     const run = () => { if (ui.job) { changeTimer = setTimeout(run, 20000); return; } // not in the middle of a sync
-      try { updateWidget(); } catch (e) { /* optional */ } try { backupToFile(false).catch(() => {}); } catch (e) { /* next time */ } };
+      statusSoon().catch(() => {}).then(() => { try { updateWidget(); } catch (e) { /* optional */ } try { backupToFile(false).catch(() => {}); } catch (e) { /* next time */ } }); };
     changeTimer = setTimeout(run, 20000);
   }
   // ---- Your lists: films, series, games and books together; plus smart lists that fill themselves
@@ -2592,6 +2632,27 @@
   }
   // posters, dates and streaming in the background, after the sync has reported
   let detailsRunning = false;
+  // 0.5.7: what follows a sync runs one thing after another, after the sync's own save, instead of all at once
+  let afterRunning = false;
+  async function afterSync() {
+    if (afterRunning) return;
+    afterRunning = true;
+    try {
+      for (let i = 0; i < 600 && ui.job; i++) await new Promise(r => setTimeout(r, 500));
+      await new Promise(r => setTimeout(r, 1200)); // the result on screen first
+      await db.settled();
+      await statusSoon();
+      await C.breathe(30);
+      try { updateWidget(); } catch (e) { /* optional */ }
+      await C.breathe(30);
+      await runDetails();
+      await C.breathe(30);
+      await fillImages();
+      await db.settled();
+      await backupToFile(false).catch(() => {});
+    } catch (e) { logError("after sync", e.message); }
+    afterRunning = false;
+  }
   async function runDetails() {
     if (detailsRunning || !db.get("tmdb_key")) return;
     detailsRunning = true;
@@ -2643,7 +2704,10 @@
   // Pictures for everything that has none, trying several sources per kind (images.js). A picture that fails to
   // load moves that title on to its next source. Titles nothing was found for are tried again after three days.
   let imgRunning = false, imgAgain = false;
-  const imgState = () => { try { return JSON.parse(db.get("img_state", "{}")); } catch (e) { return {}; } };
+  // 0.5.7: kept in memory and saved a few seconds after a change (a broken picture used to parse and rewrite it each time)
+  let imgMem = null, imgSaveT = null;
+  const imgState = () => { if (!imgMem) { try { imgMem = JSON.parse(db.get("img_state", "{}")) || {}; } catch (e) { imgMem = {}; } } return imgMem; };
+  const imgSave = () => { clearTimeout(imgSaveT); imgSaveT = setTimeout(() => { imgSaveT = null; if (imgMem) db.set("img_state", JSON.stringify(imgMem)); }, 5000); };
   const canonKey = c => c.imdb || `${C.norm(c.title)}|${c.year || ""}`;
   function imgTargets(state) {
     const out = [], now = Date.now();
@@ -2659,6 +2723,7 @@
     // pictures wait for a running sync or import to finish: both at once is what made the screen lag
     if (ui.job) { clearTimeout(fillImages._wait); fillImages._wait = setTimeout(() => fillImages(budget), 15000); return 0; }
     imgRunning = true;
+    try { await statusSoon(); } catch (e) { /* the canon part is skipped */ }
     const state = imgState();
     const jobs = imgTargets(state).slice(0, budget);
     const http = C.robust(Native.http, { timeout: 15000, tries: 1 });
@@ -2671,7 +2736,7 @@
       if (r) { j.set(r.url); st.src = r.src; st.none = false; n++; hit[j.k.slice(0, j.k.indexOf(":"))] = 1; } else st.none = true;
       await C.breathe(20);
     });
-    db.set("img_state", JSON.stringify(state));
+    imgSave();
     if (n) { if (hit.lib) libSave(); if (hit.game) games.save(); if (hit.book) books.save(); invalidate(); if (!ui.job && !document.querySelector("#overlay .sheet")) render(); }
     imgRunning = false;
     if (imgAgain) { imgAgain = false; setTimeout(fillImages, 1000); }
@@ -2682,7 +2747,7 @@
     const state = imgState(), st = state[key] = state[key] || {};
     const src = st.src || (/steamstatic.*library_600x900/.test(url) ? "steam" : /steamstatic/.test(url) ? "steamHeader" : /tmdb/.test(url) ? "tmdb" : /media-amazon/.test(url) ? "imdbId" : /tvmaze/.test(url) ? "tvmaze" : /jikan|myanimelist/.test(url) ? "jikanAnime" : "");
     st.skip = [...new Set((st.skip || []).concat(src ? [src] : []))]; st.src = ""; st.none = false;
-    db.set("img_state", JSON.stringify(state));
+    imgSave();
     const [kind, id] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
     const clear = (o, f) => { if (o && o[f] && (!url || url.includes(String(o[f]).replace(/^https?:/, "")) || String(o[f]) === url)) o[f] = ""; };
     if (kind === "lib") clear(lib.get(id), "poster"); else if (kind === "game") clear(games.get(id), "cover"); else if (kind === "book") clear(books.get(id), "cover"); else db.cacheSet("img:" + id, "");
@@ -3100,14 +3165,13 @@
       db.set("last_report", ui.report);
       invalidate();
       await C.breathe();
-      if (feat("streamAlerts")) for (const n of C.streamAlerts(db, status(), myServices())) Native.notify(n.id, n.title, n.text, n.tab);
+      if (feat("streamAlerts")) for (const n of C.streamAlerts(db, await statusSoon(), myServices())) Native.notify(n.id, n.title, n.text, n.tab);
       await C.breathe();
       progress(0.72, "Library, Trakt, games and episodes");
       const post = await postSync((f, t) => progress(null, t), http);
       db.set("stage_report", post);
       await C.breathe();
-      setTimeout(() => { runDetails(); fillImages(); }, 300);
-      setTimeout(() => { try { updateWidget(); backupToFile(false).catch(() => {}); } catch (e) { /* optional */ } }, 1500); // after the result is on screen
+      setTimeout(afterSync, 300);
       const stageFails = (post.match(/^FAIL/gm) || []).length;
       if (!r.total && !post) return retryOnly ? "Nothing to retry" : "Nothing to sync yet. Add sources in Settings.";
       return retryOnly ? `Retried ${r.total}: ${r.ok} now OK` : `Synced ${r.ok} of ${r.total} sources${r.failed.length ? `, ${r.failed.length} with problems` : ""}${stageFails ? `, ${stageFails} later steps failed` : ""}`;
@@ -3431,7 +3495,7 @@
 
   // leaving the app: everything written now and waited for, so a background sync starts from the latest copy
   // leaving the app: everything not yet written is written at once (the background job reads these files)
-  const saveAllNow = () => { commitFields(); if (libPending()) libWrite(true); else libOwnStamp(); gamesFile.now(); booksFile.now(); if (db._timer || db._flushing || db._cacheDirty) db.flush(true); };
+  const saveAllNow = () => { commitFields(); if (libPending()) libWrite(true); else libOwnStamp(); gamesFile.now(); booksFile.now(); if (db._timer || db._flushing || db._cacheDirty || db._dirty) db.flush(true); };
   window.addEventListener("pagehide", saveAllNow);
   document.addEventListener("visibilitychange", () => { if (document.hidden) saveAllNow(); });
   window.__paused = saveAllNow;
@@ -3490,5 +3554,5 @@
   const last = parseFloat(db.get("last_sync", "0")) || 0;
   const hasSources = db.get("username") || db.get("imdb_user") || db.get("canon_urls") || db.get("imdb_lists");
   if (db.get("auto_sync") === "1" && hasSources && Date.now() / 1000 - last > AUTO_SYNC_HOURS * 3600) { db.set("sync_open", "0"); doSync(); db.set("sync_open", "1"); }
-  window.__app = { whatsNew, setLook, icsText, forYou, picksToday, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
+  window.__app = { whatsNew, setLook, icsText, forYou, picksToday, imgState, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
 })();

@@ -15,7 +15,7 @@ const mock = (seed) => {
   const LS = localStorage;
   if (!LS.getItem("__seeded")) { LS.setItem("__seeded", "1"); for (const [k, v] of Object.entries(seed.ls || {})) LS.setItem(k, v); for (const [k, v] of Object.entries(seed.files || {})) LS.setItem("f:" + k, v); }
   const push = (k, v) => { const a = JSON.parse(LS.getItem(k) || "[]"); a.push(v); LS.setItem(k, JSON.stringify(a)); };
-  const results = {};
+  const results = {}, bodies = {};
   window.__http = [];
   const reply = (m, url, body) => {
     const J = (o, st) => ({ status: st || 200, body: JSON.stringify(o) });
@@ -57,7 +57,10 @@ const mock = (seed) => {
     appendLater: (n, t) => { window.__files = window.__files || {}; window.__files[n] = (window.__files[n] || "") + t; return true; },
     writeUriBuf: (id, uri, k) => { const t = (window.__buf || {})[k]; delete window.__buf[k]; window.__backupFile = t; setTimeout(() => { results[id] = "true"; window.__saveDone(id); }, 50); },
     ownStamp: n => (window.__own || {})[n] || "", stamp: n => file(n).length + ":" + file(n).slice(-16), take: id => { const r = results[id]; delete results[id]; return r || ""; },
-    http: (id, m, url, h, body) => { window.__http.push(url); setTimeout(() => { results[id] = JSON.stringify(Object.assign({ headers: {} }, reply(m, url, body))); window.__httpDone(id); }, 3); },
+    // like the phone since 0.5.7: the answer's facts as JSON, its body handed over as it is
+    http: (id, m, url, h, body) => { window.__http.push(url); setTimeout(() => { const r = Object.assign({ headers: {} }, reply(m, url, body)), b = String(r.body == null ? "" : r.body); bodies[id] = b; delete r.body; r.split = 1; r.len = b.length; results[id] = JSON.stringify(r); window.__httpDone(id); }, 3); },
+    takeBody: id => { const b = bodies[id]; delete bodies[id]; return b || ""; },
+    takeBodyPart: (id, a, e) => { const b = bodies[id] || ""; const p = b.slice(a, e); if (e >= b.length) delete bodies[id]; return p; },
     browse: (id) => setTimeout(() => { results[id] = JSON.stringify({ status: 0, value: "NETERR:Web page not available", error: "x" }); window.__httpDone(id); }, 3),
     pick: id => setTimeout(() => { results[id] = JSON.stringify(window.__nextPick || []); window.__pickDone(id); }, 3),
     saveAs: (id, name, text) => { window.__saved = { name, text }; setTimeout(() => { results[id] = "true"; window.__saveDone(id); }, 3); },
@@ -133,6 +136,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   const lt = (await A(() => window.__lt)).filter(x => x[0] > tS).sort((a, b) => b[1] - a[1]);
   console.log("sync: longest blocking steps", JSON.stringify(lt.slice(0, 4)), await A(() => (__app.ui.report || "").slice(0, 80)));
   ok(/OK  Trakt account: 9300 records/.test(await A(() => __app.ui.report)), "big Trakt sync ran");
+  ok((await A(() => __app.ui.stalls)) === "", "no screen pauses during the big sync: " + await A(() => __app.ui.stalls));
   await pg.waitForFunction(() => window.__backupFile && window.__files["library.json"] && window.__files["canonsync.json"] && !__app.db._flushing && !__app.db._timer, null, { timeout: 60000 });
   await pg.waitForTimeout(4500);
   const st = await A(() => { const c = JSON.parse(window.__files["canonsync.json"]), l = JSON.parse(window.__files["library.json"]), b = JSON.parse(window.__backupFile);

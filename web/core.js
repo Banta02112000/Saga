@@ -138,11 +138,20 @@
   };
 
   class TitleIndex {
-    constructor(rows) {
+    constructor(rows, lazy = false) {
       this.rows = rows;
       this.exact = new Map();
       this.inv = new Map();
-      rows.forEach((r, i) => {
+      if (!lazy) rows.forEach((r, i) => this._add(r, i));
+    }
+    // the same, a few thousand rows at a time with a pause in between (0.5.7)
+    static async build(rows, pause) {
+      const ix = new TitleIndex(rows, true);
+      for (let i = 0; i < rows.length; i++) { ix._add(rows[i], i); if ((i & 2047) === 2047) await pause(); }
+      return ix;
+    }
+    _add(r, i) {
+      {
         if (!this.exact.has(r.norm)) this.exact.set(r.norm, []);
         this.exact.get(r.norm).push(r);
         const toks = new Set(tokens(r.norm).length ? tokens(r.norm) : [r.norm]);
@@ -150,7 +159,7 @@
           if (!this.inv.has(t)) this.inv.set(t, []);
           this.inv.get(t).push(i);
         }
-      });
+      }
     }
 
     find(n, year, medium, threshold = 0.9, fuzzy = true) {
@@ -324,7 +333,10 @@
     touch() {
       if (!this.persist) return;
       clearTimeout(this._timer);
-      this._timer = setTimeout(() => this.flush(), Math.max(400, (CONFIG_BUSY.on && this.persist.saveParts ? BUSY_GAP : FLUSH_GAP) - (Date.now() - this._lastFlush)));
+      // 0.5.7: while a job (a sync) runs, nothing is saved: building a multi-MB text again and again is what lagged.
+      // It's saved once when the job ends; leaving the app saves at once.
+      if (CONFIG_BUSY.on && this.persist.saveParts) { this._dirty = true; return; }
+      this._timer = setTimeout(() => this.flush(), Math.max(400, FLUSH_GAP - (Date.now() - this._lastFlush)));
     }
     _cacheTouch() {
       if (!this.persist) return;
@@ -369,6 +381,7 @@
       if (!this.persist) return;
       clearTimeout(this._timer);
       this._timer = null;
+      this._dirty = false;
       if (!sync && this.persist.saveParts) { this._flushParts(); return; }
       this._gen++; // a save in pieces that's still under way is now out of date
       const text = JSON.stringify(this.toJSON());
@@ -384,6 +397,7 @@
       try {
         do {
           this._again = false;
+          if (this.persist.prepare) await this.persist.prepare();
           const gen = ++this._gen;
           const parts = await jsonParts(this.toJSON());
           if (gen !== this._gen) break;
@@ -828,7 +842,7 @@
   const seeds = db => dedupe(db.items(null, ["rated"]).concat(db.items(null, ["watched"]), db.items(null, ["watchlist", "list", "collection"])));
 
   class MatchSet {
-    constructor(rows) {
+    constructor(rows, lazy = false) {
       this.imdb = new Set(rows.filter(r => r.imdb).map(r => r.imdb));
       this.tmdb = new Set(rows.filter(r => r.tmdb).map(r => tmdbKey(r.medium, r.tmdb)));
       const seen = new Set(), slim = [];
@@ -836,7 +850,14 @@
         const k = `${r.norm}|${r.year}|${r.medium}`;
         if (r.norm && !seen.has(k)) { seen.add(k); slim.push({ norm: r.norm, year: r.year, medium: r.medium }); }
       }
-      this.index = new TitleIndex(slim);
+      this.slim = slim;
+      if (!lazy) this.index = new TitleIndex(slim);
+    }
+    static async build(rows, pause) {
+      const m = new MatchSet(rows, true);
+      await pause();
+      m.index = await TitleIndex.build(m.slim, pause);
+      return m;
     }
 
     matches(c, threshold) {
@@ -852,9 +873,20 @@
 
   // seen = watched, rated or marked as seen in the app; listed = on any of your IMDb/Trakt lists or watchlists.
   class Exclusion {
-    constructor(db) {
+    constructor(db, lazy = false) {
+      if (lazy) return;
       this.seen = new MatchSet(db.items(null, SEEN_KINDS).concat(db.exclusions().map(r => Object.assign({}, r, { tmdb: null }))));
       this.listed = new MatchSet(db.items(null, LIST_KINDS));
+    }
+    static async build(db, pause) {
+      const ex = new Exclusion(db, true);
+      const seenRows = db.items(null, SEEN_KINDS).concat(db.exclusions().map(r => Object.assign({}, r, { tmdb: null })));
+      await pause();
+      ex.seen = await MatchSet.build(seenRows, pause);
+      const listRows = db.items(null, LIST_KINDS);
+      await pause();
+      ex.listed = await MatchSet.build(listRows, pause);
+      return ex;
     }
 
     state(c, threshold) {
@@ -877,8 +909,14 @@
 
   const franchiseName = name => (String(name || "Unsorted").trim().replace(/\s+collection$/i, "") || "Unsorted");
 
-  function canonStatus(db, threshold = 0.9) {
-    const ex = new Exclusion(db);
+  // the same as canonStatus without holding the screen: the slow part (indexing everything you've seen) in slices
+  async function canonStatusAsync(db, threshold = 0.9, pause = () => breathe(0)) {
+    const ex = await Exclusion.build(db, pause);
+    await pause();
+    return canonStatus(db, threshold, ex);
+  }
+  function canonStatus(db, threshold = 0.9, prebuilt = null) {
+    const ex = prebuilt || new Exclusion(db);
     const hidden = db.hiddenFranchises();
     const notCanon = db.notCanon();
     const alias = mvAlias(db);
@@ -1700,7 +1738,7 @@
         const it = await gqlList(http, lid, true);
         if (!it.total || it.length >= it.total * 0.98) return [it, `IMDb API (no page)${it.total ? `, IMDb counts ${it.total}` : ""}`];
         errs.push(`api: ${it.length} of ${it.total}`);
-      } catch (e) { errs.push(`api: ${e.message}`); gqlBlocked = true; } // refused or broken: the page route for the rest of this sync
+      } catch (e) { errs.push(`api: ${e.message}`); if (/HTTP (0|403|429|5\d\d)\b/.test(e.message)) gqlBlocked = true; } // only a refusal or an outage stops the API for the rest of this sync; one odd list doesn't
     }
     if (http.browse) {
       try { const it = await browseTitles(http, `https://www.imdb.com/list/${lid}/`, CONFIG.listBrowseMs); return [it, browserRoute(it)]; } catch (e) { errs.push(`browser: ${e.message}`); if (e.network) netFail = true; }
@@ -3448,7 +3486,7 @@ ${blocks.join("\n\n")}`;
   const Core = {
     MEDIA, PROFILES, SECRET_RX, norm, parseYear, mediumFromImdb, mediumFromText, ratio, TitleIndex, Store,
     parseCsv, parseImdbText, importImdbCsv, importFranchiseFile, traktEntries, routeTraktFile, storeTrakt, importTraktZip,
-    breathe, jsonParts, BUSY: CONFIG_BUSY, consumed, Exclusion, canonStatus, franchiseProgress, upNext, missingCanon, discrepancies, computeStats,
+    breathe, jsonParts, BUSY: CONFIG_BUSY, consumed, Exclusion, canonStatus, canonStatusAsync, franchiseProgress, upNext, missingCanon, discrepancies, computeStats,
     apiTitles, pageOrApi, gqlInfo, authorizeUrl, exchangeCode, Trakt, traktSync, imdbList, imdbRatings, imdbWatchlist, imdbUserId, listIdFrom, walkTitles, browseTitles, pageExtract, pageProbe, probeFor, TMDB, collectionScan, season0Scan,
     CONFIG, AI_PRESETS, compatProvider, compatScan, localModels, serverBase, traktOne, traktEpRatings, parseLines, parseMvGroup, relevantNames, promptLine, netHint, robust, pool, details, titleInfo, justWatch, pickDates, dateSummary, bestOffer, cachedInfo, enrichInfo, platformRatings, ratingDiffs, withTimeout, watchProgress, continueWatching, testGemini, gemError, fillPosters, posterKey, aiState, resetAi, canonScan, claudeScan, claudeCall, claudeModels, rankClaudeModel, CLAUDE_DEFAULT, upcomingEpisodes, canonKeys, parseJsonArray, multiverseScan, collectionRows, refreshCollections, tvNext, upcomingEvents, computeAlerts, backgroundRun, fmtWhen, hashId, geminiState, resetGemini, mvGroup, mvExpand, multiverses, mvMap, mvAlias, mvPending, mvDone, geminiProvider, vpnOptions, bestVpn, worldFrom, worldCountries, jwQuery, flag: FLAGS, VPN_DEFAULT, manualScan, franchiseBatches, verifyPrompt, parseVerify, newsBatches, newsPrompt, parseCanonRows, franchiseName, releaseList, releaseKey, parseDate, seeds, rankGeminiModel, resolveGeminiModel, syncAll, sleep,
   };
