@@ -15,4 +15,4 @@ jobs:
         run: for t in test_core test_extras test_library test_imports test_games test_media test_books test_fixes511 test_secure test_storage; do echo "== $t"; node $t.js || exit 1; done
       - name: Page tests
         working-directory: web
-        run: for t in test_saga test_ui test_legacy test_books_ui test_persist test_bigimport test_probe test_blank test_bg; do echo "== $t"; node $t.js /tmp/shots || exit 1; done
+        run: for t in test_saga test_ui test_legacy test_books_ui test_persist test_bigimport test_probe test_blank test_bg test_site; do echo "== $t"; node $t.js /tmp/shots || exit 1; done

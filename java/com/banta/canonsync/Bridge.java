@@ -35,7 +35,7 @@ import java.util.zip.ZipInputStream;
 
 public class Bridge {
     static final int PICK = 4242;
-    static final String UA = "Saga/0.5.7 (Android)";
+    static final String UA = "Saga/0.5.7.1 (Android)";
     final Context ctx;
     final MainActivity act;       // null when running inside the background job
     final SyncJobService job;     // null in the app
@@ -737,6 +737,57 @@ public class Bridge {
         main.post(new BrowseTask(this, id, url, probe, timeoutMs));
     }
 
+    // ---- 0.5.7.1: a watch on the phone's own screen thread (taps, scrolling and drawing go through it), during a job.
+    // Every 100 ms it notes how late it ran; anything over 250 ms is a hitch, with what was going on at the time.
+    static volatile String doing = "";
+    static volatile boolean beating = false;
+    static final java.util.ArrayList<String> HITCHES = new java.util.ArrayList<String>();
+    static long hitchTotal = 0;
+
+    static class Beat implements Runnable {
+        final Handler h;
+        long last;
+
+        Beat(Handler h) {
+            this.h = h;
+            this.last = android.os.SystemClock.uptimeMillis();
+        }
+
+        public void run() {
+            long now = android.os.SystemClock.uptimeMillis(), late = now - last - 100;
+            last = now;
+            if (late > 250) {
+                synchronized (HITCHES) {
+                    hitchTotal += late;
+                    if (HITCHES.size() < 40) HITCHES.add(late + "\t" + doing);
+                }
+            }
+            if (beating) h.postDelayed(this, 100);
+        }
+    }
+
+    @JavascriptInterface
+    public void watchScreen(boolean on) {
+        if (on && !beating) {
+            synchronized (HITCHES) {
+                HITCHES.clear();
+                hitchTotal = 0;
+            }
+            beating = true;
+            main.postDelayed(new Beat(main), 100);
+        } else if (!on) beating = false;
+    }
+
+    // what the watch saw: total ms, then one line per hitch (ms TAB what was going on)
+    @JavascriptInterface
+    public String screenReport() {
+        synchronized (HITCHES) {
+            StringBuilder sb = new StringBuilder().append(hitchTotal);
+            for (int i = 0; i < HITCHES.size(); i++) sb.append('\n').append(HITCHES.get(i));
+            return sb.toString();
+        }
+    }
+
     static class BrowseTask implements Runnable {
         final Bridge b;
         final String id, url, probe;
@@ -754,6 +805,7 @@ public class Bridge {
         }
 
         public void run() {
+            doing = "IMDb page open in the hidden browser";
             try {
                 w = new WebView(b.act);
                 WebSettings s = w.getSettings();
@@ -812,6 +864,7 @@ public class Bridge {
                 }
             } catch (Throwable ignored) {
             }
+            doing = "";
             b.deliver("__httpDone", id, json);
         }
     }
@@ -992,7 +1045,7 @@ public class Bridge {
 
     @JavascriptInterface
     public String version() {
-        return "0.5.7";
+        return "0.5.7.1";
     }
 
     // ---------- background sync & notifications ----------

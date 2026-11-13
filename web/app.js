@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.5.7";
+  const VERSION = "0.5.7.1";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -270,6 +270,8 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.5.7.1", ["If a sync still hitches, the report now also watches the phone's own screen thread (where taps and scrolling are handled) and reports smaller hitches too, with what was going on at the time.",
+      "Saga website: the same app in a browser, from your own machine on your Tailscale network (site/ folder; see its README)."]],
     ["0.5.7", ["Sync: nothing is saved while a sync runs (it's saved once at the end, or at once if you leave the app). Building the multi-MB save text again and again was a main cause of the lag.",
       "Answers from Trakt and IMDb reach the app as they are, instead of being wrapped and unpacked twice.",
       "Checking a file's state no longer waits for a big file to finish writing (that could hold the screen for seconds).",
@@ -389,6 +391,7 @@
     // Shorter hitches (over 0.15 s) are added up per step: many small ones are what makes the screen feel laggy.
     const stalls = [], jank = {}; let beat = Date.now();
     const stepOf = () => (Native.browsing() ? "IMDb page (hidden browser): " : "") + String(ui.status || name).replace(/\s*\(\d+ s\)$/, "").replace(/\d[\d,.]*/g, "#").slice(0, 60);
+    try { if (window.Android && window.Android.watchScreen) window.Android.watchScreen(true); } catch (e) { /* older app */ }
     const watch = setInterval(() => { const now = Date.now(), gap = now - beat - 250; beat = now; if (gap > 150) { const k = stepOf(); jank[k] = (jank[k] || 0) + gap; } if (gap > 700) stalls.push([gap, (Native.browsing() ? "IMDb page (hidden browser): " : "") + (ui.status || name)]); }, 250);
     // ticking elapsed time so a slow step never looks frozen
     const tick = setInterval(() => {
@@ -416,12 +419,17 @@
       toast(ui.status);
     } finally {
       clearInterval(tick); clearInterval(watch);
+      // 0.5.7.1: the phone's own screen thread (taps and scrolling) is watched too, and smaller hitches are reported
+      let native = { total: 0, list: [] };
+      try { const A = window.Android; if (A && A.screenReport) { A.watchScreen(false); const t = String(A.screenReport() || "0").split("\n"); native = { total: +t[0] || 0, list: t.slice(1).map(l => l.split("\t")).map(([ms, w]) => [+ms, w || ""]) }; } } catch (e) { /* older app */ }
       const jankAll = Object.values(jank).reduce((a, b) => a + b, 0);
-      if (stalls.length || jankAll > 3000) {
+      if (stalls.length || jankAll > 600 || native.total > 600) {
         const worst = stalls.slice().sort((a, b) => b[0] - a[0]).slice(0, 5);
         const steps = Object.entries(jank).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, ms]) => `${(ms / 1000).toFixed(1)} s in "${k}"`).join("; ");
         const line = `SLOW screen paused ${stalls.length} time${stalls.length === 1 ? "" : "s"} over 0.7 s` + (worst.length ? ` (longest: ${worst.map(([ms, st]) => `${(ms / 1000).toFixed(1)} s during "${String(st).replace(/\s*\(\d+ s\)$/, "").slice(0, 60)}"`).join("; ")})` : "") +
-          `. Hitches added up: ${(jankAll / 1000).toFixed(1)} s${steps ? ` (most: ${steps})` : ""}`;
+          `. Hitches added up: ${(jankAll / 1000).toFixed(1)} s${steps ? ` (most: ${steps})` : ""}` +
+          (native.total ? `. Phone screen thread: ${(native.total / 1000).toFixed(1)} s in ${native.list.length} hitch${native.list.length === 1 ? "" : "es"}` +
+            ` (longest: ${native.list.slice().sort((a, b) => b[0] - a[0]).slice(0, 3).map(([ms, w]) => `${(ms / 1000).toFixed(1)} s${w ? ` while ${w}` : ""}`).join("; ")})` : "");
         ui.stalls = line;
         if (name === "Sync" || name === "Retry") { ui.report = (ui.report || "") + "\n" + line; db.set("last_report", ui.report); }
         logError("stall", `${name}: ${line}`);
