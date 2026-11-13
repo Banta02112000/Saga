@@ -64,9 +64,9 @@ function cursorHtml(total) {
 </script></body></html>`;
 }
 
-async function runProbe(page, url, timeoutMs) {
+async function runProbe(page, url, timeoutMs, want = 0) {
   await page.goto(url, { waitUntil: "commit" });
-  const probe = C.probeFor(timeoutMs);
+  const probe = C.probeFor(timeoutMs, want);
   const t0 = Date.now();
   for (;;) {
     let v = null;
@@ -114,6 +114,13 @@ async function runProbe(page, url, timeoutMs) {
   assert.strictEqual(res0.items.filter(x => x.r).length, 1940);
   assert.strictEqual(res0.total, 1940);
   assert.strictEqual(res0.capped, false);
+
+  // 0b) 0.5.4.7: only the newest 500 wanted (the rest is stored): stops early, not reported as cut short
+  cfg = { total: 1940 };
+  r0 = await runProbe(page, "https://www.imdb.com/user/p.cursor/ratings/", 300000, 500);
+  res0 = JSON.parse(r0.v);
+  console.log(`newest only: ${res0.items.filter(x => x.r).length} rated of ${res0.total}, newest ${res0.newest}, ${r0.secs.toFixed(0)}s`);
+  assert.ok(res0.newest && !res0.capped && res0.items.filter(x => x.r).length >= 500 && res0.items.filter(x => x.r).length < 1940);
 
   // 1) list with infinite scroll: 1,130 titles
   cfg = { total: 1130, mode: "scroll", rating: false };

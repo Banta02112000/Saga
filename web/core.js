@@ -955,7 +955,8 @@
     const timeout = opt.timeout || 45000, tries = opt.tries || 3, log = opt.log || null;
     const f = async (method, url, o = {}) => {
       let r = null;
-      for (let a = 1; a <= tries; a++) {
+      const n = o.once ? 1 : tries; // once: a quick try that has a fallback of its own
+      for (let a = 1; a <= n; a++) {
         if (CONFIG.cancelled) return { status: 0, headers: {}, body: "", error: "cancelled" };
         const t0 = Date.now();
         try { r = await withTimeout(http(method, url, o), timeout, `no answer within ${Math.round(timeout / 1000)} s`); }
@@ -963,7 +964,7 @@
         r.headers = r.headers || {};
         if (log) log(`${method} ${String(url).replace(/(api_key|key)=[^&]+/g, "$1=…").slice(0, 140)} → ${r.status || r.error} (${Date.now() - t0} ms)${a > 1 ? ` try ${a}` : ""}`);
         const retry = r.status === 0 || r.status === 429 || r.status >= 500;
-        if (!retry || a === tries) break;
+        if (!retry || a === n) break;
         const ra = parseFloat(r.headers["retry-after"] || "");
         const unit = CONFIG.retryDelayMs / 4; // 1.5 s normally; the tests shrink it
         await sleep(r.status === 429 ? Math.min(((isFinite(ra) ? ra : 5) + 1) * 1000, unit * 40) : unit * a * a);
@@ -1124,8 +1125,8 @@
   const TT = /^tt\d{7,9}$/;
   const IMDB_H = { "User-Agent": BROWSER_UA, "Accept-Language": "en-US,en;q=0.9" };
   const GQL = "https://api.graphql.imdb.com/";
-  const LIST_QUERY = "query($id: ID!, $after: String){ list(id:$id){ titleListItemSearch(first:250, after:$after){ " +
-    "edges{ listItem{ ... on Title { id titleText{text} releaseYear{year} titleType{id} " +
+  const LIST_QUERY = "query($id: ID!, $after: String){ list(id:$id){ titleListItemSearch(first:250, after:$after){ total " +
+    "edges{ listItem{ ... on Title { id titleText{text} releaseYear{year} titleType{id} releaseDate{year month day} runtime{seconds} " +
     "titleGenres{genres{genre{text}}} } } } pageInfo{hasNextPage endCursor} } } }";
 
   async function getText(http, url) {
@@ -1219,7 +1220,7 @@
 
   // Polled once a second by the native layer. Waits for the page's data to be complete, captures the page's own
   // GraphQL responses, scrolls / presses "N more" until nothing new loads, then returns the compact list.
-  function pageProbe(extract, maxPolls) {
+  function pageProbe(extract, maxPolls, want) {
     // Chrome's "Web page not available" error page: say so at once instead of waiting for the timeout.
     if (/^chrome-error:/i.test(String(location.href))) return "NETERR:" + (document.title || "page not available");
     var S = window.__cs;
@@ -1348,7 +1349,9 @@
               function (e) { S.inflight--; S.directErr = String(e).slice(0, 120); });
       return true;
     };
-    var replayed = S.inflight <= 0 && (replay() || direct());
+    // enough: the newest `want` titles are in (the rest is already stored), so stop asking for more pages
+    var enough = want > 0 && S.order.length >= want;
+    var replayed = !enough && S.inflight <= 0 && (replay() || direct());
     // Once the next pages come straight from IMDb's API (replay or direct), the page itself is left alone: no
     // scrolling and no buttons, so it doesn't keep drawing thousands of new rows on the engine the app shares.
     var apiMode = !!S.tpl || (/\/list\/ls\d+/.test(String(location.pathname)) && !S.directErr && S.next !== undefined);
@@ -1360,7 +1363,7 @@
       setTimeout(function () { window.scrollTo(0, Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)); }, 200);
     } catch (e) { /* ignore */ }
     // "250 more", "Altri 250", "Load more"... (English or Italian), or IMDb's own see-more button; never links elsewhere.
-    if (!replayed && !apiMode) {
+    if (!replayed && !apiMode && !enough) {
       var btns = document.querySelectorAll("button");
       for (var b2 = 0; b2 < btns.length; b2++) {
         var bt = btns[b2], txt = (bt.textContent || "").replace(/\s+/g, " ").trim();
@@ -1381,16 +1384,17 @@
     var size = nLinks * 1000000 + S.order.length * 1000 + S.chunks;
     if (size === S.last && S.inflight <= 0 && !replayed) S.stable++; else { S.stable = 0; S.last = size; }
     var more = S.next && !S.asked[S.next] && (S.tpl || (/\/list\/ls\d+/.test(String(location.pathname)) && !S.directErr));
-    if ((S.stable < 4 || S.polls < 3 || more) && S.polls < maxPolls) return null;
+    if (enough && S.inflight <= 0) more = false;
+    if (!(enough && S.inflight <= 0) && (S.stable < 4 || S.polls < 3 || more) && S.polls < maxPolls) return null;
     var items = S.order.map(function (id) { return S.out[id]; });
-    var capped = S.stable < 4 || (S.total > 0 && items.length < S.total * 0.98);
+    var capped = !enough && (S.stable < 4 || (S.total > 0 && items.length < S.total * 0.98));
     // when it stops short, say what the page offered, so the next report shows why
     var dbg = capped ? "button " + (S.btn ? "'" + S.btn + "' pressed" : "not found") + ", " + S.gql + " data requests seen" + (Object.keys(S.ops).length ? " (" + Object.keys(S.ops).slice(0, 4).join(", ") + ")" : "") +
       ", next page " + (S.next ? "known" : S.next === null ? "none" : "unknown") + (S.directErr ? ", " + S.directErr : "") : "";
-    return JSON.stringify({ items: items, loads: S.chunks - 1, polls: S.polls, total: S.total, capped: capped, dbg: dbg });
+    return JSON.stringify({ items: items, loads: S.chunks - 1, polls: S.polls, total: S.total, capped: capped, dbg: dbg, newest: !!enough });
   }
 
-  const probeFor = timeoutMs => `(${pageProbe.toString()})(${pageExtract.toString()}, ${Math.max(5, Math.floor(timeoutMs / 1000) - 8)})`;
+  const probeFor = (timeoutMs, want = 0) => `(${pageProbe.toString()})(${pageExtract.toString()}, ${Math.max(5, Math.floor(timeoutMs / 1000) - 8)}, ${+want || 0})`;
 
   function fromCompact(x) {
     return {
@@ -1403,10 +1407,10 @@
   // Opens url in the hidden browser and returns [items, loads].
   const netError = msg => Object.assign(new Error(msg), { network: true });
 
-  async function browseTitles(http, url, timeout = 180000) {
+  async function browseTitles(http, url, timeout = 180000, want = 0) {
     let r;
     for (let attempt = 1; ; attempt++) {
-      r = await http.browse(url, probeFor(timeout), timeout);
+      r = await http.browse(url, probeFor(timeout, want), timeout);
       const failedLoad = (typeof r.value === "string" && r.value.startsWith("NETERR:")) ||
         (r.error === "timeout" && /chrome-error|not available/i.test(String(r.title || "")));
       if (!failedLoad) break;
@@ -1427,6 +1431,7 @@
     items.capped = !!res.capped;
     items.total = res.total || 0;
     items.dbg = res.dbg || "";
+    items.newest = !!res.newest;
     return items;
   }
 
@@ -1443,21 +1448,26 @@
     return [...out.values()];
   }
 
-  async function gqlList(http, listId) {
+  let gqlBlocked = false; // IMDb refused the API once this run: don't keep asking
+  async function gqlList(http, listId, once = false) {
     const items = [];
+    let total = 0;
     let after = null;
     for (let i = 0; i < 40; i++) {
       const r = await http("POST", GQL, { headers: Object.assign({ "Content-Type": "application/json" }, IMDB_H),
-                                          body: JSON.stringify({ query: LIST_QUERY, variables: { id: listId, after } }) });
+                                          body: JSON.stringify({ query: LIST_QUERY, variables: { id: listId, after } }), once });
       if (r.status !== 200) throw new Error(`GraphQL HTTP ${r.status}`);
       const res = (((JSON.parse(r.body).data || {}).list) || {}).titleListItemSearch;
       if (!res) throw new Error("GraphQL returned no list data");
+      if (res.total) total = res.total;
       for (const e of res.edges || []) {
         const t = e.listItem || {};
         if (!t.id) continue;
         const gs = ((t.titleGenres || {}).genres) || [];
+        const rd = t.releaseDate || {};
         items.push({ imdb: t.id, title: (t.titleText || {}).text, year: (t.releaseYear || {}).year,
-                     medium: mediumFromImdb((t.titleType || {}).id),
+                     medium: mediumFromImdb((t.titleType || {}).id), date: rd.year ? parseDate({ year: rd.year, month: rd.month, day: rd.day }) : null,
+                     runtime: t.runtime && t.runtime.seconds ? Math.round(t.runtime.seconds / 60) : null,
                      genres: gs.filter(x => x.genre).map(x => x.genre.text).join(", ") });
       }
       const pi = res.pageInfo || {};
@@ -1465,6 +1475,7 @@
       after = pi.endCursor;
     }
     if (!items.length) throw new Error("GraphQL list was empty");
+    items.total = total;
     return items;
   }
 
@@ -1478,6 +1489,15 @@
     const lid = listIdFrom(url);
     const errs = [];
     let netFail = false;
+    // IMDb's API straight from the phone's network code: no page to load, nothing running on the screen's engine.
+    // Kept only if IMDb answers with the whole list; otherwise the page route below takes over.
+    if (http.browse && !gqlBlocked) {
+      try {
+        const it = await gqlList(http, lid, true);
+        if (!it.total || it.length >= it.total * 0.98) return [it, `IMDb API (no page)${it.total ? `, IMDb counts ${it.total}` : ""}`];
+        errs.push(`api: ${it.length} of ${it.total}`);
+      } catch (e) { errs.push(`api: ${e.message}`); gqlBlocked = true; } // refused or broken: the page route for the rest of this sync
+    }
     if (http.browse) {
       try { const it = await browseTitles(http, `https://www.imdb.com/list/${lid}/`, CONFIG.listBrowseMs); return [it, browserRoute(it)]; } catch (e) { errs.push(`browser: ${e.message}`); if (e.network) netFail = true; }
     }
@@ -1523,16 +1543,17 @@
     throw new Error(`IMDb watchlist for ${id} failed (${errs.join("; ")}). Check your watchlist is public, or sign in to IMDb in Settings.`);
   }
 
-  async function imdbRatings(http, ur) {
+  async function imdbRatings(http, ur, want = 0) {
     ur = imdbUserId(ur);
     const errs = [];
     let netFail = false;
     if (http.browse) {
       try {
-        const items = await browseTitles(http, `https://www.imdb.com/user/${ur}/ratings/`, CONFIG.listBrowseMs + 120000);
+        const items = await browseTitles(http, `https://www.imdb.com/user/${ur}/ratings/`, CONFIG.listBrowseMs + 120000, want);
         const groups = {};
         for (const it of items) (groups[it.rating ? "rated" : "watched"] = groups[it.rating ? "rated" : "watched"] || []).push(it);
         Object.defineProperty(groups, "total", { value: items.total || 0, enumerable: false });
+        Object.defineProperty(groups, "newest", { value: items.newest, enumerable: false });
         return [groups, browserRoute(items)];
       } catch (e) { errs.push(`browser: ${e.message}`); if (e.network) netFail = true; }
     }
@@ -2991,6 +3012,7 @@ ${blocks.join("\n\n")}`;
   // so one slow source never holds the rest. A route that only got the first page of a list is reported as PART, not OK,
   // and keeps whatever was there before. Release dates, posters and episode lookups are not part of this: see details().
   async function syncAll(db, http, progress, only = null, opt = {}) {
+    gqlBlocked = false;
     const log = [];
     const L = m => { log.push(`${new Date().toISOString().slice(11, 19)} ${m}`); if (log.length > 400) log.shift(); };
     http = robust(http, { timeout: 45000, tries: 3, log: L });
@@ -3034,9 +3056,16 @@ ${blocks.join("\n\n")}`;
     };
     if (db.get("imdb_user")) {
       add("imdb", "IMDb ratings", async () => {
-        const [groups, route] = await imdbRatings(http, db.get("imdb_user"));
+        // With thousands of ratings already stored, a sync reads only the newest 500 (IMDb lists them newest first,
+        // and a changed rating moves to the top). Reading every page each time kept IMDb's page busy on the engine
+        // the app shares, freezing the screen. The whole list is read only when asked (Settings › IMDb).
+        const have = db.items("imdb", ["rated"]).length;
+        const want = have >= 1000 && !opt.fullImdb ? 500 : 0;
+        const [groups, route] = await imdbRatings(http, db.get("imdb_user"), want);
         for (const [k, items] of Object.entries(groups)) db.addItems(items, "imdb", k, "");
         const all = Object.assign(Object.values(groups).flat(), { total: groups.total || 0, isRatings: true });
+        if (groups.newest) return { msg: `newest ${all.length} ratings checked; the other ${Math.max(0, have - all.length)} are already stored (to catch ratings you removed on IMDb, use Settings › IMDb › Read all my ratings again)`, part: false, got: all.length };
+        if (!want && groups.total && all.length >= groups.total * 0.98) db.set("imdb_full_at", String(Date.now()));
         keepEps(all);
         return imdbRes(all, route);
       }, CONFIG.listTaskMs);

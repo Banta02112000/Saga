@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.5.4.6";
+  const VERSION = "0.5.4.7";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -229,6 +229,8 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.5.4.7", ["Sync and the frozen screen: with 1,000 or more IMDb ratings already in Saga, a sync reads only your newest 500 instead of every page, and IMDb lists are asked for straight from IMDb's API without opening their page. Settings › IMDb › Read all my ratings again reads the whole list when you want it.",
+      "New app icon: your chosen picture, used as it is."]],
     ["0.5.4.6", ["Sync: reading IMDb lists no longer redraws thousands of rows on the screen engine the app shares, and each page of results is processed as it arrives instead of all at the end. These were the long freezes during the IMDb part of a sync.",
       "If the screen still pauses during a job, the Sync report ends with a SLOW line saying how long and during which step (also in Settings › Error log).",
       "Library: films and series of your own lists, and a Paused status for anything you've put on hold."]],
@@ -1038,6 +1040,8 @@
         ${db.get("imdb_signed_in") ? `<span class="small" style="color:var(--ok)">Sign-in page was opened ${esc(db.get("imdb_signed_in"))}</span>` : ""}</div>
         ${field("imdb_user", "User ID", { placeholder: "ur12345678, p.abc123 or your profile link", hint: "Your ratings sync if they're public or you've signed in above. Importing your ratings CSV from the Home tab always works." })}
         ${field("imdb_lists", "Public lists and your watchlist link, one per line. Titles here count as already planned, not missing", { area: true, placeholder: "https://www.imdb.com/list/ls100000001/" })}
+        <button class="btn quiet" data-action="imdbfull">Read all my ratings again</button>
+        <p class="small muted">Once you have 1,000 or more IMDb ratings in Saga, a sync reads only your newest 500 (it keeps the screen responsive). Use this now and then to catch ratings you removed on IMDb; it takes a few minutes.</p>
       </section>
       <section class="stack">
         <h2>Steam</h2>
@@ -2857,12 +2861,12 @@
 
   // Sync: the sources (Trakt and IMDb side by side), then the library, Trakt, games and episodes, each with a time
   // limit. Posters, dates and streaming follow in the background. Everything is written to the Sync screen.
-  function doSync(retryOnly = false) {
+  function doSync(retryOnly = false, fullImdb = false) {
     const only = retryOnly ? new Set(failedLabels()) : null;
     if (!retryOnly && ui.sec !== "sync" && db.get("sync_open", "1") === "1") go("sync");
     return runJob(retryOnly ? "Retry" : "Sync", async progress => {
       const http = C.robust(Native.http, { timeout: 30000, tries: 2 });
-      const r = await C.syncAll(db, Native.http, (f, t) => progress(f == null ? null : f * 0.7, t), only);
+      const r = await C.syncAll(db, Native.http, (f, t) => progress(f == null ? null : f * 0.7, t), only, { fullImdb });
       if (only) {
         const fresh = new Map(r.report.split("\n").map(l => [labelOf(l), l]));
         ui.report = (ui.report || "").split("\n").map(l => fresh.get(labelOf(l)) || l).join("\n");
@@ -2932,6 +2936,7 @@
     if (a === "dismiss") { if (e.target === el) closeOverlay(); return; }
     if (a.startsWith("lib") && libAct(a, el)) { if (a === "libseasonopen") return; e.preventDefault(); return; }
     if (a.startsWith("mlist") && myListAct(a, el)) { e.preventDefault(); return; }
+    if (a === "imdbfull") { e.preventDefault(); doSync(false, true); return; }
     for (const m of Object.values(Kit.mods)) if (m.act && m.act(a, el, e)) { e.preventDefault(); return; }
     switch (a) {
       case "search": openSearch(); break;
