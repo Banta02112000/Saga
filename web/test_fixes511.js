@@ -1,6 +1,31 @@
 const assert = require("assert");
 const C = require("./core.js"), L = require("./library.js"), I = require("./imports.js");
 (async () => {
+  // 0.5.4.9: saves go to the phone's background writer; the cache has its own file; reload tells our writes from others
+  { let file = "", stampN = 0, queue = [], own = "", saves = 0, cacheFile = "", cacheSaves = 0;
+    const settle = () => { while (queue.length) { file = queue.shift(); stampN++; own = "s" + stampN; } };
+    const p = { load: () => { settle(); return file; }, save: t => { settle(); file = t; stampN++; saves++; }, saveLater: t => { queue.push(t); saves++; },
+      stamp: () => { settle(); return "s" + stampN; }, ownStamp: () => { settle(); return own; },
+      cache: { load: () => cacheFile, save: t => { cacheFile = t; cacheSaves++; } } };
+    // an older file with the cache inside: moved out to its own file
+    file = JSON.stringify({ v: 1, settings: { a: "1" }, items: [], tmdbCache: [["poster:x", { p: "/x.jpg" }]] });
+    const db = new C.Store(p);
+    assert.deepStrictEqual(db.cacheGet("poster:x"), { p: "/x.jpg" });
+    db.flush(); settle();
+    assert.ok(!JSON.parse(file).tmdbCache.length && JSON.parse(cacheFile).length === 1, "cache moved to its own file");
+    // many cache writes in a burst: no main-file save for them
+    const before = saves; for (let i = 0; i < 50; i++) db.cacheSet("k" + i, { i }); await new Promise(r => setTimeout(r, 600));
+    assert.strictEqual(saves, before, "cache changes don't rewrite the main file");
+    db.flush(); settle(); assert.ok(JSON.parse(cacheFile).length === 51);
+    // our own background write is not mistaken for someone else's
+    db.set("b", "2"); db.flush();
+    assert.strictEqual(db.reload(), false);
+    // a write by the background sync is noticed, and the cache survives the reload
+    const ext = JSON.parse(file); ext.settings.c = "3"; p.save(JSON.stringify(ext));
+    assert.strictEqual(db.reload(), true); assert.strictEqual(db.get("c"), "3"); assert.ok(db.cacheGet("k7"));
+    // automatic saves are spaced out
+    const s0 = saves; db.set("d", "1"); await new Promise(r => setTimeout(r, 500)); db.set("e", "1"); await new Promise(r => setTimeout(r, 600));
+    assert.ok(saves - s0 <= 1, "at most one automatic save within 4 s: " + (saves - s0)); db.flush(); }
   // one activity history across media; Your year adds it up; bulk ticks left out; a day's episodes grouped
   { const Act = require("./activity.js"); const lb = new L.Library(null);
     const m = lb.add({ type: "movie", title: "Heat", year: 1995, runtime: 170 }, "watchlist").item; lb.setStatus(m, "watched", "2025-03-01"); m.watches.push("2025-06-01"); m.rating = 9;

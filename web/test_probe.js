@@ -99,7 +99,7 @@ async function runProbe(page, url, timeoutMs, want = 0) {
 
   await page.route("https://caching.graphql.imdb.com/**", async route => {
     const v = JSON.parse(new URL(route.request().url()).searchParams.get("variables"));
-    const from = +String(v.after).slice(1), to = Math.min(from + v.first, cfg.total);
+    const from = v.after ? +String(v.after).slice(1) : 0, to = Math.min(from + v.first, cfg.total);
     await new Promise(r => setTimeout(r, 200));
     return route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" },
       body: JSON.stringify({ data: { advancedTitleSearch: { total: cfg.total, pageInfo: { hasNextPage: to < cfg.total, endCursor: "c" + to }, edges: makeItems(from, to, true) } } }) });
@@ -114,6 +114,22 @@ async function runProbe(page, url, timeoutMs, want = 0) {
   assert.strictEqual(res0.items.filter(x => x.r).length, 1940);
   assert.strictEqual(res0.total, 1940);
   assert.strictEqual(res0.capped, false);
+
+  // 0a) 0.5.4.9: the page's own request is handed back, and later syncs page through IMDb's API without the page
+  assert.ok(res0.tpl && /graphql/.test(res0.tpl.url), "template kept: " + JSON.stringify(res0.tpl).slice(0, 200));
+  { const viaPage = async (method, url, o) => page.evaluate(async ([m, u, b]) => { const r = await fetch(u, { method: m, body: b || undefined }); return { status: r.status, body: await r.text(), headers: {} }; }, [method, url, (o || {}).body || null]);
+    const t0 = Date.now(); const api = await C.apiTitles(viaPage, res0.tpl);
+    console.log(`API without the page: ${api.filter(x => x.rating).length} rated of ${api.total}, ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+    assert.strictEqual(api.filter(x => x.rating).length, 1940);
+    const newest = await C.apiTitles(viaPage, res0.tpl, 500); assert.ok(newest.newest && newest.length >= 500 && newest.length < 1940);
+    // a dead template: pageOrApi forgets it and opens the page again
+    const store = { m: { "imdb_tpl /user/p.cursor/ratings/": JSON.stringify(Object.assign({}, res0.tpl, { url: "https://caching.graphql.imdb.com/?broken=1" })) }, get(k) { return this.m[k]; }, set(k, v) { this.m[k] = v; } };
+    let browsed = 0; const h2 = async (m, u, o) => { if (/broken/.test(u)) return { status: 500, body: "", headers: {} }; return viaPage(m, u, o); };
+    h2.browse = async (url, probe, timeout) => { browsed++; const r = await runProbe(page, url, timeout); return { status: 200, value: r.v }; };
+    const it2 = await C.pageOrApi(h2, "https://www.imdb.com/user/p.cursor/ratings/", 300000, 0, store);
+    assert.ok(browsed === 1 && it2.length >= 1940 && /caching\.graphql/.test(store.m["imdb_tpl /user/p.cursor/ratings/"]) && !/broken/.test(store.m["imdb_tpl /user/p.cursor/ratings/"]), "fallback to the page renews the template");
+    const it3 = await C.pageOrApi(h2, "https://www.imdb.com/user/p.cursor/ratings/", 300000, 0, store);
+    assert.ok(browsed === 1 && /no page/.test(it3.route), "next time: API, no page"); }
 
   // 0b) 0.5.4.7: only the newest 500 wanted (the rest is stored): stops early, not reported as cut short
   cfg = { total: 1940 };

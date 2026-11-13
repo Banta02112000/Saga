@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.5.4.8";
+  const VERSION = "0.5.4.9";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -116,6 +116,10 @@
         }
       },
       save: (n, t) => (A ? A.save(n, t) : (mem[n] = t, true)),
+      // written by the phone in the background: the screen doesn't wait for the disk (falls back to save)
+      saveLater: (n, t) => { try { return A && A.saveLater ? A.saveLater(n, t) : A ? A.save(n, t) : (mem[n] = t, true); } catch (e) { logError("save", `${n}: ${e.message}`); return false; } },
+      later: !!(A && A.saveLater && A.ownStamp),
+      ownStamp: n => (A && A.ownStamp ? String(A.ownStamp(n) || "") : ""),
       openUrl: u => (A ? A.openUrl(u) : window.open(u, "_blank")),
       copy: t => (A ? A.copy(t) : navigator.clipboard && navigator.clipboard.writeText(t)),
       sha256url: async s => {
@@ -134,6 +138,8 @@
 
   // ------------------------------------------------------------ state
   const db = new C.Store({ load: () => Native.load("canonsync.json"), save: t => Native.save("canonsync.json", t),
+                           saveLater: Native.later ? t => Native.saveLater("canonsync.json", t) : null, ownStamp: () => Native.ownStamp("canonsync.json"),
+                           cache: { load: () => Native.load("cache.json"), save: t => Native.saveLater("cache.json", t) },
                            stamp: () => (window.Android && Android.stamp ? Android.stamp("canonsync.json") : ""),
                            // keys and tokens: encrypted with the phone's Keystore when this Android build offers it
                            secrets: window.Android && Android.secretsLoad ? { load: () => Android.secretsLoad(), save: t => Android.secretsSave(t) } : null });
@@ -229,6 +235,10 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.5.4.9", ["Sync lag: Saga no longer rewrites its big files over and over while syncing. Saves are spaced out, the phone writes them in the background so the screen doesn't wait, and posters, episode lists and dates live in a separate cache file that's written every 30 seconds at most.",
+      "Posters are fetched after a sync or import finishes, not during it.",
+      "IMDb ratings and watchlist: after the first sync, Saga asks IMDb's API directly with the page's own request instead of opening the page each time.",
+      "If the screen still hitches during a job, the report's SLOW line now also adds up the small hitches per step."]],
     ["0.5.4.8", ["Diary: everything you watched, played and read in one list, newest first, by month, with filters (Home › Recently › Diary). A day's episodes of one series show as one line.",
       "Your year and the diary now come from one shared activity history, so their numbers always agree.",
       "Imports: before anything is written, Saga shows what each file is, how many entries it has and how many are already in your library. Every import can be undone afterwards (Settings › Import)."]],
@@ -327,8 +337,10 @@
     };
     // Stall watch: a 250 ms timer that fires late means the screen couldn't respond. Each pause over 0.7 s is kept
     // with the step it happened in, and listed in the report, so a freeze on the phone says where it came from.
-    const stalls = []; let beat = Date.now();
-    const watch = setInterval(() => { const now = Date.now(), gap = now - beat - 250; beat = now; if (gap > 700) stalls.push([gap, ui.status || name]); }, 250);
+    // Shorter hitches (over 0.15 s) are added up per step: many small ones are what makes the screen feel laggy.
+    const stalls = [], jank = {}; let beat = Date.now();
+    const stepOf = () => String(ui.status || name).replace(/\s*\(\d+ s\)$/, "").replace(/\d[\d,.]*/g, "#").slice(0, 60);
+    const watch = setInterval(() => { const now = Date.now(), gap = now - beat - 250; beat = now; if (gap > 150) { const k = stepOf(); jank[k] = (jank[k] || 0) + gap; } if (gap > 700) stalls.push([gap, ui.status || name]); }, 250);
     // ticking elapsed time so a slow step never looks frozen
     const tick = setInterval(() => {
       const el = $("#status");
@@ -355,10 +367,12 @@
       toast(ui.status);
     } finally {
       clearInterval(tick); clearInterval(watch);
-      if (stalls.length) {
+      const jankAll = Object.values(jank).reduce((a, b) => a + b, 0);
+      if (stalls.length || jankAll > 3000) {
         const worst = stalls.slice().sort((a, b) => b[0] - a[0]).slice(0, 5);
-        const line = `SLOW screen paused ${stalls.length} time${stalls.length === 1 ? "" : "s"} (${(stalls.reduce((a, x) => a + x[0], 0) / 1000).toFixed(1)} s in all). Longest: ` +
-          worst.map(([ms, st]) => `${(ms / 1000).toFixed(1)} s during "${String(st).replace(/\s*\(\d+ s\)$/, "").slice(0, 60)}"`).join("; ");
+        const steps = Object.entries(jank).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, ms]) => `${(ms / 1000).toFixed(1)} s in "${k}"`).join("; ");
+        const line = `SLOW screen paused ${stalls.length} time${stalls.length === 1 ? "" : "s"} over 0.7 s` + (worst.length ? ` (longest: ${worst.map(([ms, st]) => `${(ms / 1000).toFixed(1)} s during "${String(st).replace(/\s*\(\d+ s\)$/, "").slice(0, 60)}"`).join("; ")})` : "") +
+          `. Hitches added up: ${(jankAll / 1000).toFixed(1)} s${steps ? ` (most: ${steps})` : ""}`;
         ui.stalls = line;
         if (name === "Sync" || name === "Retry") { ui.report = (ui.report || "") + "\n" + line; db.set("last_report", ui.report); }
         logError("stall", `${name}: ${line}`);
@@ -1587,9 +1601,20 @@
     db.addItems(rows.watchlist, "app", "watchlist", "Library");
     invalidate();
   }
-  function libSave() {
+  // The library file is written a moment later, and once for a burst of changes (a sync, ticking several episodes):
+  // with a big library each write takes long enough to hold up the screen. Leaving the app writes it at once.
+  let libTimer = null, libLast = 0;
+  function libWrite(sync) {
+    clearTimeout(libTimer); libTimer = null; libLast = Date.now();
+    if (!sync && Native.later) { Native.saveLater("library.json", JSON.stringify(lib.toJSON())); libStamp = null; return; }
     lib.save();
     libStamp = window.Android && Android.stamp ? String(Android.stamp("library.json") || "") : "";
+  }
+  // after a background write, the stamp it left (asked only when needed: asking waits for the write)
+  const libOwnStamp = () => { if (libStamp === null) libStamp = Native.ownStamp("library.json"); return libStamp; };
+  const libPending = () => !!libTimer;
+  function libSave() {
+    if (!libTimer) libTimer = setTimeout(libWrite, Math.max(800, 4000 - (Date.now() - libLast)));
     libMirror();
     db.touch();
     if (typeof changed === "function") changed("watch");
@@ -2515,19 +2540,23 @@
   }
   async function fillImages(budget = 200) {
     if (imgRunning) { imgAgain = true; return 0; }
+    // pictures wait for a running sync or import to finish: both at once is what made the screen lag
+    if (ui.job) { clearTimeout(fillImages._wait); fillImages._wait = setTimeout(() => fillImages(budget), 15000); return 0; }
     imgRunning = true;
     const state = imgState();
     const jobs = imgTargets(state).slice(0, budget);
     const http = C.robust(Native.http, { timeout: 15000, tries: 1 });
     let n = 0;
-    await C.pool(jobs, 4, async j => {
+    const hit = {};
+    await C.pool(jobs, 3, async j => {
       const st = state[j.k] = state[j.k] || {};
       const r = await Images.find(http, j.o, { tmdbKey: db.get("tmdb_key"), skip: st.skip || [], country: db.get("region", "IT") });
       st.at = Date.now();
-      if (r) { j.set(r.url); st.src = r.src; st.none = false; n++; } else st.none = true;
+      if (r) { j.set(r.url); st.src = r.src; st.none = false; n++; hit[j.k.slice(0, j.k.indexOf(":"))] = 1; } else st.none = true;
+      await C.breathe(20);
     });
     db.set("img_state", JSON.stringify(state));
-    if (n) { lib.save(); games.save(); books.save(); db.flush(); invalidate(); if (!document.querySelector("#overlay .sheet")) render(); }
+    if (n) { if (hit.lib) libSave(); if (hit.game) games.save(); if (hit.book) books.save(); invalidate(); if (!ui.job && !document.querySelector("#overlay .sheet")) render(); }
     imgRunning = false;
     if (imgAgain) { imgAgain = false; setTimeout(fillImages, 1000); }
     return n;
@@ -3262,8 +3291,9 @@
     db.flush();
   });
 
-  window.addEventListener("pagehide", () => { commitFields(); db.flush(); });
-  document.addEventListener("visibilitychange", () => { if (document.hidden) { commitFields(); db.flush(); } });
+  // leaving the app: everything written now and waited for, so a background sync starts from the latest copy
+  window.addEventListener("pagehide", () => { commitFields(); if (libPending()) libWrite(true); else libOwnStamp(); db.flush(true); });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) { commitFields(); if (libPending()) libWrite(true); else libOwnStamp(); db.flush(true); } });
 
   function applyBackground() {
     Native.setBackground(db.get("bg_enabled", "1") === "1", parseInt(db.get("bg_hours", "12"), 10) || 12);
@@ -3283,9 +3313,10 @@
   // background sync changed the file meanwhile; otherwise just refresh date-dependent text.
   window.__resumed = () => {
     if (ui.job) return;
+    if (libPending()) libWrite(true); // our own unsaved changes first, so they're never taken for the background job's
     if (db.reload()) { invalidate(); ui.report = db.get("last_report", ui.report); }
     const ls = window.Android && Android.stamp ? String(Android.stamp("library.json") || "") : "";
-    if (ls && ls !== libStamp) { libStamp = ls; const fresh = new L.Library({ load: () => Native.load("library.json") }); lib.items = fresh.items; lib.adopted = fresh.adopted; lib.outbox = fresh.outbox; libMirror(); }
+    if (ls && ls !== libOwnStamp()) { libStamp = ls; const fresh = new L.Library({ load: () => Native.load("library.json") }); lib.items = fresh.items; lib.adopted = fresh.adopted; lib.outbox = fresh.outbox; libMirror(); }
     try { const gs = Android.stamp("games.json"); if (gs && gs !== ui.gStamp) { if (ui.gStamp) { const t = Native.load("games.json"); if (t) games.fromJSON(JSON.parse(t)); } ui.gStamp = gs; } } catch (e) { /* not in the app */ }
     try { const bs = Android.stamp("books.json"); if (bs && bs !== ui.bStamp) { if (ui.bStamp) { const t = Native.load("books.json"); if (t) books.fromJSON(JSON.parse(t)); } ui.bStamp = bs; } } catch (e) { /* not in the app */ }
     applyPending();

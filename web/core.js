@@ -196,18 +196,29 @@
   // they live there and never in canonsync.json; without one they stay in settings as before.
   const SECRET_RX = /(^|_)(key|token|refresh|secret|password)s?$|^(token|refresh_token|client_secret|gemini_key|claude_key|ai_key|steam_key|itad_key|tmdb_key)$/i;
 
+  // Saving rewrites the whole file (several MB with a big library), which holds up the screen while it happens.
+  // So automatic saves are spaced at least FLUSH_GAP apart, and the look-up cache (posters, episode lists, dates)
+  // lives in its own file (persist.cache), written at most every CACHE_GAP: it changes all the time during a sync
+  // and losing a few minutes of it only means asking TMDB again.
+  const FLUSH_GAP = 4000, CACHE_GAP = 30000;
   class Store {
     constructor(persist) {
-      this.persist = persist || null; // {load(): string, save(text)}
+      this.persist = persist || null; // {load(): string, save(text), cache?: {load, save}}
       this.reset();
+      this._lastFlush = 0; this._cacheDirty = false; this._cacheTimer = null; this._timer = null;
       if (this.persist) {
         const raw = this.persist.load();
         if (raw) {
           try { this.fromJSON(JSON.parse(raw)); } catch (e) { /* corrupted file: start fresh */ }
         }
         this._stamp = this._fileStamp();
+        const cp = this.persist.cache;
+        if (cp) {
+          const fromMain = this.tmdbCache.size;
+          try { const t = cp.load(); if (t) for (const [k, v] of JSON.parse(t)) if (!this.tmdbCache.has(k)) this.tmdbCache.set(k, v); } catch (e) { /* a broken cache is just empty */ }
+          if (fromMain) { this._cacheDirty = true; this.touch(); } // an older file kept the cache inside: move it out
+        }
       }
-      this._timer = null;
       this._sec = this._secLoad();
       this._moveSecrets();
     }
@@ -251,7 +262,7 @@
         v: 1, settings: this.settings, items: [...this.itemsMap.values()],
         exclusions: [...this.exclusionsMap.values()], canon: [...this.canonMap.values()],
         specials: [...this.specialsMap.values()], franchiseMap: [...this.franchiseMap.values()],
-        tmdbCache: [...this.tmdbCache.entries()],
+        tmdbCache: this.persist && this.persist.cache ? [] : [...this.tmdbCache.entries()],
       };
     }
 
@@ -269,16 +280,34 @@
     touch() {
       if (!this.persist) return;
       clearTimeout(this._timer);
-      this._timer = setTimeout(() => this.flush(), 400);
+      this._timer = setTimeout(() => this.flush(), Math.max(400, FLUSH_GAP - (Date.now() - this._lastFlush)));
+    }
+    _cacheTouch() {
+      if (!this.persist) return;
+      if (!this.persist.cache) { this.touch(); return; }
+      this._cacheDirty = true;
+      if (!this._cacheTimer) this._cacheTimer = setTimeout(() => this.flushCache(), CACHE_GAP);
+    }
+    flushCache() {
+      clearTimeout(this._cacheTimer); this._cacheTimer = null;
+      if (!this.persist || !this.persist.cache || !this._cacheDirty) return;
+      this._cacheDirty = false;
+      try { this.persist.cache.save(JSON.stringify([...this.tmdbCache.entries()])); } catch (e) { this._cacheDirty = true; }
     }
 
-    flush() {
+    // sync: wait for the disk (leaving the app); otherwise the phone writes it in the background when it can
+    flush(sync = false) {
       if (!this.persist) return;
       clearTimeout(this._timer);
       this._timer = null;
-      this.persist.save(JSON.stringify(this.toJSON()));
-      this._stamp = this._fileStamp();
+      const text = JSON.stringify(this.toJSON());
+      if (!sync && this.persist.saveLater) { this.persist.saveLater(text); this._stamp = null; }
+      else { this.persist.save(text); this._stamp = this._fileStamp(); }
+      this._lastFlush = Date.now();
+      if (this._cacheDirty) this.flushCache();
     }
+    // the stamp our own last write left; after a background write it's asked for only when needed
+    _ownStamp() { if (this._stamp === null) this._stamp = this.persist && this.persist.ownStamp ? String(this.persist.ownStamp() || "") : this._fileStamp(); return this._stamp; }
 
     _fileStamp() { try { return this.persist && this.persist.stamp ? String(this.persist.stamp() || "") : ""; } catch (e) { return ""; } }
 
@@ -463,20 +492,23 @@
     }
 
     cacheGet(k) { return this.tmdbCache.has(k) ? this.tmdbCache.get(k) : null; }
-    cacheSet(k, v) { this.tmdbCache.set(k, v); this.touch(); }
+    cacheSet(k, v) { this.tmdbCache.set(k, v); this._cacheTouch(); }
 
     // Re-read the saved file (the background job may have updated it while the app was paused).
     // Returns true when the file had changed and was re-read. Unsaved changes are written first.
     reload() {
       if (!this.persist) return false;
-      if (this._timer) this.flush();
-      const st = this._fileStamp();
-      if (st && st === this._stamp) return false;
+      if (this._timer) this.flush(true);
+      const own = this._ownStamp(), st = this._fileStamp();
+      if (st && st === own) return false;
       const raw = this.persist.load();
       if (!raw) return false;
-      try { const d = JSON.parse(raw); const sec = this._secLoad(); if (sec) this._sec = sec; this.reset(); this.fromJSON(d); this._stamp = st; return true; } catch (e) { return false; }
+      try { const d = JSON.parse(raw); const sec = this._secLoad(); if (sec) this._sec = sec; const keep = this.tmdbCache; this.reset(); this.fromJSON(d);
+        for (const [k, v] of keep) if (!this.tmdbCache.has(k)) this.tmdbCache.set(k, v); // the cache file isn't part of the reload
+        if (this.persist.cache && d.tmdbCache && d.tmdbCache.length) this._cacheTouch();
+        this._stamp = st; return true; } catch (e) { return false; }
     }
-    cachePut(k, tmdbId, cid, cname) { this.tmdbCache.set(k, { tmdb_id: tmdbId, collection_id: cid, collection_name: cname }); this.touch(); }
+    cachePut(k, tmdbId, cid, cname) { this.tmdbCache.set(k, { tmdb_id: tmdbId, collection_id: cid, collection_name: cname }); this._cacheTouch(); }
 
     counters() {
       const watched = new Set(), all = new Set(), listed = new Set(), games = new Set(), by = {};
@@ -1391,7 +1423,16 @@
     // when it stops short, say what the page offered, so the next report shows why
     var dbg = capped ? "button " + (S.btn ? "'" + S.btn + "' pressed" : "not found") + ", " + S.gql + " data requests seen" + (Object.keys(S.ops).length ? " (" + Object.keys(S.ops).slice(0, 4).join(", ") + ")" : "") +
       ", next page " + (S.next ? "known" : S.next === null ? "none" : "unknown") + (S.directErr ? ", " + S.directErr : "") : "";
-    return JSON.stringify({ items: items, loads: S.chunks - 1, polls: S.polls, total: S.total, capped: capped, dbg: dbg, newest: !!enough });
+    // the page's own "next page" request, so later syncs can ask IMDb's API for these pages without opening the page
+    var tplOut = null;
+    try {
+      if (S.tpl) {
+        var h = S.tpl.init.headers, ho = {};
+        if (h && typeof h.forEach === "function") h.forEach(function (v, k) { ho[k] = v; }); else if (h) for (var hk in h) ho[hk] = h[hk];
+        tplOut = { url: S.tpl.url, method: S.tpl.init.method || "GET", headers: ho, body: typeof S.tpl.init.body === "string" ? S.tpl.init.body : null };
+      }
+    } catch (e) { tplOut = null; }
+    return JSON.stringify({ items: items, loads: S.chunks - 1, polls: S.polls, total: S.total, capped: capped, dbg: dbg, newest: !!enough, tpl: tplOut });
   }
 
   const probeFor = (timeoutMs, want = 0) => `(${pageProbe.toString()})(${pageExtract.toString()}, ${Math.max(5, Math.floor(timeoutMs / 1000) - 8)}, ${+want || 0})`;
@@ -1432,7 +1473,81 @@
     items.total = res.total || 0;
     items.dbg = res.dbg || "";
     items.newest = !!res.newest;
+    items.tpl = res.tpl || null;
     return items;
+  }
+
+  // ---- IMDb pages without the page: replay the page's own API request from the phone's network code ----
+  // The first sync opens the page once and keeps its "next page" request (the template). Later syncs send that same
+  // request straight to IMDb's API, page after page, so no IMDb page runs on the browser engine Saga's own screen
+  // shares (that was what made the screen lag during a sync). Any failure falls back to the page and a new template.
+  function gqlInfo(obj) {
+    const r = { total: 0, next: undefined }; let best = -1;
+    const walk = (n, d) => {
+      if (!n || typeof n !== "object" || d > 40) return;
+      if (Array.isArray(n)) { for (const x of n) walk(x, d + 1); return; }
+      if (Array.isArray(n.edges) && n.edges.length > best) {
+        best = n.edges.length; r.total = typeof n.total === "number" ? n.total : 0;
+        const pi = n.pageInfo; r.next = pi && typeof pi === "object" ? (pi.hasNextPage && pi.endCursor ? pi.endCursor : null) : undefined;
+      }
+      for (const k of Object.keys(n)) if (n[k] && typeof n[k] === "object") walk(n[k], d + 1);
+    };
+    walk(obj, 0);
+    return r;
+  }
+  function tplRequest(tpl, cursor) {
+    const setVars = v => { if (!v || typeof v !== "object") return false; if (cursor) v.after = cursor; else delete v.after; if (typeof v.first === "number" && v.first < 250) v.first = 250; return true; };
+    const headers = Object.assign({}, IMDB_H, { Origin: "https://www.imdb.com", Referer: "https://www.imdb.com/" }, tpl.headers || {});
+    if (tpl.body) {
+      const b = JSON.parse(tpl.body);
+      if (!setVars(b.variables)) throw new Error("template has no variables");
+      return { method: tpl.method || "POST", url: tpl.url, o: { headers, body: JSON.stringify(b) } };
+    }
+    const U = new URL(tpl.url), vs = U.searchParams.get("variables");
+    if (!vs) throw new Error("template has no variables");
+    const v = JSON.parse(vs);
+    if (!setVars(v)) throw new Error("template has no variables");
+    U.searchParams.set("variables", JSON.stringify(v));
+    return { method: tpl.method || "GET", url: U.toString(), o: { headers } };
+  }
+  async function apiTitles(http, tpl, want = 0) {
+    const out = {}, order = [];
+    let cursor = null, total = 0, pages = 0;
+    for (; pages < 80; pages++) {
+      const q = tplRequest(tpl, cursor);
+      const r = await http(q.method, q.url, q.o);
+      if (r.status !== 200 || !/"tt\d{7,9}"/.test(r.body || "")) throw new Error(`IMDb API ${r.status || r.error || "failed"}`);
+      for (const x of pageExtract([r.body])) {
+        let p = out[x.i];
+        if (!p) { p = out[x.i] = { i: x.i }; order.push(x.i); }
+        for (const f of Object.keys(x)) if (f !== "i" && f !== "r" && x[f] !== undefined) p[f] = x[f];
+        if (x.r && !p.r) p.r = x.r;
+      }
+      const inf = gqlInfo(JSON.parse(r.body));
+      if (inf.total) total = inf.total;
+      if (want && order.length >= want) break;
+      if (!inf.next) break;
+      cursor = inf.next;
+      await breathe(30);
+    }
+    const items = order.map(id => out[id]).filter(x => x.t).map(fromCompact);
+    if (!items.length) throw new Error("IMDb API gave no titles");
+    items.total = total; items.loads = pages; items.newest = !!(want && items.length >= want && total > items.length); items.capped = false;
+    if (!items.newest && total && items.length < total * 0.98) throw new Error(`IMDb API stopped at ${items.length} of ${total}`);
+    return items;
+  }
+  // titles of an IMDb page: the API with a kept template first, the page otherwise (keeping its template for next time)
+  async function pageOrApi(http, url, timeout, want, store) {
+    const key = "imdb_tpl " + url.replace(/^https:\/\/www\.imdb\.com/, "");
+    let tpl = null;
+    if (store) { try { tpl = JSON.parse(store.get(key) || "null"); } catch (e) { tpl = null; } }
+    if (tpl) {
+      try { const it = await apiTitles(http, tpl, want); it.route = `IMDb API (no page)${it.total ? `, IMDb counts ${it.total}` : ""}`; return it; }
+      catch (e) { if (store) store.set(key, ""); }
+    }
+    const it = await browseTitles(http, url, timeout, want);
+    if (store && it.tpl) store.set(key, JSON.stringify(it.tpl));
+    return it;
   }
 
   // A list still loading when time ran out is kept, but reported as partial so the next sync tries again.
@@ -1518,12 +1633,12 @@
     return m ? m[1] : String(s || "").trim();
   }
 
-  async function imdbWatchlist(http, user) {
+  async function imdbWatchlist(http, user, store = null) {
     const id = imdbUserId(user);
     const errs = [];
     let netFail = false;
     if (http.browse) {
-      try { const it = await browseTitles(http, `https://www.imdb.com/user/${id}/watchlist/`, CONFIG.listBrowseMs); return [it, browserRoute(it)]; } catch (e) { errs.push(`browser: ${e.message}`); if (e.network) netFail = true; }
+      try { const it = await pageOrApi(http, `https://www.imdb.com/user/${id}/watchlist/`, CONFIG.listBrowseMs, 0, store); return [it, it.route || browserRoute(it)]; } catch (e) { errs.push(`browser: ${e.message}`); if (e.network) netFail = true; }
     }
     let html = "";
     try { html = await getText(http, `https://www.imdb.com/user/${id}/watchlist/`); } catch (e) { errs.push(`page: ${e.message}`); }
@@ -1543,18 +1658,18 @@
     throw new Error(`IMDb watchlist for ${id} failed (${errs.join("; ")}). Check your watchlist is public, or sign in to IMDb in Settings.`);
   }
 
-  async function imdbRatings(http, ur, want = 0) {
+  async function imdbRatings(http, ur, want = 0, store = null) {
     ur = imdbUserId(ur);
     const errs = [];
     let netFail = false;
     if (http.browse) {
       try {
-        const items = await browseTitles(http, `https://www.imdb.com/user/${ur}/ratings/`, CONFIG.listBrowseMs + 120000, want);
+        const items = await pageOrApi(http, `https://www.imdb.com/user/${ur}/ratings/`, CONFIG.listBrowseMs + 120000, want, store);
         const groups = {};
         for (const it of items) (groups[it.rating ? "rated" : "watched"] = groups[it.rating ? "rated" : "watched"] || []).push(it);
         Object.defineProperty(groups, "total", { value: items.total || 0, enumerable: false });
         Object.defineProperty(groups, "newest", { value: items.newest, enumerable: false });
-        return [groups, browserRoute(items)];
+        return [groups, items.route || browserRoute(items)];
       } catch (e) { errs.push(`browser: ${e.message}`); if (e.network) netFail = true; }
     }
     try {
@@ -3013,6 +3128,7 @@ ${blocks.join("\n\n")}`;
   // and keeps whatever was there before. Release dates, posters and episode lookups are not part of this: see details().
   async function syncAll(db, http, progress, only = null, opt = {}) {
     gqlBlocked = false;
+    const tplStore = { get: k => db.get(k, ""), set: (k, v) => db.set(k, v) };
     const log = [];
     const L = m => { log.push(`${new Date().toISOString().slice(11, 19)} ${m}`); if (log.length > 400) log.shift(); };
     http = robust(http, { timeout: 45000, tries: 3, log: L });
@@ -3061,7 +3177,7 @@ ${blocks.join("\n\n")}`;
         // the app shares, freezing the screen. The whole list is read only when asked (Settings › IMDb).
         const have = db.items("imdb", ["rated"]).length;
         const want = have >= 1000 && !opt.fullImdb ? 500 : 0;
-        const [groups, route] = await imdbRatings(http, db.get("imdb_user"), want);
+        const [groups, route] = await imdbRatings(http, db.get("imdb_user"), want, tplStore);
         for (const [k, items] of Object.entries(groups)) db.addItems(items, "imdb", k, "");
         const all = Object.assign(Object.values(groups).flat(), { total: groups.total || 0, isRatings: true });
         if (groups.newest) return { msg: `newest ${all.length} ratings checked; the other ${Math.max(0, have - all.length)} are already stored (to catch ratings you removed on IMDb, use Settings › IMDb › Read all my ratings again)`, part: false, got: all.length };
@@ -3083,7 +3199,7 @@ ${blocks.join("\n\n")}`;
       }
       if (/\/watchlist/i.test(url)) {
         add("imdb", "IMDb watchlist", async () => {
-          const [items, route] = await imdbWatchlist(http, url);
+          const [items, route] = await imdbWatchlist(http, url, tplStore);
           db.addItems(items, "imdb", "watchlist", "watchlist");
           return imdbRes(items, route);
         }, CONFIG.listTaskMs);
@@ -3186,7 +3302,7 @@ ${blocks.join("\n\n")}`;
     MEDIA, PROFILES, SECRET_RX, norm, parseYear, mediumFromImdb, mediumFromText, ratio, TitleIndex, Store,
     parseCsv, parseImdbText, importImdbCsv, importFranchiseFile, traktEntries, routeTraktFile, storeTrakt, importTraktZip,
     breathe, consumed, Exclusion, canonStatus, franchiseProgress, upNext, missingCanon, discrepancies, computeStats,
-    authorizeUrl, exchangeCode, Trakt, traktSync, imdbList, imdbRatings, imdbWatchlist, imdbUserId, listIdFrom, walkTitles, browseTitles, pageExtract, pageProbe, probeFor, TMDB, collectionScan, season0Scan,
+    apiTitles, pageOrApi, gqlInfo, authorizeUrl, exchangeCode, Trakt, traktSync, imdbList, imdbRatings, imdbWatchlist, imdbUserId, listIdFrom, walkTitles, browseTitles, pageExtract, pageProbe, probeFor, TMDB, collectionScan, season0Scan,
     CONFIG, AI_PRESETS, compatProvider, compatScan, traktOne, traktEpRatings, parseLines, parseMvGroup, relevantNames, promptLine, netHint, robust, pool, details, titleInfo, justWatch, pickDates, dateSummary, bestOffer, cachedInfo, enrichInfo, platformRatings, ratingDiffs, withTimeout, watchProgress, continueWatching, testGemini, gemError, fillPosters, posterKey, aiState, resetAi, canonScan, claudeScan, claudeCall, claudeModels, rankClaudeModel, CLAUDE_DEFAULT, upcomingEpisodes, canonKeys, parseJsonArray, multiverseScan, collectionRows, refreshCollections, tvNext, upcomingEvents, computeAlerts, backgroundRun, fmtWhen, hashId, geminiState, resetGemini, mvGroup, mvExpand, multiverses, mvMap, mvAlias, mvPending, mvDone, geminiProvider, vpnOptions, bestVpn, worldFrom, worldCountries, jwQuery, flag: FLAGS, VPN_DEFAULT, manualScan, franchiseBatches, verifyPrompt, parseVerify, newsBatches, newsPrompt, parseCanonRows, franchiseName, releaseList, releaseKey, parseDate, seeds, rankGeminiModel, resolveGeminiModel, syncAll, sleep,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Core;

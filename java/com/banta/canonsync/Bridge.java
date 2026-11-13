@@ -35,7 +35,7 @@ import java.util.zip.ZipInputStream;
 
 public class Bridge {
     static final int PICK = 4242;
-    static final String UA = "Saga/0.5.4.8 (Android)";
+    static final String UA = "Saga/0.5.4.9 (Android)";
     final Context ctx;
     final MainActivity act;       // null when running inside the background job
     final SyncJobService job;     // null in the app
@@ -64,8 +64,85 @@ public class Bridge {
     }
 
     // ---------- storage ----------
+    // ---- writes in the background: the screen doesn't wait for the disk ----
+    // saveLater hands the text to one writer thread (so writes of a file land in order) and returns at once.
+    // load, stamp and save wait for that file's queued writes first, so nobody ever reads an older copy.
+    static final Object WLOCK = new Object();
+    static final Map<String, Integer> PENDING = new ConcurrentHashMap<String, Integer>();
+    static final Map<String, String> OWN = new ConcurrentHashMap<String, String>(); // stamp of the writer's last write
+    static final java.util.concurrent.ExecutorService WRITER = java.util.concurrent.Executors.newSingleThreadExecutor();
+
+    static class Writer implements Runnable {
+        final Bridge b;
+        final String name, text;
+
+        Writer(Bridge b, String name, String text) {
+            this.b = b;
+            this.name = name;
+            this.text = text;
+        }
+
+        public void run() {
+            try {
+                b.writeFile(name, text);
+                File f = new File(b.ctx.getFilesDir(), safe(name));
+                OWN.put(name, f.exists() ? f.lastModified() + ":" + f.length() : "");
+            } finally {
+                synchronized (WLOCK) {
+                    Integer n = PENDING.get(name);
+                    PENDING.put(name, n == null || n <= 1 ? 0 : n - 1);
+                    WLOCK.notifyAll();
+                }
+            }
+        }
+    }
+
+    static void awaitWrites(String name) {
+        long end = System.currentTimeMillis() + 15000;
+        synchronized (WLOCK) {
+            while (true) {
+                Integer n = PENDING.get(name);
+                long left = end - System.currentTimeMillis();
+                if (n == null || n <= 0 || left <= 0) return;
+                try {
+                    WLOCK.wait(left);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        }
+    }
+
+    @JavascriptInterface
+    public boolean saveLater(String name, String text) {
+        synchronized (WLOCK) {
+            Integer n = PENDING.get(name);
+            PENDING.put(name, n == null ? 1 : n + 1);
+        }
+        try {
+            WRITER.execute(new Writer(this, name, text));
+            return true;
+        } catch (Throwable t) {
+            synchronized (WLOCK) {
+                Integer n = PENDING.get(name);
+                PENDING.put(name, n == null || n <= 1 ? 0 : n - 1);
+                WLOCK.notifyAll();
+            }
+            return writeFile(name, text);
+        }
+    }
+
+    // the stamp the file had right after this app's own last background write (to tell it from a background sync's)
+    @JavascriptInterface
+    public String ownStamp(String name) {
+        awaitWrites(name);
+        String v = OWN.get(name);
+        return v == null ? "" : v;
+    }
+
     @JavascriptInterface
     public String load(String name) {
+        awaitWrites(name);
         try {
             File f = new File(ctx.getFilesDir(), safe(name));
             // the main file can be missing for a moment while the daily copy is being rotated: the copy is used then
@@ -80,6 +157,7 @@ public class Bridge {
     // Changes whenever the file is rewritten (by this screen or the background sync), so a resume can skip re-reading it.
     @JavascriptInterface
     public String stamp(String name) {
+        awaitWrites(name);
         try {
             File f = new File(ctx.getFilesDir(), safe(name));
             return f.exists() ? f.lastModified() + ":" + f.length() : "";
@@ -90,6 +168,11 @@ public class Bridge {
 
     @JavascriptInterface
     public boolean save(String name, String text) {
+        awaitWrites(name);
+        return writeFile(name, text);
+    }
+
+    boolean writeFile(String name, String text) {
         try {
             File dir = ctx.getFilesDir();
             File tmp = new File(dir, safe(name) + ".tmp");
@@ -748,7 +831,7 @@ public class Bridge {
 
     @JavascriptInterface
     public String version() {
-        return "0.5.4.8";
+        return "0.5.4.9";
     }
 
     // ---------- background sync & notifications ----------

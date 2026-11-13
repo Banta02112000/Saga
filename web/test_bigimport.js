@@ -49,7 +49,10 @@ const mock = (seed) => {
   const file = n => LS.getItem("f:" + n) || "";
   window.Banta = { app: () => "canon", read: n => file(n), write: (n, t) => { LS.setItem("f:" + n, String(t)); return true; }, remove: n => { LS.removeItem("f:" + n); return true; },
     stamp: n => file(n).length + ":" + file(n).slice(-16), post: () => {}, take: () => "", busy: () => {}, paste: () => "", shareTo: () => true, notify: () => {}, widget: () => {} };
-  window.Android = { load: file, save: (n, t) => { LS.setItem("f:" + n, t); return true; }, stamp: n => file(n).length + ":" + file(n).slice(-16), take: id => { const r = results[id]; delete results[id]; return r || ""; },
+  window.Android = { load: file, save: (n, t) => { LS.setItem("f:" + n, t); return true; },
+    // 0.5.4.9: background writes (here: done at once), and the stamp the writer left
+    saveLater: (n, t) => { LS.setItem("f:" + n, t); window.__own = window.__own || {}; window.__own[n] = file(n).length + ":" + file(n).slice(-16); return true; },
+    ownStamp: n => (window.__own || {})[n] || "", stamp: n => file(n).length + ":" + file(n).slice(-16), take: id => { const r = results[id]; delete results[id]; return r || ""; },
     http: (id, m, url, h, body) => { window.__http.push(url); setTimeout(() => { results[id] = JSON.stringify(Object.assign({ headers: {} }, reply(m, url, body))); window.__httpDone(id); }, 3); },
     browse: (id) => setTimeout(() => { results[id] = JSON.stringify({ status: 0, value: "NETERR:Web page not available", error: "x" }); window.__httpDone(id); }, 3),
     pick: id => setTimeout(() => { results[id] = JSON.stringify(window.__nextPick || []); window.__pickDone(id); }, 3),
