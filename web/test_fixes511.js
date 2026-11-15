@@ -65,8 +65,10 @@ const C = require("./core.js"), L = require("./library.js"), I = require("./impo
   // IMDb lists come straight from IMDb's API first (no page on the screen's engine); the page is the fallback
   { let browsed = 0;
     const edges = n => Array.from({ length: n }, (_, i) => ({ listItem: { id: "tt" + (7000000 + i), titleText: { text: "T" + i }, releaseYear: { year: 2001 }, titleType: { id: "movie" }, releaseDate: { year: 2001, month: 5, day: 4 }, runtime: { seconds: 5400 } } }));
-    const http = async (m, url, o) => { const v = JSON.parse(o.body).variables; const from = v.after ? +v.after : 0, to = Math.min(from + 250, 300);
-      return { status: 200, headers: {}, body: JSON.stringify({ data: { list: { titleListItemSearch: { total: 300, edges: edges(to).slice(from), pageInfo: { hasNextPage: to < 300, endCursor: String(to) } } } } }) }; };
+    // 0.5.9: the cached GET address with the list's items{edges{node{listItem}}} shape (the one IMDb answers)
+    const http = async (m, url, o) => { if (!/^https:\/\/caching\.graphql\.imdb\.com\/\?query=/.test(url) || m !== "GET") return { status: 403, headers: {}, body: "" };
+      const q = decodeURIComponent(url.split("?query=")[1]); const a = (q.match(/after:"(\d+)"/) || [])[1]; const from = a ? +a : 0, to = Math.min(from + 250, 300);
+      return { status: 200, headers: {}, body: JSON.stringify({ data: { list: { name: { originalText: "L" }, items: { total: 300, edges: edges(to).slice(from).map(e => ({ node: e })), pageInfo: { hasNextPage: to < 300, endCursor: String(to) } } } } }) }; };
     http.browse = async () => { browsed++; return { status: 0, error: "x" }; };
     const [items, route] = await C.imdbList(http, "https://www.imdb.com/list/ls123456789/");
     assert.strictEqual(items.length, 300); assert.ok(/IMDb API \(no page\)/.test(route) && !browsed, route);

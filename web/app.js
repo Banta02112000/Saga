@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.5.8";
+  const VERSION = "0.5.9";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -95,9 +95,12 @@
         browsing++;
         pending.set(id, r => { browsing = Math.max(0, browsing - 1); res(r); });
         A.browse(id, url, probe, timeoutMs || 35000);
+        // 0.5.9: if the phone never answers, close the page ourselves and move on
+        setTimeout(() => { if (pending.has(id)) { try { if (A.cancelBrowse) A.cancelBrowse(id); } catch (e) { /* older app */ } setTimeout(() => { const f = pending.get(id); if (f) { pending.delete(id); f({ status: 0, value: null, error: "timeout" }); } }, 3000); } }, (timeoutMs || 35000) + 30000);
       });
     }
     if (A && A.browse) http.browse = browse;
+    http.cancelBrowse = () => { try { if (A && A.cancelBrowse) A.cancelBrowse(""); } catch (e) { /* older app */ } };
 
     const mem = {};
     return {
@@ -190,7 +193,15 @@
     cmpView: "imdb", cmpQ: "", cmpLimit: 150, s0all: false,
   };
   let memo = null;
-  const status = () => { if (!memo && typeof mirrorNow === "function") mirrorNow(); return (memo = memo || C.canonStatus(db, threshold())); };
+  // 0.5.9: during a job the screen shows the last canon state and the new one is worked out in slices,
+  // instead of redoing the whole canon check in one go each time the screen is drawn
+  let lastMemo = null;
+  const status = () => {
+    if (memo) return memo;
+    if (ui.job && lastMemo) { if (typeof statusSoon === "function") setTimeout(() => statusSoon().catch(() => {}), 0); return lastMemo; }
+    if (typeof mirrorNow === "function") mirrorNow();
+    return (memo = lastMemo = C.canonStatus(db, threshold()));
+  };
   let memoGen = 0, memoAsync = null;
   const invalidate = () => { memo = null; memoGen++; };
   // 0.5.7: the same, worked out in slices so the screen stays free (after a sync, for the widget and pictures)
@@ -198,7 +209,7 @@
     if (memo) return memo;
     if (memoAsync && memoAsync.gen === memoGen) return memoAsync.p;
     const gen = memoGen;
-    const p = (async () => { if (typeof mirrorNow === "function") mirrorNow(); await C.breathe(0); const st = await C.canonStatusAsync(db, threshold()); if (gen === memoGen && !memo) memo = st; return st; })();
+    const p = (async () => { if (typeof mirrorNow === "function") mirrorNow(); await C.breathe(0); const st = await C.canonStatusAsync(db, threshold()); if (gen === memoGen && !memo) memo = lastMemo = st; return st; })();
     memoAsync = { gen, p };
     try { return await p; } finally { if (memoAsync && memoAsync.p === p) memoAsync = null; }
   }
@@ -270,6 +281,14 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.5.9", ["IMDb sync without the hidden browser: lists, your ratings and your watchlist are read from IMDb's data service the way the old GameCheck app did (the cached address first, 250 titles a request), then a list's CSV export; the hidden browser only if both fail. Your sync report showed lists taking 13–23 minutes in the hidden browser: that route is now the last resort.",
+      "The hidden browser itself: a page that doesn't bring its data gives up after about 20 s; other requests on the page (your lists sidebar, exports, recently viewed) no longer take over the list's page count; one page at a time, and a page the app stopped waiting for is closed at once.",
+      "The screen stays on while a sync runs in the app, and the stall report no longer counts the phone sleeping (screen off) as a frozen screen.",
+      "Trakt: ratings pages come 4 at a time, and without a sign-in a sync stops at the ratings it already has (Trakt sends the newest first).",
+      "Rated means seen: a rated film on a list or watchlist counts as watched, rated imports from MyAnimeList, AniList and others too; rated episodes are ticked (on the day they were rated, when known) and their series added or moved to Watching. Episodes from the IMDb ratings CSV wait by name until the series' episode list is loaded.",
+      "Games: games rated on IMDb that were on your backlog or wishlist move to Finished; the report says how many IMDb games are already in Games.",
+      "Steam: a custom name like banta_02_11_2000 is also tried as banta02112000, then through your community page.",
+      "Big syncs add rows in small batches, and the screen shows the last canon state during a sync instead of redoing the canon check each time it's drawn."]],
     ["0.5.8", ["Sync: Trakt is asked what changed since the last sync, and only those parts are downloaded again (ratings, watchlist, lists, watched films or series). The 10-minute background check no longer downloads your whole account because of your own ticks, and it now works in small steps.",
       "Universe dashboard for any franchise: films, series, games and books with progress per medium, release / in-universe / your own order, and a tier per entry (essential, recommended, optional, alternate continuity, not canon) with Essential only and Missing only.",
       "Smart lists by rules (what, status, rating, length, owned, on your streaming services, franchise, progress), with five ready-made ones: Short & owned backlog, Streaming now on my services, Next canon entries, Paused & almost done, All-time favourites.",
@@ -402,7 +421,7 @@
     const stalls = [], jank = {}; let beat = Date.now();
     const stepOf = () => (Native.browsing() ? "IMDb page (hidden browser): " : "") + String(ui.status || name).replace(/\s*\(\d+ s\)$/, "").replace(/\d[\d,.]*/g, "#").slice(0, 60);
     try { if (window.Android && window.Android.watchScreen) window.Android.watchScreen(true); } catch (e) { /* older app */ }
-    const watch = setInterval(() => { const now = Date.now(), gap = now - beat - 250; beat = now; if (gap > 150) { const k = stepOf(); jank[k] = (jank[k] || 0) + gap; } if (gap > 700) stalls.push([gap, (Native.browsing() ? "IMDb page (hidden browser): " : "") + (ui.status || name)]); }, 250);
+    const watch = setInterval(() => { const now = Date.now(), gap = now - beat - 250; beat = now; if (document.hidden || gap > 20000) return; /* 0.5.9: the app asleep (screen off, in the background) is not a hitch */ if (gap > 150) { const k = stepOf(); jank[k] = (jank[k] || 0) + gap; } if (gap > 700) stalls.push([gap, (Native.browsing() ? "IMDb page (hidden browser): " : "") + (ui.status || name)]); }, 250);
     // ticking elapsed time so a slow step never looks frozen
     const tick = setInterval(() => {
       const el = $("#status");
@@ -1862,32 +1881,60 @@
     let n = 0, Y = 0;
     const shows = lib.all().filter(x => x.type === "show");
     const byImdb = new Map(), byTmdb = new Map(), byName = new Map();
-    for (const x of shows) { if (x.imdb) byImdb.set(x.imdb, x); if (x.tmdb) byTmdb.set(String(x.tmdb), x); const k = L.norm(x.title); if (!byName.has(k)) byName.set(k, x); if (x.orig) { const o = L.norm(x.orig); if (!byName.has(o)) byName.set(o, x); } }
+    const index = x => { if (x.imdb) byImdb.set(x.imdb, x); if (x.tmdb) byTmdb.set(String(x.tmdb), x); const k = L.norm(x.title); if (!byName.has(k)) byName.set(k, x); if (x.orig) { const o = L.norm(x.orig); if (!byName.has(o)) byName.set(o, x); } };
+    for (const x of shows) index(x);
     const put = (it, k, r) => { it.er = it.er || {}; if (!it.er[k] && r && !(it.erMine && it.erMine[k])) { it.er[k] = +r; n++; } };
+    // 0.5.9: a rated episode is a watched episode: ticked (on the day it was rated when known), and its series moves
+    // from the watchlist to Watching. A series not in the library yet is added, unless you removed it.
+    const tick = (it, k, d) => {
+      if (!it.eps[k]) { it.eps[k] = d || TODAY(); if (!d) L.markBulk(it, k); n++; }
+      if (it.status === "watchlist") { it.status = "watching"; it.updated = Date.now(); }
+    };
+    const showFor = (p, fallbackTitle) => {
+      let it = (p.tmdb && byTmdb.get(String(p.tmdb))) || (p.imdb && byImdb.get(p.imdb)) || byName.get(L.norm(p.t || fallbackTitle || ""));
+      if (it && lib.items[it.id] !== it) it = null;
+      if (it || !(p.t || fallbackTitle)) return it || null;
+      const ak = p.imdb || `show|${L.norm(p.t || fallbackTitle)}|${p.y || ""}`;
+      if (lib.adopted[ak]) return null; // brought in before and since removed by you
+      lib.adopted[ak] = 1;
+      it = lib.add({ type: "show", title: p.t || fallbackTitle, year: p.y || null, imdb: p.imdb || null, tmdb: p.tmdb ? +p.tmdb : null, src: "sync" }, "watching").item;
+      it.autoWatching = true; index(it); n++;
+      return it;
+    };
     let tr = {};
     try { tr = JSON.parse(db.get("ep_ratings", "{}")) || {}; } catch (e) { tr = {}; }
     for (const p of Object.values(tr)) {
-      const it = (p.tmdb && byTmdb.get(String(p.tmdb))) || (p.imdb && byImdb.get(p.imdb)) || byName.get(L.norm(p.t || ""));
-      if (it) for (const [k, r] of Object.entries(p.r || {})) put(it, k, r);
+      const it = showFor(p);
+      if (it) for (const [k, r] of Object.entries(p.r || {})) { put(it, k, r); if (r > 0) tick(it, k, (p.d || {})[k]); }
       if ((++Y & 63) === 0) yield;
     }
     for (const [sid, p] of Object.entries(ieps || {})) {
-      const it = byImdb.get(sid) || byName.get(L.norm(p.t || ""));
-      if (it) for (const [k, r] of Object.entries(p.r || {})) put(it, k, r);
+      const it = showFor(Object.assign({ imdb: sid }, p));
+      if (it) for (const [k, r] of Object.entries(p.r || {})) { put(it, k, r); if (r > 0) tick(it, k, (p.d || {})[k] || ((p.eps || {})[k] && typeof p.eps[k] === "string" ? p.eps[k] : null)); }
       if ((++Y & 63) === 0) yield;
     }
     {
       const epIx = new Map(); // show -> episode name -> "s:e"
       for (const r of db.items("imdb", ["rated"])) {
         if (r.medium !== "Episode" || !r.rating) continue;
-        const cut = String(r.title).indexOf(": ");
-        if (cut < 1) continue;
-        const it = byName.get(L.norm(r.title.slice(0, cut)));
-        if (!it || !it.epl || !it.epl.length) continue;
+        // "Series: Episode" — the series name can hold ": " itself, so each split is tried against your library
+        // (no series is created from a CSV row: it carries no series id, and a wrong split would add a wrong title)
+        let it = null, epName = "";
+        for (let cut = String(r.title).indexOf(": "); cut > 0 && !it; cut = r.title.indexOf(": ", cut + 2)) { const x = byName.get(L.norm(r.title.slice(0, cut))); if (x && lib.items[x.id] === x) { it = x; epName = r.title.slice(cut + 2); } }
+        if (!it) continue;
+        const d = String(r.rated_at || r.date || "").slice(0, 10) || null;
+        if (!it.epl || !it.epl.length) {
+          // the episode list isn't loaded yet: kept by name, ticked as soon as it is (library.js pendingEps)
+          const pk = L.norm(epName);
+          it.epRatedPending = it.epRatedPending || {};
+          if (!it.epRatedPending[pk]) { it.epRatedPending[pk] = { r: +r.rating, d }; n++; }
+          if (it.status === "watchlist") it.status = "watching";
+          continue;
+        }
         let ix = epIx.get(it);
         if (!ix) { ix = new Map(); for (const x of it.epl) if (x[3]) { const k = L.norm(x[3]); ix.set(k, ix.has(k) ? null : L.epKey(x[0], x[1])); } epIx.set(it, ix); }
-        const k = ix.get(L.norm(r.title.slice(cut + 2)));
-        if (k) { put(it, k, r.rating); if (!it.eps[k] && it.status !== "watchlist") { it.eps[k] = (r.rated_at || r.date || TODAY()).slice(0, 10); n++; } }
+        const k = ix.get(L.norm(epName));
+        if (k) { put(it, k, r.rating); tick(it, k, d); }
         if ((++Y & 255) === 0) yield;
       }
     }
@@ -2917,7 +2964,7 @@
         try { await GC.storePrices(g, http, { itadKey: db.get("itad_key"), country: games.settings.region || "IT" }); storeN++; } catch (e) { logError("prices", e.message); break; }
       }
       if (storeN) games.save();
-      return `${steamTxt}${storeN ? `store prices for ${storeN} wishlist games, ` : ""}${im.added} from IMDb, ${linked} linked to Steam, ${alerts.length} price alerts, ${dates} dates updated`;
+      return `${steamTxt}${storeN ? `store prices for ${storeN} wishlist games, ` : ""}IMDb games: ${im.added} new, ${im.matched || 0} already in Games${im.promoted ? ` (${im.promoted} marked finished: rated on IMDb)` : ""}, ${linked} linked to Steam, ${alerts.length} price alerts, ${dates} dates updated`;
     }, 180000);
     await step("episodes", "Episodes", async () => {
       const shows = L.stale(lib).slice(0, 20);

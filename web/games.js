@@ -300,19 +300,23 @@
   }
   // Video games from your IMDb ratings and lists (the Watch sync reads them): rated = finished, listed = wishlist.
   function fromImdb(lib, rows) {
-    let added = 0, rated = 0;
+    let added = 0, rated = 0, matched = 0, promoted = 0;
     for (const r of rows) {
       if (r.medium !== "Video Game" || !r.title) continue;
       if (lib.removed[norm(r.title)]) continue;
       const isRated = r.kind === "rated" || r.kind === "watched";
       const before = lib.find({ title: r.title, imdb: r.imdb, year: r.year });
+      if (before) before._st = before.status;
       if (!before && !isRated && lib.settings.imdbLists === "0") continue;
-      const { game, existed } = lib.add({ title: r.title, imdb: r.imdb || null, date: r.year ? r.year + "-12-31" : "", dateText: r.year ? String(r.year) : "", src: "imdb" }, isRated ? "done" : "wishlist");
+      const { game, existed } = lib.add({ title: r.title, imdb: r.imdb || null, date: r.date || (r.year ? r.year + "-12-31" : ""), dateText: r.year ? String(r.year) : "", src: "imdb" }, isRated ? "done" : "wishlist");
       if (!game.imdb && r.imdb) game.imdb = r.imdb;
       if (r.rating && !game.rating) { game.rating = +r.rating; rated++; }
-      if (!existed) added++;
+      // 0.5.9: rated or watched on IMDb means played: a game still on the backlog or wishlist moves to Finished
+      if (existed && isRated && before && (before._st === "backlog" || before._st === "wishlist")) { if (game.status !== "done") setStatus(game, "done", String(r.rated_at || r.date || "").slice(0, 10) || undefined); promoted++; }
+      if (before) delete before._st;
+      if (!existed) added++; else matched++;
     }
-    return { added, rated };
+    return { added, rated, matched, promoted };
   }
   function storeLinks(g) {
     const q = encodeURIComponent(g.title);

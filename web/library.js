@@ -229,7 +229,8 @@ const epKey = (s, e) => `${s}:${e}`;
         const type = r.medium === "TV Series" ? "show" : "movie";
         const o = { type, title: r.title, year: r.year || null, imdb: r.imdb || null, tmdb: r.tmdb ? +r.tmdb : null, src: r.source || "sync" };
         const k = adoptKey(o);
-        const want = ["watchlist", "list", "collection"].includes(r.kind);
+        // 0.5.9: a rating means you've seen it, whatever list the row came from
+        const want = ["watchlist", "list", "collection"].includes(r.kind) && !(r.rating && +r.rating > 0);
         if (this.adopted[k]) {
           // Already brought in once. Later changes on IMDb or Trakt still count: a new or changed rating (unless you
           // rated it in Saga), a watchlist title now watched, and ids it was missing. A title you removed stays removed.
@@ -277,10 +278,16 @@ const epKey = (s, e) => `${s}:${e}`;
     }
     _merge(rows, live) {
       let added = 0, updated = 0;
-      for (const r of rows) {
+      for (let r of rows) {
+        // 0.5.9: rated means seen: a rated title from an import's "plan to watch" counts as watched (a series as watching)
+        if (r.rating && +r.rating > 0 && r.status === "watchlist") {
+          r = Object.assign({}, r, r.type === "show" ? { status: "watching", autoWatching: true } : { status: "watched", watches: (r.watches && r.watches.length) ? r.watches : [day(r.date || "") || ""] });
+        }
         const before = this.find(r);
         if (live && !before && this.adopted["live|" + adoptKey(r)]) continue; // removed by you: stays removed
         const { item } = this.add(r, r.status);
+        if (r.autoWatching && item.status === "watching" && !Object.keys(item.eps).length) item.autoWatching = true;
+        if (before && r.rating && +r.rating > 0 && item.status === "watchlist") { item.status = item.type === "show" ? "watching" : "watched"; if (item.type === "movie" && !item.watches.length) item.watches.push(day(r.date || "") || ""); }
         if (live) this.adopted["live|" + adoptKey(r)] = 1;
         if (before) updated++; else added++;
         for (const d of r.watches || []) if (d && !item.watches.includes(d)) item.watches.push(d);
@@ -504,6 +511,22 @@ const epKey = (s, e) => `${s}:${e}`;
       for (const x of list) if (!it.eps[epKey(x[0], x[1])]) it.eps[epKey(x[0], x[1])] = it.watches[it.watches.length - 1] || today();
       delete it.epsPending; changed = true;
     }
+    // 0.5.9: rated IMDb episodes known only by name (from the ratings CSV): ticked and rated once the list is known
+    if (it.epRatedPending && it.epl && it.epl.length) {
+      const ix = new Map();
+      for (const x of it.epl) if (x[3]) { const k = norm(x[3]); ix.set(k, ix.has(k) ? null : epKey(x[0], x[1])); }
+      for (const [name, p] of Object.entries(it.epRatedPending)) {
+        const k = ix.get(name);
+        if (!k) continue;
+        it.er = it.er || {};
+        if (!it.er[k] && p.r && !(it.erMine && it.erMine[k])) it.er[k] = +p.r;
+        if (!it.eps[k]) { it.eps[k] = p.d || today(); if (!p.d) markBulk(it, k); }
+        delete it.epRatedPending[name];
+      }
+      if (!Object.keys(it.epRatedPending).length) delete it.epRatedPending;
+      if (it.status === "watchlist" && Object.keys(it.eps).length) it.status = "watching";
+      changed = true;
+    }
     if (it.upToPending && it.epl) {
       const [ps, pe] = it.upToPending;
       for (const x of it.epl) if (x[0] > 0 && (x[0] < ps || (x[0] === ps && x[1] <= pe)) && !it.eps[epKey(x[0], x[1])]) it.eps[epKey(x[0], x[1])] = it.watches[it.watches.length - 1] || today();
@@ -564,7 +587,7 @@ const epKey = (s, e) => `${s}:${e}`;
     return out.length ? out.join(", ") : "nothing Trakt needed";
   }
 
-  const API = { markBulk, adoptKey, settleShow, searchImdb, searchAnime, fromJikan, animeDetails, traktPush, Library, STATUSES, LABEL, search, details, stale, fromTmdb, fromTvmaze, fromItunes, norm, day, yearOf, epKey, blank, idFor };
+  const API = { markBulk, pendingEps, adoptKey, settleShow, searchImdb, searchAnime, fromJikan, animeDetails, traktPush, Library, STATUSES, LABEL, search, details, stale, fromTmdb, fromTvmaze, fromItunes, norm, day, yearOf, epKey, blank, idFor };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   else root.Lib = API;
 })(typeof window !== "undefined" ? window : globalThis);

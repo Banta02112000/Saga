@@ -316,9 +316,18 @@
     let id = (p.match(/(?:profiles\/)?(\d{17})(?:\/|$)/) || [])[1];
     if (!id) {
       const name = (p.match(/\/id\/([^/?#]+)/) || [])[1] || p.replace(/^@/, "");
-      const j = await get(`https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${encodeURIComponent(key)}&vanityurl=${encodeURIComponent(name)}`);
-      id = j && j.response && j.response.success === 1 ? j.response.steamid : null;
-      if (!id) throw new Error(`Steam: no profile with the custom name “${name}”. Paste the link of your profile page instead`);
+      // 0.5.9: the custom name as typed, then without _ - . (people often type it the way it's shown, not the way it's set),
+      // then the community page's own XML, which carries the numeric id
+      const variants = [...new Set([name, name.replace(/[_\-.]/g, ""), name.toLowerCase(), name.replace(/[_\-.]/g, "").toLowerCase()])].filter(Boolean);
+      for (const v of variants) {
+        const j = await get(`https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${encodeURIComponent(key)}&vanityurl=${encodeURIComponent(v)}`);
+        id = j && j.response && j.response.success === 1 ? j.response.steamid : null;
+        if (id) break;
+      }
+      if (!id) {
+        try { const r = await http("GET", `https://steamcommunity.com/id/${encodeURIComponent(name)}/?xml=1`, { headers: { Accept: "text/xml" } }); id = ((r.body || "").match(/<steamID64>(\d{17})<\/steamID64>/) || [])[1] || null; } catch (e) { id = null; }
+      }
+      if (!id) throw new Error(`Steam: no profile with the custom name “${name}” (also tried ${variants.slice(1).map(v => `“${v}”`).join(", ") || "no variants"}). Open your profile in Steam, copy its link (…/profiles/7656… or …/id/…) and paste it in Settings › Accounts and sync`);
     }
     const j = await get(`https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${encodeURIComponent(key)}&steamid=${id}&include_appinfo=1&include_played_free_games=1`);
     const games = j && j.response && j.response.games;

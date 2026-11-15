@@ -430,6 +430,12 @@
       this.settings[k] = String(v); this.touch();
     }
 
+    // 0.5.9: the same, 400 rows at a time with a pause in between (a sync adds tens of thousands of rows)
+    async addItemsAsync(items, source, kind, listName = "", pause = () => breathe(0)) {
+      let n = 0;
+      for (let i = 0; i < items.length; i += 400) { n += this.addItems(items.slice(i, i + 400), source, kind, listName); if (i + 400 < items.length) await pause(); }
+      return n;
+    }
     addItems(items, source, kind, listName = "") {
       let n = 0;
       for (const it of items) {
@@ -800,9 +806,18 @@
       const k = ids.tmdb ? String(ids.tmdb) : ids.imdb || "t:" + norm(x.show.title);
       const e = m[k] = m[k] || { t: x.show.title, y: x.show.year || null, imdb: ids.imdb || null, tmdb: ids.tmdb || null, r: {} };
       if (e.r[`${sn}:${en}`] !== x.rating) { e.r[`${sn}:${en}`] = x.rating; n++; }
+      if (x.rated_at) { e.d = e.d || {}; if (e.d[`${sn}:${en}`] !== x.rated_at.slice(0, 10)) { e.d[`${sn}:${en}`] = x.rated_at.slice(0, 10); n++; } } // 0.5.9: the day, for "watched on"
     }
     if (n) db.set("ep_ratings", JSON.stringify(m));
     return n;
+  }
+  async function storeTraktAsync(db, data, kind, listName = "") {
+    if (kind === "rated") traktEpRatings(db, data);
+    await breathe(0);
+    let items = traktEntries(data);
+    if (kind === "rated") items = items.filter(i => i.rating);
+    await breathe(0);
+    return db.addItemsAsync ? db.addItemsAsync(items, "trakt", kind, listName) : db.addItems(items, "trakt", kind, listName);
   }
   function storeTrakt(db, data, kind, listName = "") {
     if (kind === "rated") traktEpRatings(db, data);
@@ -1131,6 +1146,7 @@
       return r;
     };
     if (http && http.browse) f.browse = http.browse;
+    if (http && http.cancelBrowse) f.cancelBrowse = http.cancelBrowse;
     f.robust = true;
     return f;
   }
@@ -1185,11 +1201,32 @@
   class Trakt {
     constructor(http, clientId, token) { this.http = robust(http, { timeout: 60000, tries: 3 }); this.clientId = (clientId || "").trim(); this.token = token || null; }
 
-    async get(path, params = {}) {
+    // 0.5.9: pages after the first come 4 at a time (41 pages of ratings took 16 s one by one), in order;
+    // opt.stopWhen(page) ends early (used to stop at ratings already stored, when Trakt sends newest first)
+    async get(path, params = {}, opt = {}) {
+      const first = await this.page(path, params, 1);
+      if (!Array.isArray(first.data)) return first.data;
+      const out = first.data.slice();
+      const count = first.count;
+      if (count <= 1) return out;
+      if (opt.stopWhen && opt.stopWhen(first.data)) { out.stopped = 1; return out; }
+      if (opt.stopWhen) {
+        for (let page = 2; page <= count; page++) { const p = await this.page(path, params, page); out.push(...p.data); if (opt.stopWhen(p.data)) { out.stopped = page; break; } }
+        return out;
+      }
+      for (let page = 2; page <= count; page += 4) {
+        const batch = [];
+        for (let k = page; k < page + 4 && k <= count; k++) batch.push(this.page(path, params, k));
+        for (const p of await Promise.all(batch)) out.push(...p.data);
+        await breathe(0);
+      }
+      return out;
+    }
+
+    async page(path, params, page) {
       const headers = { "Content-Type": "application/json", "trakt-api-version": "2", "trakt-api-key": this.clientId };
       if (this.token) headers.Authorization = `Bearer ${this.token}`;
-      const out = [];
-      for (let page = 1; ; page++) {
+      {
         let r;
         for (let attempt = 0; attempt < 4; attempt++) {
           r = await this.http("GET", `${TRAKT}${path}?${qs(Object.assign({}, params, { page, limit: 1000 }))}`, { headers });
@@ -1202,9 +1239,7 @@
         if (r.status < 200 || r.status >= 300) throw httpError(r, "Trakt");
         let data;
         try { data = JSON.parse(r.body || "null"); } catch (e) { throw new Error(`Trakt sent an unreadable answer for ${path} (${String(r.body || "").length} bytes, page ${page})`); }
-        if (!Array.isArray(data)) return data;
-        out.push(...data);
-        if (page >= parseInt(r.headers["x-pagination-page-count"] || "1", 10)) return out;
+        return { data, count: parseInt((r.headers || {})["x-pagination-page-count"] || "1", 10) || 1 };
       }
     }
   }
@@ -1262,9 +1297,21 @@
       const [label, path, kind] = steps[i];
       progress(i / n, `Trakt: ${label}`);
       if (same(label) && (label !== "Watched shows" || db.get("trakt_progress"))) { skipped.push(label.toLowerCase()); continue; }
-      const data = await t.get(path);
+      // ratings without a sign-in: stop at ratings already stored (with 2 days' overlap), if Trakt sends newest first
+      let stopWhen = null;
+      const lastRated = db.get("trakt_last_rated_at", "");
+      if (label === "Ratings" && !opt.full && lastRated && db.items("trakt", ["rated"]).length >= 1000) {
+        const edge = new Date(Date.parse(lastRated) - 2 * 864e5).toISOString();
+        stopWhen = page => { const ds = page.map(x => x.rated_at || "").filter(Boolean); if (!ds.length) return false; for (let k = 1; k < ds.length; k++) if (ds[k] > ds[k - 1]) return false; return ds[ds.length - 1] < edge; };
+      }
+      const data = await t.get(path, {}, { stopWhen });
+      if (label === "Ratings") {
+        const newest = data.reduce((m, x) => (x.rated_at && x.rated_at > m ? x.rated_at : m), "");
+        if (newest && newest > lastRated) db.set("trakt_last_rated_at", newest);
+        if (data.stopped) skipped.push(`older ratings (stopped at page ${data.stopped}: already stored)`);
+      }
       if (!Array.isArray(data)) throw new Error(`Trakt: ${label} came back empty`);
-      total += storeTrakt(db, data, kind, "");
+      total += await storeTraktAsync(db, data, kind, "");
       if (label === "Watched shows" && Array.isArray(data)) db.set("trakt_progress", JSON.stringify(watchProgress(data)));
     }
     progress(steps.length / n, "Trakt: your lists");
@@ -1282,7 +1329,7 @@
       const lid = (lst.ids || {}).trakt;
       const name = String(lst.name || lid).toLowerCase().replace(/ /g, "-");
       progress((steps.length + j / Math.max(lists.length, 1)) / n, `Trakt list: ${lst.name}`);
-      total += storeTrakt(db, await t.get(`${u}/lists/${lid}/items`), "list", name);
+      total += await storeTraktAsync(db, await t.get(`${u}/lists/${lid}/items`), "list", name);
     }
     return total;
     }
@@ -1434,6 +1481,9 @@
       var nd = document.getElementById("__NEXT_DATA__");
       if (!nd) {
         if (document.readyState === "complete" && /sign in|accedi|404|not found|error|private|privat/i.test(title)) return "ERR:" + title;
+        // 0.5.9: a page that never brings its data: give up after about 20 s instead of waiting out the whole time limit
+        window.__csWait = (window.__csWait || 0) + 1;
+        if (window.__csWait > 20) return "ERR:" + (title || "page did not load its data");
         return null;
       }
       var baseText = nd.textContent || "";
@@ -1456,15 +1506,22 @@
       S.add(baseText);
       var bi = info(baseText); S.total = bi.total; S.next = bi.next; S.gql = 0; S.ops = {};
       var isGql = function (u) { return /graphql/i.test(String(u || "")); };
+      // 0.5.9: only the page's own list moves the count and the cursor; side requests (your lists, exports, recently
+      // viewed titles) carry their own "edges" and used to take over, sending the next page request to the wrong list
+      var mainList = function (t, req) {
+        var op = req && req.url ? String(req.url) + " " + String((req.init && req.init.body) || "") : "";
+        if (/YourListsSidebar|YourExports|RVI_|RecentlyViewed|AmazonAccount|Watchlist(Ribbon|Button)|Sidebar/i.test(op)) return false;
+        return /titleListItemSearch|advancedTitleSearch|"items"\s*:\s*\{|userRatings|predefinedList/.test(t) && /"tt\d{7,9}"/.test(t);
+      };
       var keep = function (t, req) {
         if (!t || t.length <= 50) return;
         S.add(t);
+        S.gql++;
+        try { var op0 = req && req.url && (String(req.url).match(/operationName=([^&]+)/) || [])[1]; if (op0) S.ops[op0] = 1; } catch (e) { /* ignore */ }
+        if (!mainList(t, req)) return;
         var ii = info(t);
         if (!S.total && ii.total) S.total = ii.total;
-        // only a response that carries titles moves the cursor on
-        if (ii.next !== undefined && /"tt\d{7,9}"/.test(t)) { S.next = ii.next; if (req && req.url) S.tpl = req; }
-        S.gql++;
-        try { var op = req && req.url && (String(req.url).match(/operationName=([^&]+)/) || [])[1]; if (op) S.ops[op] = 1; } catch (e) { /* ignore */ }
+        if (ii.next !== undefined) { S.next = ii.next; if (req && req.url) S.tpl = req; }
       };
       var of = window.fetch;
       S.fetch = of; S.keep = keep; // later polls are new calls of this function: keep the helpers on the state
@@ -1526,8 +1583,8 @@
       if (!m || S.tpl || !S.next || S.asked[S.next] || !S.fetch || S.directErr) return false;
       var cur = S.next;
       S.asked[cur] = 1; S.inflight++;
-      var q = "query($id: ID!, $after: String){ list(id:$id){ titleListItemSearch(first:250, after:$after){ total pageInfo{hasNextPage endCursor} " +
-        "edges{ listItem{ ... on Title { id titleText{text} releaseYear{year} titleType{id} releaseDate{year month day} titleGenres{genres{genre{text}}} } } } } } }";
+      var q = "query($id: ID!, $after: String){ list(id:$id){ items(first:250, after:$after){ total pageInfo{hasNextPage endCursor} " +
+        "edges{ node{ listItem{ ... on Title { id titleText{text} releaseYear{year} titleType{id} releaseDate{year month day} titleGenres{genres{genre{text}}} } } } } } } }";
       S.fetch.call(window, "https://api.graphql.imdb.com/", { method: "POST", headers: { "content-type": "application/json" }, credentials: "include",
         body: JSON.stringify({ query: q, variables: { id: m[1], after: cur } }) })
         .then(function (r) { return r.text().then(function (txt) { S.inflight--; if (r.status !== 200 || !/"edges"/.test(txt)) { S.directErr = "API " + r.status + " " + txt.slice(0, 120); return; } S.keep(txt, null); }); },
@@ -1716,35 +1773,101 @@
     return [...out.values()];
   }
 
-  let gqlBlocked = false; // IMDb refused the API once this run: don't keep asking
-  async function gqlList(http, listId, once = false) {
-    const items = [];
-    let total = 0;
-    let after = null;
-    for (let i = 0; i < 40; i++) {
-      const r = await http("POST", GQL, { headers: Object.assign({ "Content-Type": "application/json" }, IMDB_H),
-                                          body: JSON.stringify({ query: LIST_QUERY, variables: { id: listId, after } }), once });
-      if (r.status !== 200) throw new Error(`GraphQL HTTP ${r.status}`);
-      const res = (((JSON.parse(r.body).data || {}).list) || {}).titleListItemSearch;
-      if (!res) throw new Error("GraphQL returned no list data");
-      if (res.total) total = res.total;
-      for (const e of res.edges || []) {
-        const t = e.listItem || {};
-        if (!t.id) continue;
-        const gs = ((t.titleGenres || {}).genres) || [];
-        const rd = t.releaseDate || {};
-        items.push({ imdb: t.id, title: (t.titleText || {}).text, year: (t.releaseYear || {}).year,
-                     medium: mediumFromImdb((t.titleType || {}).id), date: rd.year ? parseDate({ year: rd.year, month: rd.month, day: rd.day }) : null,
-                     runtime: t.runtime && t.runtime.seconds ? Math.round(t.runtime.seconds / 60) : null,
-                     genres: gs.filter(x => x.genre).map(x => x.genre.text).join(", ") });
-      }
-      const pi = res.pageInfo || {};
-      if (!pi.hasNextPage) break;
-      after = pi.endCursor;
+  let gqlBlocked = false; // IMDb refused both API addresses this run: don't keep asking
+  // ---- 0.5.9: IMDb's data service, the way the old GameCheck app read it (which kept working): the cached GET
+  // address first (caching.graphql.imdb.com), the POST address only if that fails. No page, no hidden browser.
+  const GQL_CACHE = "https://caching.graphql.imdb.com/";
+  const GQL_HEAD = Object.assign({ "Content-Type": "application/json", Accept: "application/json", Origin: "https://www.imdb.com", Referer: "https://www.imdb.com/" }, IMDB_H);
+  const T_FIELDS = "id titleType{id} titleText{text} originalTitleText{text} releaseYear{year} releaseDate{day month year} runtime{seconds} titleGenres{genres{genre{text}}}";
+  async function imdbGql(http, query) {
+    if (gqlBlocked) throw new Error("IMDb API refused earlier in this sync");
+    let r = await http("GET", GQL_CACHE + "?query=" + encodeURIComponent(query), { headers: GQL_HEAD, once: true });
+    if (r.status !== 200) {
+      const r2 = await http("POST", GQL, { headers: GQL_HEAD, body: JSON.stringify({ query }), once: true });
+      if (r2.status !== 200 && /^(403|429)$/.test(String(r.status)) && /^(403|429)$/.test(String(r2.status))) gqlBlocked = true;
+      r = r2;
     }
-    if (!items.length) throw new Error("GraphQL list was empty");
+    if (r.status !== 200) throw new Error(`IMDb API HTTP ${r.status || 0}`);
+    let j;
+    try { j = JSON.parse(r.body); } catch (e) { throw new Error("IMDb API: not JSON"); }
+    if (j && j.data && Object.values(j.data).some(v => v != null)) return j.data;
+    throw new Error("IMDb API: " + ((((j && j.errors) || [])[0] || {}).message || "empty answer").slice(0, 160));
+  }
+  function gqlTitle(t, extra) {
+    if (!t || !TT.test(t.id || "")) return null;
+    const gs = ((t.titleGenres || {}).genres) || [], rd = t.releaseDate || {};
+    return Object.assign({ imdb: t.id, title: (t.titleText || {}).text || (t.originalTitleText || {}).text || null, year: (t.releaseYear || {}).year || rd.year || null,
+      medium: mediumFromImdb((t.titleType || {}).id), date: rd.year ? parseDate({ year: rd.year, month: rd.month, day: rd.day }) : null,
+      runtime: t.runtime && t.runtime.seconds ? Math.round(t.runtime.seconds / 60) : null, genres: gs.filter(x => x.genre).map(x => x.genre.text).join(", ") }, extra || {});
+  }
+  // a title from one edge, whichever shape IMDb uses (node.listItem, listItem, node.title, node itself)
+  const edgeTitle = e => (e && ((e.node && (e.node.listItem || e.node.title || (e.node.id ? e.node : null))) || e.listItem || e.title)) || null;
+  async function gqlList(http, listId) {
+    const items = [];
+    let total = 0, after = null, name = "";
+    for (let i = 0; i < 60; i++) {
+      const d = await imdbGql(http, `{list(id:"${listId}"){name{originalText} listClass{id} items(first:250${after ? `,after:${JSON.stringify(after)}` : ""}){total pageInfo{hasNextPage endCursor} edges{node{listItem{... on Title{${T_FIELDS}}}}}}}}`);
+      const L0 = d.list;
+      const L = L0 && Object.assign({}, L0, { items: L0.items || L0.titleListItemSearch });
+      if (!L || !L.items) throw new Error("IMDb API: no such list, or it's private");
+      name = (L.name && L.name.originalText) || name;
+      if (L.items.total) total = L.items.total;
+      for (const e of L.items.edges || []) { const it = gqlTitle(edgeTitle(e)); if (it) items.push(it); }
+      const pi = L.items.pageInfo || {};
+      if (!pi.hasNextPage || !pi.endCursor) break;
+      after = pi.endCursor;
+      await breathe(0);
+    }
+    if (!items.length && total) throw new Error("IMDb API: the list came back empty");
+    items.total = total; items.name = name;
+    return items;
+  }
+  // your IMDb user id (ur…) for a p.… profile id: read once from your public ratings page, then kept
+  async function imdbUr(http, user, store) {
+    const u = String(user || "");
+    const ur = (u.match(/ur\d{4,}/) || [])[0];
+    if (ur) return ur;
+    const p2 = (u.match(/p\.[a-z0-9]+/i) || [])[0];
+    if (!p2) return "";
+    if (store && store.get("imdb_ur_for") === p2 && store.get("imdb_ur")) return store.get("imdb_ur");
+    const r = await http("GET", `https://www.imdb.com/user/${p2}/ratings/`, { headers: Object.assign({ Accept: "text/html" }, IMDB_H), once: true });
+    const m = String(r.body || "").match(/"authorId":"(ur\d{4,})"/) || String(r.body || "").match(/"(ur\d{4,})"/);
+    if (!m) return "";
+    if (store) { store.set("imdb_ur", m[1]); store.set("imdb_ur_for", p2); }
+    return m[1];
+  }
+  async function gqlRatings(http, ur, want = 0) {
+    const items = [];
+    let total = 0, after = null, desc = null, prev = null;
+    for (let i = 0; i < 200; i++) {
+      const d = await imdbGql(http, `{userRatings(first:250,userId:"${ur}"${after ? `,after:${JSON.stringify(after)}` : ""}){total pageInfo{hasNextPage endCursor} edges{node{title{${T_FIELDS}} userRating{value date}}}}}`);
+      const R = d.userRatings;
+      if (!R) throw new Error("IMDb API: your ratings are private or unavailable");
+      if (R.total) total = R.total;
+      for (const e of R.edges || []) {
+        const n = e.node || {}, ur2 = n.userRating || {};
+        const date = ur2.date ? String(ur2.date).slice(0, 10) : null;
+        const it = gqlTitle(n.title, { rating: ur2.value || null, rated_at: date, date });
+        if (!it) continue;
+        if (date && prev) { const dd = date <= prev; desc = desc === null ? dd : desc && dd; }
+        if (date) prev = date;
+        items.push(it);
+      }
+      // only the newest are wanted (the rest is already stored): stop once enough came, if IMDb gives newest first
+      if (want && desc && items.length >= want) { items.newest = true; break; }
+      const pi = R.pageInfo || {};
+      if (!pi.hasNextPage || !pi.endCursor) break;
+      after = pi.endCursor;
+      await breathe(0);
+    }
     items.total = total;
     return items;
+  }
+  async function gqlWatchlistId(http, ur) {
+    const d = await imdbGql(http, `{predefinedList(classType:WATCH_LIST,userId:"${ur}"){id}}`);
+    const id = d.predefinedList && d.predefinedList.id;
+    if (!id) throw new Error("IMDb API: no watchlist found");
+    return id;
   }
 
   function listIdFrom(url) {
@@ -1757,24 +1880,22 @@
     const lid = listIdFrom(url);
     const errs = [];
     let netFail = false;
-    // IMDb's API straight from the phone's network code: no page to load, nothing running on the screen's engine.
-    // Kept only if IMDb answers with the whole list; otherwise the page route below takes over.
-    if (http.browse && !gqlBlocked) {
-      try {
-        const it = await gqlList(http, lid, true);
-        if (!it.total || it.length >= it.total * 0.98) return [it, `IMDb API (no page)${it.total ? `, IMDb counts ${it.total}` : ""}`];
-        errs.push(`api: ${it.length} of ${it.total}`);
-      } catch (e) { errs.push(`api: ${e.message}`); if (/HTTP (0|403|429|5\d\d)\b/.test(e.message)) gqlBlocked = true; } // only a refusal or an outage stops the API for the rest of this sync; one odd list doesn't
-    }
-    if (http.browse) {
-      try { const it = await browseTitles(http, `https://www.imdb.com/list/${lid}/`, CONFIG.listBrowseMs); return [it, browserRoute(it)]; } catch (e) { errs.push(`browser: ${e.message}`); if (e.network) netFail = true; }
-    }
+    // 1. IMDb's data service: no page to load, nothing running on the screen's engine, 250 titles a request.
+    try {
+      const it = await gqlList(http, lid);
+      if (!it.total || it.length >= it.total * 0.98) return [it, `IMDb API (no page)${it.total ? `, IMDb counts ${it.total}` : ""}`];
+      errs.push(`api: ${it.length} of ${it.total}`);
+    } catch (e) { errs.push(`api: ${e.message}`); }
+    // 2. the list's CSV export: the whole list in one request
     try {
       const groups = parseImdbText(await getText(http, `https://www.imdb.com/list/${lid}/export`), "list");
       if (groups.list && groups.list.length) return [groups.list, "CSV export"];
       errs.push("export: not a CSV");
     } catch (e) { errs.push(`export: ${e.message}`); }
-    try { return [await gqlList(http, lid), "GraphQL"]; } catch (e) { errs.push(`graphql: ${e.message}`); }
+    // 3. only then the hidden browser
+    if (http.browse) {
+      try { const it = await browseTitles(http, `https://www.imdb.com/list/${lid}/`, CONFIG.listBrowseMs); return [it, browserRoute(it)]; } catch (e) { errs.push(`browser: ${e.message}`); if (e.network) netFail = true; }
+    }
     try { return [await pageItems(http, `https://www.imdb.com/list/${lid}/`), "page (may be first batch only)"]; } catch (e) { errs.push(`page: ${e.message}`); }
     if (netFail) throw netError(`couldn't reach IMDb after ${CONFIG.browseTries} tries (the connection dropped, or IMDb is limiting requests). Tap Retry failed in a few minutes.`);
     throw new Error(`IMDb list ${lid} failed (${errs.join("; ")}). Check the list is public, or sign in to IMDb in Settings.`);
@@ -1790,6 +1911,10 @@
     const id = imdbUserId(user);
     const errs = [];
     let netFail = false;
+    try {
+      const ur = await imdbUr(http, user, store);
+      if (ur) { const wid = await gqlWatchlistId(http, ur); const it = await gqlList(http, wid); return [it, `IMDb API (no page)${it.total ? `, IMDb counts ${it.total}` : ""}`]; }
+    } catch (e) { errs.push(`api: ${e.message}`); }
     if (http.browse) {
       try { const it = await pageOrApi(http, `https://www.imdb.com/user/${id}/watchlist/`, CONFIG.listBrowseMs, 0, store); return [it, it.route || browserRoute(it)]; } catch (e) { errs.push(`browser: ${e.message}`); if (e.network) netFail = true; }
     }
@@ -1812,9 +1937,23 @@
   }
 
   async function imdbRatings(http, ur, want = 0, store = null) {
+    const user = ur;
     ur = imdbUserId(ur);
     const errs = [];
     let netFail = false;
+    try {
+      const uid = await imdbUr(http, user, store);
+      if (uid) {
+        const items = await gqlRatings(http, uid, want);
+        if (items.length) {
+          const groups = { rated: items };
+          Object.defineProperty(groups, "total", { value: items.total || 0, enumerable: false });
+          Object.defineProperty(groups, "newest", { value: !!items.newest, enumerable: false });
+          return [groups, `IMDb API (no page)${items.total ? `, IMDb counts ${items.total}` : ""}`];
+        }
+        errs.push("api: no ratings");
+      }
+    } catch (e) { errs.push(`api: ${e.message}`); }
     if (http.browse) {
       try {
         const items = await pageOrApi(http, `https://www.imdb.com/user/${ur}/ratings/`, CONFIG.listBrowseMs + 120000, want, store);
@@ -3390,7 +3529,7 @@ ${blocks.join("\n\n")}`;
         const have = db.items("imdb", ["rated"]).length;
         const want = have >= 1000 && !opt.fullImdb ? 500 : 0;
         const [groups, route] = await imdbRatings(http, db.get("imdb_user"), want, tplStore);
-        for (const [k, items] of Object.entries(groups)) db.addItems(items, "imdb", k, "");
+        for (const [k, items] of Object.entries(groups)) await db.addItemsAsync(items, "imdb", k, "");
         const all = Object.assign(Object.values(groups).flat(), { total: groups.total || 0, isRatings: true });
         if (groups.newest) return { msg: `newest ${all.length} ratings checked; the other ${Math.max(0, have - all.length)} are already stored (to catch ratings you removed on IMDb, use Settings › IMDb › Read all my ratings again)`, part: false, got: all.length };
         if (!want && groups.total && all.length >= groups.total * 0.98) db.set("imdb_full_at", String(Date.now()));
@@ -3404,7 +3543,7 @@ ${blocks.join("\n\n")}`;
         const u = imdbUserId(url);
         if (u && u !== ratingsUser) add("imdb", `IMDb ratings ${u}`, async () => {
           const [groups, route] = await imdbRatings(http, u);
-          for (const [k, items] of Object.entries(groups)) db.addItems(items, "imdb", k, "");
+          for (const [k, items] of Object.entries(groups)) await db.addItemsAsync(items, "imdb", k, "");
           return imdbRes(Object.values(groups).flat(), route);
         }, CONFIG.listTaskMs);
         continue;
@@ -3412,14 +3551,14 @@ ${blocks.join("\n\n")}`;
       if (/\/watchlist/i.test(url)) {
         add("imdb", "IMDb watchlist", async () => {
           const [items, route] = await imdbWatchlist(http, url, tplStore);
-          db.addItems(items, "imdb", "watchlist", "watchlist");
+          await db.addItemsAsync(items, "imdb", "watchlist", "watchlist");
           return imdbRes(items, route);
         }, CONFIG.listTaskMs);
         continue;
       }
       add("imdb", `IMDb list ${listIdSafe(url)}`, async () => {
         const [items, route] = await imdbList(http, url);
-        db.addItems(items, "imdb", "list", listIdFrom(url));
+        await db.addItemsAsync(items, "imdb", "list", listIdFrom(url));
         return imdbRes(items, route);
       }, CONFIG.listTaskMs);
     }
@@ -3455,7 +3594,9 @@ ${blocks.join("\n\n")}`;
         const t0 = Date.now();
         L(`start ${label}`);
         try {
-          const r = await withTimeout(fn(), limit, `took longer than ${Math.round(limit / 60000)} min`);
+          let r;
+          try { r = await withTimeout(fn(), limit, `took longer than ${Math.round(limit / 60000)} min`); }
+          catch (e) { if (http.cancelBrowse && /took longer/.test(e.message)) http.cancelBrowse(); throw e; } // don't leave its page running
           const msg = typeof r === "string" ? r : r.msg, part = r && r.part;
           report.push(`${part ? "PART " : "OK  "}${label}: ${msg}${part ? " (not all of it came through; what arrived is kept. Tap Retry failed, or sign in to IMDb)" : ""}`);
           state[label] = { ok: !part, at: Date.now(), ms: Date.now() - t0, msg };
@@ -3514,7 +3655,7 @@ ${blocks.join("\n\n")}`;
     MEDIA, PROFILES, SECRET_RX, norm, parseYear, mediumFromImdb, mediumFromText, ratio, TitleIndex, Store,
     parseCsv, parseImdbText, importImdbCsv, importFranchiseFile, traktEntries, routeTraktFile, storeTrakt, importTraktZip,
     breathe, jsonParts, BUSY: CONFIG_BUSY, consumed, Exclusion, canonStatus, canonStatusAsync, franchiseProgress, upNext, missingCanon, discrepancies, computeStats,
-    apiTitles, pageOrApi, gqlInfo, authorizeUrl, exchangeCode, Trakt, traktSync, imdbList, imdbRatings, imdbWatchlist, imdbUserId, listIdFrom, walkTitles, browseTitles, pageExtract, pageProbe, probeFor, TMDB, collectionScan, season0Scan,
+    apiTitles, pageOrApi, gqlInfo, imdbReset: () => { gqlBlocked = false; }, imdbGql, gqlList, gqlRatings, imdbUr, authorizeUrl, exchangeCode, Trakt, traktSync, imdbList, imdbRatings, imdbWatchlist, imdbUserId, listIdFrom, walkTitles, browseTitles, pageExtract, pageProbe, probeFor, TMDB, collectionScan, season0Scan,
     CONFIG, AI_PRESETS, compatProvider, compatScan, localModels, serverBase, traktOne, traktEpRatings, parseLines, parseMvGroup, relevantNames, promptLine, netHint, robust, pool, details, titleInfo, justWatch, pickDates, dateSummary, bestOffer, cachedInfo, enrichInfo, platformRatings, ratingDiffs, withTimeout, watchProgress, continueWatching, testGemini, gemError, fillPosters, posterKey, aiState, resetAi, canonScan, claudeScan, claudeCall, claudeModels, rankClaudeModel, CLAUDE_DEFAULT, upcomingEpisodes, canonKeys, parseJsonArray, multiverseScan, collectionRows, refreshCollections, tvNext, upcomingEvents, computeAlerts, backgroundRun, fmtWhen, hashId, geminiState, resetGemini, mvGroup, mvExpand, multiverses, mvMap, mvAlias, mvPending, mvDone, geminiProvider, vpnOptions, bestVpn, worldFrom, worldCountries, jwQuery, flag: FLAGS, VPN_DEFAULT, manualScan, franchiseBatches, verifyPrompt, parseVerify, newsBatches, newsPrompt, parseCanonRows, franchiseName, releaseList, releaseKey, parseDate, seeds, rankGeminiModel, resolveGeminiModel, syncAll, sleep,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Core;

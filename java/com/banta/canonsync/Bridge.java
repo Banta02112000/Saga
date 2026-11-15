@@ -35,7 +35,7 @@ import java.util.zip.ZipInputStream;
 
 public class Bridge {
     static final int PICK = 4242;
-    static final String UA = "Saga/0.5.8 (Android)";
+    static final String UA = "Saga/0.5.9 (Android)";
     final Context ctx;
     final MainActivity act;       // null when running inside the background job
     final SyncJobService job;     // null in the app
@@ -734,7 +734,45 @@ public class Bridge {
             deliver("__httpDone", id, "{\"status\":0,\"value\":null,\"error\":\"the in-app browser only works with the app open\"}");
             return;
         }
-        main.post(new BrowseTask(this, id, url, probe, timeoutMs));
+        BrowseTask t = new BrowseTask(this, id, url, probe, timeoutMs);
+        main.post(new Swap(t));
+    }
+
+    // 0.5.9: only one hidden page at a time; a new one ends the one before
+    static BrowseTask current = null;
+
+    static class Swap implements Runnable {
+        final BrowseTask t;
+
+        Swap(BrowseTask t) {
+            this.t = t;
+        }
+
+        public void run() {
+            BrowseTask old = current;
+            if (old != null && !old.done) old.finish("{\"status\":0,\"value\":null,\"error\":\"replaced by a newer page\"}");
+            current = t;
+            t.run();
+        }
+    }
+
+    static class Cancel implements Runnable {
+        final String id;
+
+        Cancel(String id) {
+            this.id = id;
+        }
+
+        public void run() {
+            BrowseTask t = current;
+            if (t != null && !t.done && (id == null || id.length() == 0 || id.equals(t.id))) t.finish("{\"status\":0,\"value\":null,\"error\":\"cancelled\"}");
+        }
+    }
+
+    // the app gave up waiting for this page (or the job stopped): close it now instead of leaving it running
+    @JavascriptInterface
+    public void cancelBrowse(String id) {
+        main.post(new Cancel(id));
     }
 
     // ---- 0.5.7.1: a watch on the phone's own screen thread (taps, scrolling and drawing go through it), during a job.
@@ -756,7 +794,8 @@ public class Bridge {
         public void run() {
             long now = (System.nanoTime() / 1000000L), late = now - last - 100;
             last = now;
-            if (late > 250) {
+            // 0.5.9: a gap of more than 20 s is the app being put to sleep (screen off, another app in front), not a hitch
+            if (late > 250 && late < 20000) {
                 synchronized (HITCHES) {
                     hitchTotal += late;
                     if (HITCHES.size() < 40) HITCHES.add(late + "\t" + doing);
@@ -768,6 +807,7 @@ public class Bridge {
 
     @JavascriptInterface
     public void watchScreen(boolean on) {
+        keepScreenOn(on);
         if (on && !beating) {
             synchronized (HITCHES) {
                 HITCHES.clear();
@@ -776,6 +816,29 @@ public class Bridge {
             beating = true;
             main.postDelayed(new Beat(main), 100);
         } else if (!on) beating = false;
+    }
+
+    // 0.5.9: the screen stays on while a sync runs in the app, so the phone doesn't put the app (and the sync) to sleep
+    static class ScreenOn implements Runnable {
+        final MainActivity a;
+        final boolean on;
+
+        ScreenOn(MainActivity a, boolean on) {
+            this.a = a;
+            this.on = on;
+        }
+
+        public void run() {
+            try {
+                if (on) a.getWindow().addFlags(128); // FLAG_KEEP_SCREEN_ON
+                else a.getWindow().clearFlags(128);
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    void keepScreenOn(boolean on) {
+        if (act != null) main.post(new ScreenOn(act, on));
     }
 
     // what the watch saw: total ms, then one line per hitch (ms TAB what was going on)
@@ -821,9 +884,21 @@ public class Bridge {
                 started = System.currentTimeMillis();
                 w.loadUrl(url);
                 w.postDelayed(new Poll(this), 1500);
+                main().postDelayed(new Watchdog(this), 5000);
             } catch (Throwable t) {
                 finish("{\"status\":0,\"value\":null,\"error\":" + q(String.valueOf(t)) + "}");
             }
+        }
+
+        Handler main() {
+            return b.main;
+        }
+
+        // checks the time every 5 s on its own, so a page that stops answering (paused, frozen) still ends on time
+        void watch() {
+            if (done) return;
+            if (System.currentTimeMillis() - started > timeoutMs + 10000) onTitle("\"no answer from the page\"");
+            else b.main.postDelayed(new Watchdog(this), 5000);
         }
 
         @SuppressWarnings("unchecked")
@@ -903,6 +978,18 @@ public class Bridge {
             } catch (Throwable ignored) {
             }
             return null;
+        }
+    }
+
+    static class Watchdog implements Runnable {
+        final BrowseTask t;
+
+        Watchdog(BrowseTask t) {
+            this.t = t;
+        }
+
+        public void run() {
+            t.watch();
         }
     }
 
@@ -1045,7 +1132,7 @@ public class Bridge {
 
     @JavascriptInterface
     public String version() {
-        return "0.5.8";
+        return "0.5.9";
     }
 
     // ---------- background sync & notifications ----------

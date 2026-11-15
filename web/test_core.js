@@ -177,7 +177,7 @@ async function main() {
       if (path.includes("/users/someone/lists/matrix/items")) return resp([{ type: "movie", movie: { title: "The Matrix", year: 1999, ids: { imdb: "tt0133093" } } }]);
       return resp([]);
     }
-    if (url.includes("api.graphql.imdb.com")) return gql;
+    if (url.includes("api.graphql.imdb.com")) return /ls222/.test(String(opt.body || "")) ? gql : resp({ data: { list: null } });
     if (url.includes("ls111/export")) return resp(LIST_CSV);
     if (url.includes("ls222/export")) return resp("", 404);
     if (url.includes("ratings/export")) return resp("<html>please sign in</html>");
@@ -191,7 +191,7 @@ async function main() {
   const rep = await C.syncAll(db3, syncHttp, noop);
   assert.ok(!rep.report.includes("FAIL") && rep.ok === 4 && /PART IMDb ratings/.test(rep.report) && rep.failed.includes("IMDb ratings"), rep.report);
   assert.ok(rep.report.indexOf("Trakt account") < rep.report.indexOf("IMDb ratings") && db3.get("sync_state").includes("Trakt account"), "report order and per-source state");
-  assert.ok(rep.report.includes("GraphQL") && rep.report.includes("page") && rep.report.includes("Trakt API"), rep.report);
+  assert.ok(rep.report.includes("IMDb API") && rep.report.includes("page") && rep.report.includes("Trakt API"), rep.report);
   eqSet(db3.items("imdb").map(i => i.title), ["Page Movie", "The Shawshank Redemption"]);
   assert.strictEqual(db3.items("trakt")[0].title, "Heat");
   eqSet(db3.canon().map(c => c.title), ["The Matrix Reloaded", "The Matrix"]);
