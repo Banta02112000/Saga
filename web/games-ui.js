@@ -53,14 +53,40 @@
       ["wishlist", "Wishlist", c.wishlist], ["upcoming", "Upcoming", c.upcoming], ["owned", "Owned, to play", null], ["sale", "On sale", null], ["remakes", "Has a remake", null], ["dropped", "Dropped", c.dropped]];
     const list = ui.view === "grid" ? listFor() : [];
     return `${playing.length && ui.f === "all" && !ui.q ? `<section>${K.head("Playing and up next", "", playing.length)}${K.rail(playing.map(tileOf))}</section>` : ""}
-      <div class="subnav">${[["grid", "Library"], ["mv", "Franchises"]].map(([k, l]) => `<button data-action="gview" data-v="${k}" ${ui.view === k ? 'aria-current="page"' : ""}>${l}</button>`).join("")}</div>
+      <div class="subnav">${[["grid", "Library"], ["mv", "Franchises"], ["stats", "Stats"]].map(([k, l]) => `<button data-action="gview" data-v="${k}" ${ui.view === k ? 'aria-current="page"' : ""}>${l}</button>`).join("")}</div>
       <div class="toolbar"><input type="search" data-gq="1" data-input="gq" value="${esc(ui.q)}" placeholder="Filter your games" autocomplete="off">
         ${ui.view === "grid" ? `<select data-gsort="1" aria-label="Sort">${[["release", "Release (oldest)"], ["newest", "Release (newest)"], ["remake", "Remake release"], ["recent", "Recently played"], ["title", "Title"], ["rating", "Rating"], ["short", "Shortest"], ["price", "Price"]].map(([k, l]) => `<option value="${k}" ${ui.sort === k ? "selected" : ""}>${l}</option>`).join("")}</select>` : ""}
         <button class="iconbtn" data-action="gadd" aria-label="Add a game">${K.icon("plus")}</button></div>
-      ${ui.view === "grid" ? `<div class="chips" style="margin-bottom:14px">${f.map(([k, l, n]) => `<button class="chip" data-action="gfilter" data-v="${k}" aria-pressed="${ui.f === k}">${l}${n != null ? ` <span class="muted">${n}</span>` : ""}</button>`).join("")}</div>
+      ${ui.view !== "stats" ? strip() : ""}
+      ${ui.view === "stats" ? renderStats() : ui.view === "grid" ? `<div class="chips" style="margin-bottom:14px">${f.map(([k, l, n]) => `<button class="chip" data-action="gfilter" data-v="${k}" aria-pressed="${ui.f === k}">${l}${n != null ? ` <span class="muted">${n}</span>` : ""}</button>`).join("")}</div>
         ${list.length ? K.grid(list.slice(0, ui.lim).map(tileOf)) : `<p class="muted">Nothing here.</p>`}
         ${list.length > ui.lim ? `<button class="btn block" style="margin-top:16px" data-action="gmore">Show more (${list.length - ui.lim})</button>` : ""}
         <p class="small muted" style="margin-top:16px">${c.all} games · ${c.done} finished · ${c.plays} playthroughs</p>` : renderMv()}`;
+  }
+  // a line of the main numbers at the top of Library and Franchises
+  function strip() {
+    const s = G.stats(lib());
+    return `<div class="sstrip"><div><b>${s.total}</b><span>games</span></div><div><b>${s.done}</b><span>finished</span></div><div><b>${s.backlogDone}%</b><span>backlog cleared</span></div>
+      ${s.playedHours ? `<div><b>${s.playedHours} h</b><span>played</span></div>` : ""}<div><b>${s.avg != null ? "★ " + s.avg : "–"}</b><span>average</span></div><div><b>${s.ownedUnplayed}</b><span>owned, unplayed</span></div></div>`;
+  }
+  function renderStats() {
+    const s = G.stats(lib()), mx = Math.max(1, ...s.hist), mm = Math.max(1, ...s.months);
+    const rows = (list, f) => list.slice(0, 12).map(o => `<div class="item"><span class="grow ell">${esc(o.k)}</span><span class="small muted">${f(o)}</span></div>`).join("");
+    return `<div class="statgrid">
+      <section class="card" style="padding:14px"><div class="kicker">Status</div>
+        <div class="sstrip" style="flex-wrap:wrap">${[["Finished", s.done], ["Playing", s.playing], ["Paused", s.paused], ["Backlog", s.backlog], ["Wishlist", s.wishlist], ["Dropped", s.dropped]].map(([l, n]) => `<div><b>${n}</b><span>${l}</span></div>`).join("")}</div>
+        <p class="small">Backlog cleared: <b>${s.backlogDone}%</b> (finished out of finished, playing, paused and backlog) · owned but not played: <b>${s.ownedUnplayed}</b>${s.backlogHours ? ` (about ${s.backlogHours} h to beat them all)` : ""}</p></section>
+      <section class="card" style="padding:14px"><div class="kicker">Playtime</div>
+        <p class="small">${s.playedHours} h logged in sessions · ${s.plays} playthroughs${s.avgBeat ? ` · ${s.avgBeat} h to beat a finished game, on average` : ""}</p>
+        <div class="kicker" style="margin-top:8px">Sessions per month, ${new Date().getFullYear()}</div><div class="months" style="height:80px">${s.months.map(n => `<i style="height:${Math.round((100 * n) / mm)}%" title="${Math.round(n / 60)} h"></i>`).join("")}</div></section>
+      <section class="card" style="padding:14px"><div class="kicker">Ratings</div>
+        <p class="small">${s.rated} rated · average <b>★ ${s.avg != null ? s.avg : "–"}</b>${s.vsImdb != null ? ` · ${s.vsImdb >= 0 ? "+" : ""}${s.vsImdb} against IMDb` : ""}</p>
+        <div class="hist">${s.hist.map(n => `<i style="height:${Math.round((100 * n) / mx)}%" title="${n}"></i>`).join("")}</div><div class="histl">${s.hist.map((_, i) => `<span>${i + 1}</span>`).join("")}</div></section>
+      <section class="card" style="padding:14px"><div class="kicker">By platform</div>${rows(s.platforms, o => `${o.n} · ${o.done} finished${o.avg != null ? ` · ★ ${o.avg}` : ""}`)}</section>
+      <section class="card" style="padding:14px"><div class="kicker">Franchises closest to done</div>${rows(s.franchises, o => `${o.done}/${o.n}${o.avg != null ? ` · ★ ${o.avg}` : ""}`)}</section>
+      <section class="card" style="padding:14px"><div class="kicker">By decade</div>${rows(s.decades, o => `${o.n}${o.avg != null ? ` · ★ ${o.avg}` : ""}`)}</section>
+      ${s.wishValue || s.sale ? `<section class="card" style="padding:14px"><div class="kicker">Wishlist</div><p class="small">${s.sale} on sale now${s.wishValue ? ` · about €${s.wishValue} for all of it at today's prices` : ""}</p></section>` : ""}
+    </div>`;
   }
   function renderMv() {
     const q = G.norm(ui.q);

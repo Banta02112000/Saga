@@ -19,6 +19,7 @@ const mock = (seed) => {
   window.__http = [];
   const reply = (m, url, body) => {
     const J = (o, st) => ({ status: st || 200, body: JSON.stringify(o) });
+    if (/^https:\/\/saga\.test\//.test(url) && window.__webSrv) return window.__webSrv(m, url, body);
     if (/api\.trakt\.tv\/users\/banta\/watched\/movies/.test(url)) return J([{ movie: { title: "Heat", year: 1995, ids: { imdb: "tt0113277", tmdb: 949 } }, last_watched_at: "2024-03-01T20:00:00Z" }]);
     if (/api\.trakt\.tv\/users\/banta\/watched\/shows/.test(url)) return J([{ show: { title: "Severance", year: 2022, ids: { imdb: "tt11280740", tmdb: 95396 } }, last_watched_at: "2025-01-20T21:00:00Z", seasons: [{ number: 1, episodes: [{ number: 1, plays: 1, last_watched_at: "2024-12-01T21:00:00Z" }, { number: 2, plays: 1, last_watched_at: "2024-12-02T21:00:00Z" }] }] }]);
     if (/api\.trakt\.tv\/users\/banta\/ratings/.test(url)) return J([]);
@@ -273,7 +274,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.5.9", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.6.0", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();
@@ -515,6 +516,52 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   for (const id of ids) await pg.click(`[data-action="libsel"][data-id="${id}"]`);
   await pg.click('[data-action="libbulk"][data-v="paused"]');
   ok(await A(ids => ids.every(id => __app.lib.get(id).status === "paused") && !__app.ui.sel, ids), "bulk: two titles paused together");
+  // ---- 0.5.9: two-way sync with the website: a film added there arrives on the phone; nothing to send the second time
+  const ws = await A(async () => {
+    const posts = [];
+    window.__webSrv = (m, url, body) => {
+      if (/manifest$/.test(url)) return { status: 200, body: JSON.stringify({ files: { "library.json": { sha256: window.__webSha || "s0" } } }) };
+      const n = url.split("/").pop(); posts.push(n);
+      if (n !== "library.json") return { status: 200, body: JSON.stringify({ text: body, sha256: "h-" + n }) };
+      const d = JSON.parse(body); d.items["web:1"] = { id: "web:1", type: "movie", title: "Added On The Website", year: 2020, status: "watchlist", watches: [], eps: {}, tags: [] };
+      window.__webSha = "s1"; return { status: 200, body: JSON.stringify({ text: JSON.stringify(d), sha256: "s1" }) };
+    };
+    __app.db.set("web_sync_url", "https://saga.test"); __app.db.set("web_sync_auto", "0");
+    const m1 = await __app.syncWithWebServer(false);
+    const first = posts.slice(); posts.length = 0;
+    const m2 = await __app.syncWithWebServer(false);
+    return { m1, m2, first, second: posts.slice(), has: __app.lib.all().some(x => x.title === "Added On The Website") };
+  });
+  ok(ws.has && ws.first.includes("library.json") && /changes from the website in library/.test(ws.m1), "website sync: a film added on the website arrives: " + JSON.stringify(ws));
+  ok(ws.m2 === "nothing to do" && !ws.second.length, "website sync: nothing sent when nothing changed: " + JSON.stringify(ws));
+  // ---- 0.5.9: stats everywhere, Doctor Who overview, and the layout at three screen widths
+  const st = await A(() => {
+    const out = {};
+    __app.go("watch"); __app.ui.tab = "stats"; __app.render(); out.watch = document.querySelector("#view").textContent;
+    __app.ui.tab = "library"; __app.render(); out.strip = !!document.querySelector("#view .sstrip");
+    __app.go("games"); __app.render(); document.querySelector('[data-action="gview"][data-v="stats"]').click(); out.games = document.querySelector("#view").textContent;
+    __app.go("books"); __app.render(); const bv = document.querySelector('[data-action="bview"][data-v="stats"]'); if (bv) bv.click(); out.books = document.querySelector("#view").textContent;
+    const T = Kit.mods.timeline; out.dwSection = /Next up|All ★/.test(T.render()); T.act("tlg", { dataset: { v: "-1" } }); out.dwOverview = T.render().replace(/<[^>]+>/g, " ");
+    const x = T.statsOf([{ it: { k: "a" }, w: { type: "tv", title: "A", me: { done: true, rating: 8 } } }, { it: { k: "b" }, w: { type: "audio", title: "B", me: { done: true, rating: 6 } } }, { it: { k: "c" }, w: { type: "audio", title: "C", me: {} } }]);
+    out.calc = [x.n, x.d, x.rated, (x.sum / x.rated).toFixed(1), x.types.audio.n, x.types.audio.d, x.types.audio.sum / x.types.audio.rated, x.best.t, x.worst.t].join("|");
+    T.act("tlg", { dataset: { v: "0" } });
+    return out;
+  });
+  ok(/Your library/.test(st.watch) && /Your ratings, 1–10/.test(st.watch) && st.strip, "Watch: stats and the strip on Library");
+  ok(/Backlog cleared/.test(st.games) && /By platform/.test(st.games), "Games: Stats view");
+  ok(/Books|Manga/.test(st.books) && /average/.test(st.books), "Books: per-format stats");
+  ok(st.calc === "3|2|2|7.0|2|1|6|A|B", "Doctor Who: section stats per type: " + st.calc);
+  ok(st.dwSection && /canon stories/.test(st.dwOverview) && /Groups/.test(st.dwOverview), "Doctor Who: section header and Overview");
+  for (const [w, h] of [[390, 844], [820, 1100], [1280, 860]]) {
+    await pg.setViewportSize({ width: w, height: h });
+    await A(() => { __app.go("home"); __app.render(); });
+    await pg.screenshot({ path: `${OUT}/w${w}-home.png` });
+    await A(() => { __app.go("games"); __app.render(); });
+    await pg.screenshot({ path: `${OUT}/w${w}-games.png` });
+    const over = await A(() => document.documentElement.scrollWidth - window.innerWidth);
+    ok(over <= 2, `no sideways scrolling at ${w}px (${over})`);
+  }
+  await pg.setViewportSize({ width: 390, height: 844 });
   console.log("SAGA 5 UI TESTS PASSED");
   await browser.close(); srv.close();
 })().catch(e => { console.error(e); process.exit(1); });

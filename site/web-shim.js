@@ -4,14 +4,16 @@
    (a browser can't call Trakt, TMDB or IMDb directly). Loaded before everything else by the server. */
 (function () {
   "use strict";
-  var files = {}, queue = {}, unsent = 0, seq = 0, results = {}, bodies = {};
+  var files = {}, shas = {}, queue = {}, unsent = 0, seq = 0, results = {}, bodies = {}, reloadWanted = false;
+  var TAB = Math.random().toString(36).slice(2);
   var api = function (p) { return "api/" + p; };
   // ---- every file, once, before the app starts (one request)
   try {
     var x = new XMLHttpRequest();
     x.open("GET", api("all"), false);
     x.send();
-    if (x.status === 200) files = JSON.parse(x.responseText) || {};
+    if (x.status === 200) { files = JSON.parse(x.responseText) || {}; try { shas = JSON.parse(x.getResponseHeader("X-Sha") || "{}") || {}; } catch (e) { shas = {}; } }
+    else if (x.status === 401) { location.href = "login"; return; }
     else window.__sagaServerError = "The Saga server answered " + x.status;
   } catch (e) { window.__sagaServerError = "Can't reach the Saga server: " + e.message; }
   var stampOf = function (t) { t = t || ""; return t.length + ":" + t.slice(-16); };
@@ -19,15 +21,31 @@
     unsent++;
     var prev = queue[name] || Promise.resolve();
     var p = prev.then(function () {
-      return fetch(api("file/" + encodeURIComponent(name)), { method: method, body: text, headers: { "Content-Type": "text/plain; charset=utf-8" } })
-        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); })
+      var h = { "Content-Type": "text/plain; charset=utf-8", "X-Tab": TAB };
+      if (method === "PUT" && shas[name]) h["X-Base-Sha"] = shas[name];
+      return fetch(api("file/" + encodeURIComponent(name)), { method: method, body: text, headers: h })
+        .then(function (r) {
+          if (r.status === 401) { location.href = "login"; throw new Error("signed out"); }
+          if (r.status === 409) { delete h["X-Base-Sha"]; return fetch(api("file/" + encodeURIComponent(name)), { method: "PUT", body: text, headers: h }).then(function (r2) { return r2.json(); }).then(function (j) { if (j && j.sha256) shas[name] = j.sha256; }); } // the server lost track: this page's version goes in
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json().then(function (j) {
+            if (j && j.sha256) shas[name] = j.sha256;
+            // changes from the phone were folded in on the server: show them
+            if (j && j.merged) { files[name] = j.text; reloadWanted = true; }
+          }, function () {});
+        })
         .catch(function (e) { console.error("Saga: couldn't save " + name, e); window.__sagaSaveError = name + ": " + e.message; });
-    }).then(function () { unsent--; });
+    }).then(function () { unsent--; if (unsent === 0 && reloadWanted) location.reload(); });
     queue[name] = p;
     return p;
   }
   function save(name, text) { text = String(text == null ? "" : text); files[name] = text; send(name, "PUT", text); return true; }
   function append(name, text) { text = String(text || ""); files[name] = (files[name] || "") + text; send(name, "POST", text); return true; }
+  // the phone (or another page) changed a file on the server: reload to show it, once nothing of ours is unsaved
+  try {
+    var es = new EventSource(api("events"));
+    es.onmessage = function (ev) { try { var m = JSON.parse(ev.data); if (m.from === TAB) return; reloadWanted = true; if (unsent === 0) setTimeout(function () { if (unsent === 0) location.reload(); }, 600); } catch (e) { /* ignore */ } };
+  } catch (e) { /* no live updates */ }
   window.addEventListener("beforeunload", function (e) { if (unsent > 0) { e.preventDefault(); e.returnValue = "Still saving"; } });
   var later = function (fn) { setTimeout(fn, 0); };
   var deliver = function (fn, id, text) { results[id] = text; later(function () { if (window[fn]) window[fn](id); }); };

@@ -25,11 +25,11 @@
     const reading = lb.books.filter(b => b.status === "reading" && !B.isManga(b));
     const tabs = [["shelf", "Shelf"], ["manga", "Manga"], ["authors", "Authors"], ["series", "Series"], ["stats", "Stats"]];
     let body = "";
-    if (ui.view === "shelf") body = renderShelf(false);
-    else if (ui.view === "manga") body = renderShelf(true);
+    if (ui.view === "shelf") body = strip() + renderShelf(false);
+    else if (ui.view === "manga") body = strip() + renderShelf(true);
     else if (ui.view === "authors") body = renderAuthors();
     else if (ui.view === "series") body = renderSeries();
-    else body = renderStats();
+    else body = renderStats() + formatCards();
     return `${reading.length && ui.view === "shelf" && ui.f === "all" && !ui.q ? `<section>${K.head("Reading now", "", reading.length)}${K.rail(reading.map(tileOf))}</section>` : ""}
       <div class="subnav">${tabs.map(([k, l]) => `<button data-action="bview" data-v="${k}" ${ui.view === k ? 'aria-current="page"' : ""}>${l}</button>`).join("")}</div>${body}`;
   }
@@ -61,6 +61,19 @@
     const list = B.seriesList(lib());
     if (!list.length) return `<p class="muted">No series yet. Series are picked up from titles like “(Mistborn, #2)”, or set one on any book: open it › Edit details.</p>`;
     return list.map(s => `<section>${K.head(s.name, "", `${s.read}/${s.total}`)}${K.rail(s.books.map(tileOf).concat(s.missing.map(m => `<div class="tile">${K.poster({ title: m.title || `${s.name} #${m.n}`, kind: "book", badge: `#${m.n} missing`, attrs: `data-action="bfindq" data-q="${esc(m.title || s.name + " " + m.n)}"` })}<div class="cap">${esc(m.title || "Not in your library")}</div></div>`)))}</section>`).join("");
+  }
+  // a line of the main numbers (0.5.9)
+  function strip() {
+    const f = B.formatStats(lib()), a = f.all;
+    return `<div class="sstrip"><div><b>${a.read}</b><span>read</span></div><div><b>${a.reading}</b><span>reading</span></div><div><b>${a.done}%</b><span>done</span></div>
+      ${a.pages ? `<div><b>${a.pages.toLocaleString()}</b><span>pages</span></div>` : ""}${a.chapters ? `<div><b>${a.chapters.toLocaleString()}</b><span>chapters</span></div>` : ""}<div><b>${a.avg != null ? "★ " + a.avg : "–"}</b><span>average</span></div></div>`;
+  }
+  function formatCards() {
+    const f = B.formatStats(lib());
+    return `<div class="statgrid" style="margin-top:20px">${Object.entries(f).map(([k, x]) => `<section class="card" style="padding:14px"><div class="kicker">${esc(x.label)}</div>
+      <div class="sstrip" style="flex-wrap:wrap">${[["read", x.read], ["reading", x.reading], ["paused", x.paused], ["want", x.want], ["DNF", x.dnf], ["done", x.done + "%"]].map(([l, n]) => `<div><b>${n}</b><span>${l}</span></div>`).join("")}</div>
+      <p class="small">${x.pages.toLocaleString()} pages${x.chapters ? ` · ${x.chapters.toLocaleString()} chapters` : ""}${x.volumes ? ` · ${x.volumes} volumes` : ""} · ${x.rated} rated, average <b>★ ${x.avg != null ? x.avg : "–"}</b> · ${x.readYear} this year</p>
+      ${x.rated >= 3 ? `<div class="hist">${x.hist.map(n => `<i style="height:${Math.round((100 * n) / Math.max(1, ...x.hist))}%" title="${n}"></i>`).join("")}</div><div class="histl">${x.hist.map((_, i) => `<span>${i + 1}</span>`).join("")}</div>` : ""}</section>`).join("")}</div>`;
   }
   function renderStats() {
     const lb = lib(), s = B.stats(lb), max = Math.max(1, ...s.months);

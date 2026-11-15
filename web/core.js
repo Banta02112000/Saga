@@ -605,6 +605,12 @@
 
     // Re-read the saved file (the background job may have updated it while the app was paused).
     // Returns true when the file had changed and was re-read. Unsaved changes are written first.
+    // 0.5.9: replaces everything in memory with d (a merged file from the website), keeping the look-up cache
+    loadData(d) {
+      const sec = this._secLoad ? this._secLoad() : null; if (sec) this._sec = sec;
+      const keep = this.tmdbCache; this._gen++; this.reset(); this.fromJSON(d);
+      for (const [k, v] of keep) if (!this.tmdbCache.has(k)) this.tmdbCache.set(k, v);
+    }
     reload() {
       if (!this.persist) return false;
       if (this._timer) this.flush(true);

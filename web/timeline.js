@@ -42,10 +42,84 @@
     return withHidden ? out : out.filter(it => !((load().edits || {})[it.k] || {}).hidden);
   }
   function tabStats(tab, g) { let n = 0, d = 0; for (const it of g ? itemsOf(g, tab) : tab.items.filter(x => !x.ref)) { n++; if ((load().works[it.k] || {}).done) d++; } return { n, d }; }
+  // ---- 0.5.9: statistics. A set of entries → done/total, ratings overall and per media type (each with its colour).
+  function statsOf(entries) {
+    const out = { n: 0, d: 0, rated: 0, sum: 0, types: {}, hist: Array(10).fill(0), best: null, worst: null };
+    for (const { it, w } of entries) {
+      const t = out.types[w.type] = out.types[w.type] || { n: 0, d: 0, rated: 0, sum: 0 };
+      out.n++; t.n++;
+      if (w.me.done) { out.d++; t.d++; }
+      const r = +w.me.rating;
+      if (r >= 1 && r <= 10) {
+        out.rated++; out.sum += r; t.rated++; t.sum += r; out.hist[Math.round(r) - 1]++;
+        if (!out.best || r > out.best.r) out.best = { k: it.k, t: w.title, r };
+        if (!out.worst || r < out.worst.r) out.worst = { k: it.k, t: w.title, r };
+      }
+    }
+    return out;
+  }
+  const avg = x => (x.rated ? (x.sum / x.rated).toFixed(1) : "–");
+  const pct = x => (x.n ? Math.round((100 * x.d) / x.n) : 0);
+  const entriesOf = (g, t) => itemsOf(g, t).map(it => ({ it, w: workOf(it) }));
+  // every canon story once (a story listed in several sections counts once), skipped groups left out
+  function canonEntries(onlyGroup) {
+    const seen = new Set(), out = [];
+    for (const g of D().groups) {
+      if (onlyGroup ? g !== onlyGroup : /skipped|not canon/i.test(g.name)) continue;
+      for (const t of g.tabs) for (const e of entriesOf(g, t)) if (!seen.has(e.it.k)) { seen.add(e.it.k); out.push(e); }
+    }
+    return out;
+  }
+  // chips: overall average, then one per media type present (tap one to show only that type in the section)
+  function avgChips(x, filterable) {
+    const chips = [`<span class="tchip"><b>All</b> ★ ${avg(x)} <span class="muted">(${x.rated} rated)</span></span>`];
+    for (const ty of D().types || []) {
+      const t = x.types[ty.id];
+      if (!t) continue;
+      const attrs = filterable ? `data-action="tltypechip" data-v="${esc(ty.id)}" aria-pressed="${ui.type === ty.id}"` : "";
+      chips.push(`<${filterable ? "button" : "span"} class="tchip" style="--tc:${esc(ty.color)}" ${attrs}><i></i>${esc(ty.label)} ★ ${avg(t)} <span class="muted">(${t.d}/${t.n})</span></${filterable ? "button" : "span"}>`);
+    }
+    return `<div class="chips" style="margin:8px 0">${chips.join("")}</div>`;
+  }
+  const histHtml = x => `<div class="hist">${x.hist.map(n => `<i style="height:${Math.round((100 * n) / Math.max(1, ...x.hist))}%" title="${n}"></i>`).join("")}</div><div class="histl">${x.hist.map((_, i) => `<span>${i + 1}</span>`).join("")}</div>`;
+  function sectionHero(g, tab) {
+    const x = statsOf(entriesOf(g, tab));
+    const nxt = entriesOf(g, tab).find(e => !e.w.me.done);
+    return `<div class="card" style="padding:14px;margin-bottom:12px">
+      <div class="row" style="gap:10px"><b class="grow" style="font:800 20px/1.1 var(--display)">${esc(tab.name)}</b><span class="muted">${x.d}/${x.n} · ${pct(x)}%</span></div>
+      <div class="minibar" style="margin:8px 0"><i style="width:${pct(x)}%"></i></div>
+      ${avgChips(x, true)}
+      <div class="small muted">${x.rated} rated${tab.avgLine ? ` · reference: ${esc(tab.avgLine)}` : ""}${x.best ? ` · best: ${esc(x.best.t)} (★ ${x.best.r})` : ""}${x.worst && x.worst.k !== (x.best || {}).k ? ` · lowest: ${esc(x.worst.t)} (★ ${x.worst.r})` : ""}</div>
+      ${x.rated >= 3 ? `<details style="margin-top:8px"><summary class="small">Rating spread</summary>${histHtml(x)}</details>` : ""}
+      ${nxt ? `<button class="btn small" style="margin-top:10px" data-action="tlnext" data-k="${esc(nxt.it.k)}">Next up: ${esc(nxt.w.title)}</button>` : ""}</div>`;
+  }
+  function overview() {
+    const d = D(), all = canonEntries(null), x = statsOf(all);
+    const going = [];
+    for (const g of d.groups) { if (/skipped|not canon/i.test(g.name)) continue; d.groups.indexOf(g);
+      g.tabs.forEach((t, ti) => { const e = entriesOf(g, t), y = statsOf(e); if (y.d > 0 && y.d < y.n) going.push({ g, gi: d.groups.indexOf(g), ti, t, y, nx: e.find(z => !z.w.me.done) }); }); }
+    going.sort((a, b) => pct(b.y) - pct(a.y));
+    const top = all.filter(e => +e.w.me.rating >= 1).sort((a, b) => b.w.me.rating - a.w.me.rating).slice(0, 15);
+    return `<section><div class="kicker">Doctor Who · overview</div>
+      <div class="card" style="padding:16px;margin:10px 0">
+        <div class="row"><span class="bigstat" style="font-size:52px">${pct(x)}%</span><div class="grow" style="margin-left:14px"><b>${x.d.toLocaleString()} of ${x.n.toLocaleString()} canon stories</b><div class="muted small">${x.rated.toLocaleString()} rated · average ★ ${avg(x)}</div></div></div>
+        <div class="minibar" style="margin:10px 0"><i style="width:${pct(x)}%"></i></div>
+        ${avgChips(x, false)}
+        ${x.rated >= 3 ? histHtml(x) : ""}
+      </div>
+      ${going.length ? `<h3>In progress</h3><div class="listcard">${going.slice(0, 12).map(o => `<div class="item" data-action="tlgo" data-g="${o.gi}" data-t="${o.ti}"><div class="grow" style="min-width:0"><b>${esc(o.g.name)} › ${esc(o.t.name)}</b><div class="small muted ell">${o.y.d}/${o.y.n} · ★ ${avg(o.y)}${o.nx ? ` · next: ${esc(o.nx.w.title)}` : ""}</div><div class="minibar" style="margin-top:6px"><i style="width:${pct(o.y)}%"></i></div></div></div>`).join("")}</div>` : ""}
+      <h3>Groups</h3><div class="ustats">${d.groups.map((g, gi) => { const y = statsOf(canonEntries(g));
+        return `<div class="card" style="padding:14px;margin-bottom:10px"><div class="row"><b class="grow">${esc(g.name)}</b><span class="muted">${y.d}/${y.n} · ${pct(y)}% · ★ ${avg(y)}</span></div>
+          <div class="minibar" style="margin:8px 0"><i style="width:${pct(y)}%"></i></div>${avgChips(y, false)}
+          <details><summary class="small">Sections</summary>${g.tabs.map((t, ti) => { const z = statsOf(entriesOf(g, t)); return `<div class="item" data-action="tlgo" data-g="${gi}" data-t="${ti}"><span class="grow">${esc(t.name)}</span><span class="small muted">${z.d}/${z.n} · ★ ${avg(z)}</span></div>`; }).join("")}</details></div>`; }).join("")}</div>
+      ${top.length ? `<details><summary><b>Top rated</b></summary><div class="listcard">${top.map(e => `<div class="item" data-action="tlopen" data-k="${esc(e.it.k)}"><b class="grow ell">${esc(e.w.title)}</b><span class="small" style="color:${esc(typeOf(e.w.type).color)}">${esc(typeOf(e.w.type).label)}</span><span class="small">★ ${e.w.me.rating}</span></div>`).join("")}</div></details>` : ""}
+    </section>`;
+  }
   const where = k => { for (const g of D().groups) for (const t of g.tabs) if (itemsOf(g, t, true).some(x => x.k === k)) return { g, t }; return null; };
   function render() {
     const d = D();
     if (!d.groups.length) return `<p class="muted">The timeline data isn't in this build.</p>`;
+    if (ui.g === -1) return `<div class="chips" style="margin:12px 0"><button class="chip" data-action="tlg" data-v="-1" aria-pressed="true">Overview</button>${d.groups.map((gg, i) => `<button class="chip" data-action="tlg" data-v="${i}">${esc(gg.name)}</button>`).join("")}</div>` + overview();
     const g = d.groups[ui.g] || d.groups[0], tab = g.tabs[ui.t] || g.tabs[0];
     const q = ui.q.toLowerCase();
     let all = 0, done = 0;
@@ -55,8 +129,9 @@
       (ui.state === "all" || (ui.state === "done") === !!w.me.done) && (!q || w.title.toLowerCase().includes(q)));
     const s = tabStats(tab, g);
     return `<section><div class="kicker">${done.toLocaleString()} of ${all.toLocaleString()} stories</div>
-        <div class="chips" style="margin:12px 0">${d.groups.map((gg, i) => `<button class="chip" data-action="tlg" data-v="${i}" aria-pressed="${i === ui.g}">${esc(gg.name)}</button>`).join("")}</div>
+        <div class="chips" style="margin:12px 0"><button class="chip" data-action="tlg" data-v="-1">Overview</button>${d.groups.map((gg, i) => `<button class="chip" data-action="tlg" data-v="${i}" aria-pressed="${i === ui.g}">${esc(gg.name)}</button>`).join("")}</div>
         <div class="subnav">${g.tabs.map((t, i) => { const x = tabStats(t, g); return `<button data-action="tlt" data-v="${i}" ${i === ui.t ? 'aria-current="page"' : ""}>${esc(t.name)}${x.n && x.d === x.n ? " ✓" : ""}</button>`; }).join("")}</div>
+        ${sectionHero(g, tab)}
         <div class="toolbar"><input type="search" data-input="tlq" data-tlq="1" value="${esc(ui.q)}" placeholder="Find a story" autocomplete="off">
           <select data-tltype="1" aria-label="Type"><option value="all">All types</option>${(d.types || []).map(t => `<option value="${t.id}" ${ui.type === t.id ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select></div>
         <div class="chips" style="margin-bottom:12px">${[["all", "All"], ["todo", "To do"], ["done", "Done"]].map(([k, l]) => `<button class="chip" data-action="tlstate" data-v="${k}" aria-pressed="${ui.state === k}">${l}</button>`).join("")}<span class="small muted" style="align-self:center">${s.d}/${s.n} in ${esc(tab.name)}</span></div>
@@ -101,6 +176,9 @@
     switch (a) {
       case "tlg": ui.g = +el.dataset.v; ui.t = 0; Saga.render(); return true;
       case "tlt": ui.t = +el.dataset.v; Saga.render(); window.scrollTo(0, 0); return true;
+      case "tlgo": ui.g = +el.dataset.g; ui.t = +el.dataset.t; Saga.render(); window.scrollTo(0, 0); return true;
+      case "tlnext": openStory(el.dataset.k); return true;
+      case "tltypechip": ui.type = ui.type === el.dataset.v ? "all" : el.dataset.v; Saga.render(); return true;
       case "tlstate": ui.state = el.dataset.v === "todo" ? "todo" : el.dataset.v; Saga.render(); return true;
       case "tlopen": openStory(el.dataset.k); return true;
       case "tldone": { const m = s.works[ui.open] = s.works[ui.open] || {}; m.done = !m.done; if (m.done) m.at = new Date().toISOString().slice(0, 10); save(); Saga.close(); Saga.render(); return true; }
@@ -143,5 +221,5 @@
   }
   function recent(limit = 10) { return Object.entries(load().works).filter(([, v]) => v.done && v.at).map(([k, v]) => ({ k, t: workOf({ k }).title, date: v.at })).sort((a, b) => b.date.localeCompare(a.date)).slice(0, limit); }
   const statesFor = () => load();
-  K.mods.timeline = { title: "Doctor Who", render, act, change, input, migrate, next, recent, openStory, state: statesFor, reset: () => { st = null; } };
+  K.mods.timeline = { title: "Doctor Who", statsOf, canonEntries, render, act, change, input, migrate, next, recent, openStory, state: statesFor, reset: () => { st = null; } };
 })();

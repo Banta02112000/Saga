@@ -6,7 +6,7 @@
   const DAY = 864e5;
   const GB = "https://www.googleapis.com/books/v1/volumes";
   const OL = "https://openlibrary.org";
-  const UA = { "User-Agent": "Saga/0.5.9 (+https://github.com/Banta02112000/Saga)", Accept: "application/json" };
+  const UA = { "User-Agent": "Saga/0.6.0 (+https://github.com/Banta02112000/Saga)", Accept: "application/json" };
   const STATUSES = ["reading", "paused", "want", "read", "dnf"];
   const STATUS_LABEL = { reading: "Reading", paused: "Paused", want: "Want to read", read: "Read", dnf: "Did not finish" };
   const FORMATS = ["Paper", "Ebook", "Audio"];
@@ -327,6 +327,25 @@
       spent: lib.books.reduce((n, b) => n + (+b.pricePaid || 0), 0) };
   }
   const avg = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+  // 0.5.9: books, manga and light novels apart and together (light novel: marked so, or a light-novel category or format)
+  const isLN = b => /light ?novel/i.test([b.format, ...(b.categories || [])].join(" ")) || !!b.ln;
+  const formatOf = b => (isLN(b) ? "ln" : isManga(b) ? "manga" : "book");
+  function formatStats(lib, year = new Date().getFullYear()) {
+    const out = {};
+    for (const [k, label] of [["book", "Books"], ["manga", "Manga"], ["ln", "Light novels"], ["all", "All"]]) {
+      const bs = lib.books.filter(b => k === "all" || formatOf(b) === k);
+      if (!bs.length && k !== "all") continue;
+      const read = bs.filter(b => b.status === "read"), rated = bs.filter(b => b.rating > 0);
+      const hist = Array(10).fill(0); for (const b of rated) hist[Math.min(10, Math.max(1, Math.round(b.rating))) - 1]++;
+      out[k] = { label, n: bs.length, read: read.length, reading: bs.filter(b => b.status === "reading").length, paused: bs.filter(b => b.status === "paused").length,
+        want: bs.filter(b => b.status === "want").length, dnf: bs.filter(b => b.status === "dnf" || b.status === "dropped").length,
+        done: bs.length ? Math.round((100 * read.length) / bs.length) : 0, pages: read.reduce((a, b) => a + (b.pages || 0), 0) + bs.filter(b => b.status === "reading").reduce((a, b) => a + (b.currentPage || 0), 0),
+        chapters: bs.reduce((a, b) => a + (b.chapter || 0), 0), volumes: bs.reduce((a, b) => a + (b.volume || 0), 0),
+        avg: rated.length ? Math.round(avg(rated.map(b => b.rating)) * 10) / 10 : null, rated: rated.length, hist,
+        readYear: read.filter(b => b.finished && new Date(b.finished).getFullYear() === year).length };
+    }
+    return out;
+  }
   function logPagesIn(b, year) {
     let pages = 0, prev = 0;
     for (const e of b.log || []) { if (new Date(e.t).getFullYear() === year) pages += Math.max(0, e.p - prev); prev = e.p; }
@@ -676,7 +695,7 @@ IN MY LIBRARY: ${lib.books.map(b => b.title).slice(0, 400).join("; ")}`;
     return null;
   }
 
-  const API = { isManga, fromJikanManga, searchManga, setChapter, STATUSES, STATUS_LABEL, FORMATS, norm, isbnDigits, validIsbn13, validIsbn10, isbn10to13, bookIsbn, parseSeries, blankBook, Library, setStatus, setPage, percent,
+  const API = { isManga, isLN, formatOf, formatStats, fromJikanManga, searchManga, setChapter, STATUSES, STATUS_LABEL, FORMATS, norm, isbnDigits, validIsbn13, validIsbn10, isbn10to13, bookIsbn, parseSeries, blankBook, Library, setStatus, setPage, percent,
     fromGoogle, fromOpenLibrary, priceFrom, search, ebookPrice, logPrice, priceCheck, storeLinks, seriesList, stats, readImport, applyImport, parseCsv,
     genericBooks, authorWorks, readsOf, addRead, removeRead, authorsOf, seriesPrompt, parseSeriesAnswer, nextPrompt, newsPrompt, parseJson, suggestionBooks, indexFor, decodeLine, eur, hashId, isoDay };
   if (typeof module !== "undefined" && module.exports) module.exports = API;

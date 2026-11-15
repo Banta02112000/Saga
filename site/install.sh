@@ -8,6 +8,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 APP="$(cd "$HERE/.." && pwd)"
 DATA="${SAGA_DATA:-/opt/saga/data}"
 PORT="${SAGA_PORT:-8787}"
+PUBLIC_PORT="${SAGA_PUBLIC_PORT:-8788}"
 NODE="$(command -v node || true)"
 [ -n "$NODE" ] || { echo "Node.js isn't installed (see README)"; exit 1; }
 MAJOR="$("$NODE" -p 'process.versions.node.split(".")[0]')"
@@ -27,6 +28,7 @@ Environment=SAGA_DATA=$DATA
 Environment=SAGA_WEB=$APP/web
 Environment=SAGA_PORT=$PORT
 Environment=SAGA_HOST=127.0.0.1
+Environment=SAGA_PUBLIC_PORT=$PUBLIC_PORT
 ExecStart=$NODE $HERE/server.js
 Restart=always
 RestartSec=3
@@ -36,6 +38,13 @@ NoNewPrivileges=true
 [Install]
 WantedBy=multi-user.target
 UNIT
+# a password for the website and a sync key for the phone app (kept in $DATA/auth.json, readable only by you)
+if [ ! -f "$DATA/auth.json" ]; then
+  PW="$("$NODE" -e 'console.log(require("crypto").randomBytes(9).toString("base64url"))')"
+  SAGA_DATA="$DATA" "$NODE" "$HERE/server.js" --set-password "$PW" > /tmp/saga-key.txt
+  echo "Website password: $PW   (change it any time: SAGA_DATA=$DATA node $HERE/server.js --set-password)"
+  cat /tmp/saga-key.txt; rm -f /tmp/saga-key.txt
+fi
 sudo systemctl daemon-reload
 sudo systemctl enable --now saga.service
 sleep 2
@@ -43,6 +52,7 @@ if curl -fsS "http://127.0.0.1:$PORT/api/health" > /dev/null; then
   echo "Saga is running on this Pi (port $PORT), files in $DATA."
   echo "Next, put it on your tailnet with HTTPS:"
   echo "  sudo tailscale serve --bg --https=8443 http://127.0.0.1:$PORT"
+  echo "From anywhere without Tailscale (optional): a Cloudflare Tunnel to http://127.0.0.1:$PUBLIC_PORT (see README)."
   echo "then open https://$(tailscale status --json 2>/dev/null | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).Self.DNSName.replace(/\.$/,""))}catch(e){console.log("<pi-name>.<tailnet>.ts.net")}})'):8443"
 else
   echo "The service didn't start. See: journalctl -u saga -n 50"

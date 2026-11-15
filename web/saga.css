@@ -175,8 +175,9 @@ pre.log { white-space: pre-wrap; word-break: break-word; font: 12px/1.45 ui-mono
 .tl .tli.on::before { background: var(--tc, var(--ok)); }
 .tl .tli .tc { font: 800 10px/1 var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--tc, var(--muted)); }
 
-/* ---------- unfolded: navigation rail on the left ---------- */
-@media (min-width: 840px) {
+/* ---------- unfolded: navigation rail on the left (0.5.9: from 680 px, the Fold's inner screen; between 720 and 840 px
+   an older rule and this one used to mix and left a single floating button) ---------- */
+@media (min-width: 680px) {
   nav#tabs { left: calc(10px + env(safe-area-inset-left)); right: auto; top: 10px; bottom: 10px; width: var(--rail-w); height: auto; flex-direction: column; justify-content: flex-start; padding: 12px 8px; gap: 6px; max-width: none; margin: 0; border-radius: 26px; }
   nav#tabs button { flex: none; height: 64px; }
   .topbar, main#view, .jobbar { margin-left: calc(var(--rail-w) + 20px); }
@@ -252,3 +253,47 @@ html[data-text="large"] { font-size: 112%; } html[data-text="large"] body { font
 /* text over artwork stays light on every theme */
 .hero2, .poster .gen, .poster .badge:not(.acc), .sheethero, .cover-hero { --ink: #F5F1E8; --muted: #D8D2E2; color: #F5F1E8; }
 html[data-theme="light"] .hero2 .btn:not(.primary) { background: rgba(255,255,255,.92); color: #1B1720; }
+
+/* ---------- 0.5.9: polish and every screen size ---------- */
+/* status chips stay on one line and scroll sideways instead of stacking */
+.chips { flex-wrap: nowrap; }
+.chips > * { flex: none; }
+/* the section switcher and the top bar float over the content, slightly see-through */
+.subnav { position: sticky; top: 0; z-index: 6; margin-left: calc(-1 * var(--gutter)); margin-right: calc(-1 * var(--gutter)); padding: 8px var(--gutter);
+  background: color-mix(in srgb, var(--night) 82%, transparent); -webkit-backdrop-filter: blur(16px) saturate(140%); backdrop-filter: blur(16px) saturate(140%); }
+.card, .listcard, .nextbox { border: 1px solid color-mix(in srgb, var(--ink) 8%, transparent); border-radius: 14px; }
+.item { transition: background-color .15s ease; }
+@media (hover: hover) { .item[data-action]:hover, .item [data-action]:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); } }
+.poster img { transition: opacity .25s ease; }
+.pbadge { -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+/* unfolded inner screen and tablets */
+@media (min-width: 680px) and (max-width: 1023px) {
+  main#view { max-width: 980px; }
+  .listcard:has(> .item:nth-child(6)) { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); column-gap: 14px; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: 14px; }
+}
+/* desktop and wide monitors: a navigation rail with names, wider drawers, stats in columns */
+@media (min-width: 1024px) {
+  :root { --rail-w: 200px; }
+  nav#tabs { width: 200px; padding: 18px 10px; gap: 4px; }
+  nav#tabs button { flex-direction: row; justify-content: flex-start; gap: 12px; height: 48px; padding: 0 14px; }
+  nav#tabs button span { font-size: 14px; }
+  main#view { max-width: 1440px; }
+  .scrim.bottom .sheet { width: min(600px, 44vw); }
+  .statgrid, .ustats { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+  .listcard:has(> .item:nth-child(8)) { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); column-gap: 16px; }
+}
+/* small stat strips at the top of a screen */
+.sstrip { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 0 12px; }
+.sstrip::-webkit-scrollbar { display: none; }
+.sstrip > div { flex: none; padding: 8px 12px; border-radius: 12px; background: var(--card, var(--shelf)); border: 1px solid color-mix(in srgb, var(--ink) 8%, transparent); }
+.sstrip b { display: block; font: 800 18px/1.1 var(--display); }
+.sstrip span { font-size: 11.5px; color: var(--muted); }
+.hist { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; align-items: end; height: 90px; }
+.hist i { display: block; background: var(--accent); border-radius: 4px 4px 2px 2px; min-height: 2px; }
+.histl { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; font-size: 10px; color: var(--faint); text-align: center; }
+.tchip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); font-size: 12.5px; white-space: nowrap; background: transparent; color: inherit; }
+.tchip i { width: 9px; height: 9px; border-radius: 50%; background: var(--tc, var(--muted)); }
+.tchip[aria-pressed="true"] { border-color: var(--tc, var(--ink)); background: color-mix(in srgb, var(--tc, var(--ink)) 14%, transparent); }
+.minibar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.minibar > i { display: block; height: 100%; background: var(--accent); }

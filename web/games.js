@@ -37,6 +37,30 @@
     return g;
   }
   const playedMins = g => (g.sessions || []).reduce((a, x) => a + (x.mins || 0), 0);
+  // 0.5.9: everything the Stats view shows, from the games list
+  function stats(lib, year = new Date().getFullYear()) {
+    const gs = lib.visible(), by = st => gs.filter(g => g.status === st).length;
+    const done = by("done"), playing = by("playing"), paused = by("paused"), backlog = by("backlog");
+    const rated = gs.filter(g => g.rating > 0), avgOf = a => (a.length ? Math.round((a.reduce((x, g) => x + g.rating, 0) / a.length) * 10) / 10 : null);
+    const hist = Array(10).fill(0); for (const g of rated) hist[Math.min(10, Math.max(1, Math.round(g.rating))) - 1]++;
+    const group = key => { const m = new Map(); for (const g of gs) { const k = key(g); if (!k) continue; const o = m.get(k) || { k, n: 0, done: 0, rated: [], hours: 0 }; o.n++; if (g.status === "done") o.done++; if (g.rating > 0) o.rated.push(g); m.set(k, o); } return [...m.values()].map(o => Object.assign(o, { avg: avgOf(o.rated) })); };
+    const sessMins = gs.reduce((a, g) => a + playedMins(g), 0), plays = gs.reduce((a, g) => a + (g.plays || []).length, 0);
+    const beaten = gs.filter(g => g.status === "done" && g.hours);
+    const months = Array(12).fill(0);
+    for (const g of gs) for (const x of g.sessions || []) if (String(x.d).startsWith(String(year))) months[+String(x.d).slice(5, 7) - 1] += x.mins || 0;
+    const ownedBacklog = gs.filter(g => g.owned && !NA(g.owned) && g.status === "backlog");
+    const vsImdb = rated.filter(g => g.imdbR).map(g => g.rating - g.imdbR);
+    return { total: gs.length, done, playing, paused, backlog, wishlist: by("wishlist"), dropped: by("dropped"),
+      backlogDone: done + playing + paused + backlog ? Math.round((100 * done) / (done + playing + paused + backlog)) : 0,
+      ownedUnplayed: ownedBacklog.length, backlogHours: Math.round(ownedBacklog.reduce((a, g) => a + (g.hours || 0), 0)),
+      playedHours: Math.round(sessMins / 60), plays, avgBeat: beaten.length ? Math.round(beaten.reduce((a, g) => a + g.hours, 0) / beaten.length) : null,
+      avg: avgOf(rated), rated: rated.length, hist, months,
+      platforms: group(g => g.platform).sort((a, b) => b.n - a.n), franchises: group(g => g.franchise || g.multiverse).filter(o => o.n >= 2).sort((a, b) => b.done / b.n - a.done / a.n || b.n - a.n),
+      decades: group(g => (/^\d{4}/.test(g.date || "") ? Math.floor(+g.date.slice(0, 4) / 10) * 10 + "s" : "")).sort((a, b) => a.k.localeCompare(b.k)),
+      vsImdb: vsImdb.length ? Math.round((vsImdb.reduce((a, b) => a + b, 0) / vsImdb.length) * 10) / 10 : null,
+      sale: gs.filter(g => g.status === "wishlist" && g.price && g.price.cut > 0).length,
+      wishValue: Math.round(gs.filter(g => g.status === "wishlist" && g.price && g.price.now).reduce((a, g) => a + g.price.now, 0)) };
+  }
 
   class Games {
     constructor(persist) {
@@ -333,7 +357,7 @@
       games: lib.visible().map(g => ({ id: g.id, t: g.title, f: g.franchise, m: g.multiverse, done: g.status === "done", date: g.date })) };
   }
 
-  const API = { STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, franchiseGuess, fromOld, hasOld, COVER, HEADER,
+  const API = { STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
     steamSearch, linkSteam, steamPrices, storePrices, steamDates, importRows, fromImdb, storeLinks, indexFor, yearOf, NA };
   if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
   root.GamesCore = API;

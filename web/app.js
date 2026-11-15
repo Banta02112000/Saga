@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.5.9";
+  const VERSION = "0.6.0";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -281,6 +281,11 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.6.0", ["Saga website ↔ phone: Settings › Accounts and sync › Saga website (address and sync key). The phone sends what changed after each sync, when you open it and a little after you change something; the server merges entry by entry (where both changed the same thing, the phone's wins) and open website pages reload by themselves.",
+      "The website can be reached without Tailscale: a password page and a sync key for the phone, a separate public entrance for a Cloudflare Tunnel or a reverse proxy (see site/README).",
+      "Stats everywhere: a strip of numbers on top of Library, Anime, Games, Books and Manga; Watch › Stats adds your library (hours, rewatches, episodes), ratings by kind with a 1–10 chart, and canon progress (closest to complete, biggest gaps); Games gets a Stats view (status, backlog cleared, playtime, ratings by platform and franchise, decades, wishlist); Books splits books, manga and light novels.",
+      "Doctor Who: each section shows its progress, the average rating overall and per type (tap a type to show only it), best and lowest, the rating spread and Next up; an Overview with every canon story, sections in progress, each group and the top rated.",
+      "Layout: on the Fold's inner screen and tablets the navigation sits on the left (between 720 and 840 px it used to break into one floating button); on wide screens the rail shows names; status chips stay on one scrolling line; the section switcher stays at the top while you scroll."]],
     ["0.5.9", ["IMDb sync without the hidden browser: lists, your ratings and your watchlist are read from IMDb's data service the way the old GameCheck app did (the cached address first, 250 titles a request), then a list's CSV export; the hidden browser only if both fail. Your sync report showed lists taking 13–23 minutes in the hidden browser: that route is now the last resort.",
       "The hidden browser itself: a page that doesn't bring its data gives up after about 20 s; other requests on the page (your lists sidebar, exports, recently viewed) no longer take over the list's page count; one page at a time, and a page the app stopped waiting for is closed at once.",
       "The screen stays on while a sync runs in the app, and the stall report no longer counts the phone sleeping (screen off) as a frozen screen.",
@@ -655,6 +660,23 @@
     const color = m => `var(--${medCls(m)})`;
     const out = [`<section class="row"><span class="grow muted small">Where IMDb and Trakt disagree, your games ledger and the specials check.</span>
       <button class="btn" data-action="tab" data-tab="compare">${icon("compare")}Compare</button></section>`];
+    // 0.5.9: your library (episode ticks, dated viewings, rewatches), ratings per medium, and canon progress per franchise
+    { const items = lib.all(), w = watchStats(items), wa = watchStats(items.filter(x => x.anime));
+      const hist = Array(10).fill(0); for (const it of items) if (it.rating > 0) hist[Math.min(10, Math.max(1, Math.round(it.rating))) - 1]++;
+      const mh = Math.max(1, ...hist);
+      const films = items.filter(x => x.type === "movie" && x.status === "watched").length, series = items.filter(x => x.type === "show");
+      const wl = items.filter(x => x.status === "watchlist").length;
+      const fr = new Map(); for (const c of status()) { if (!c.franchise || c.franchise === "Unsorted") continue; const o = fr.get(c.franchise) || { n: 0, d: 0 }; o.n++; if (c.have && c.state !== "listed") o.d++; fr.set(c.franchise, o); }
+      const frs = [...fr.entries()].map(([k, o]) => ({ k, ...o, p: o.n ? o.d / o.n : 0 }));
+      const started = frs.filter(f => f.d > 0), complete = frs.filter(f => f.n && f.d === f.n), near = started.filter(f => f.d < f.n).sort((a, b) => b.p - a.p).slice(0, 6), gaps = started.filter(f => f.d < f.n).sort((a, b) => (b.n - b.d) - (a.n - a.d)).slice(0, 6);
+      const canonAll = frs.reduce((a, f) => a + f.n, 0), canonDone = frs.reduce((a, f) => a + f.d, 0);
+      out.push(`<section><h2>Your library</h2>${watchStrip(items)}
+        <p class="small">${fmt(films)} films watched (+${fmt(w.rewatches)} rewatches) · ${fmt(series.filter(x => x.status === "watched").length)} series finished, ${fmt(series.filter(x => x.status === "watching").length)} watching · ${fmt(w.eps)} episodes ticked · ${fmt(w.hours)} h (${Math.round(w.hours / 24)} days)${wa.n ? `, of which anime ${fmt(wa.hours)} h` : ""} · watchlist: ${fmt(wl)} to go</p>
+        <div class="kicker" style="margin-top:10px">Your ratings, 1–10</div><div class="hist">${hist.map(n => `<i style="height:${Math.round((100 * n) / mh)}%" title="${n}"></i>`).join("")}</div><div class="histl">${hist.map((_, i) => `<span>${i + 1}</span>`).join("")}</div>
+        <p class="small muted">Average: films ★ ${w.avgMovie ?? "–"} (${fmt(w.nMovie)}) · series ★ ${w.avgShow ?? "–"} (${fmt(w.nShow)}) · episodes ★ ${w.avgEp ?? "–"} (${fmt(w.nEp)})${wa.avgAll != null ? ` · anime ★ ${wa.avgAll}` : ""}</p></section>`);
+      if (frs.length) out.push(`<section><h2>Canon</h2><p class="small">${canonAll ? Math.round((100 * canonDone) / canonAll) : 0}% of all canon entries · ${started.length} franchises started, ${complete.length} complete</p>
+        ${near.length ? `<div class="kicker">Closest to complete</div><div class="listcard">${near.map(f => `<div class="item" data-action="mvopen" data-mv="${esc(f.k)}"><span class="grow ell">${esc(f.k)}</span><span class="small muted">${f.d}/${f.n}</span></div>`).join("")}</div>` : ""}
+        ${gaps.length ? `<div class="kicker" style="margin-top:10px">Biggest gaps</div><div class="listcard">${gaps.map(f => `<div class="item" data-action="mvopen" data-mv="${esc(f.k)}"><span class="grow ell">${esc(f.k)}</span><span class="small muted">${f.n - f.d} missing</span></div>`).join("")}</div>` : ""}</section>`); }
     out.push(`<section><h2>Library</h2><div class="bignum"><b>${fmt(s.total)}</b><span class="muted">titles consumed</span></div>
       <div class="bars">${["Movie", "TV Series", "Special", "Video Game", "Episode"].filter(m => s.by_medium.get(m)).map(m => {
         const mx = Math.max(...s.by_medium.values());
@@ -1185,6 +1207,15 @@
         ${db.get("steam_sync_at") ? `<p class="small muted" style="margin:0">Last read ${esc(new Date(+db.get("steam_sync_at")).toLocaleString(lang() === "it" ? "it-IT" : "en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }))}</p>` : ""}
       </section>
       ${listsHtml()}
+      <section class="stack">
+        <h2>Saga website</h2>
+        <p class="small muted" style="margin:0">Your Saga website (site/ folder, on your Pi): the phone and the website keep the same library, games, books, Doctor Who and sync data. Changes on both sides are merged, entry by entry.</p>
+        ${field("web_sync_url", "Website address", { placeholder: "https://raspberrypi.your-tailnet.ts.net:8443", hint: "Through Tailscale (.ts.net) or your public address. Plain http:// works only for .ts.net addresses." })}
+        ${field("web_sync_key", "Sync key", { secret: true, hint: "Printed by  node server.js --set-password  on the server (needed for a public address; through Tailscale it works without one)." })}
+        <label class="switch"><input type="checkbox" data-setting="web_sync_auto" ${db.get("web_sync_auto", "1") === "1" ? "checked" : ""}><span>Sync with the website by itself<small class="muted" style="display:block">After each sync, when you open the app, and a little after you change something.</small></span></label>
+        <button class="btn" data-action="websync" ${db.get("web_sync_url") ? "" : "disabled"}>${icon("sync")}Sync with the website now</button>
+        ${WS.get().at ? `<p class="small muted" style="margin:0">Last: ${esc(new Date(WS.get().at).toLocaleString(lang() === "it" ? "it-IT" : "en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }))} · ${esc(WS.get().msg || "")}</p>` : ""}
+      </section>
       <section class="stack">
         <h2>More services</h2>
         <p class="small muted" style="margin:0">Synced at every sync, from your public profile (no password). Anime goes to the library, manga and light novels to Books.</p>
@@ -2038,6 +2069,28 @@
         ${have ? `<div class="sub"><span class="small" style="color:var(--ok)">In your library · ${esc(LST[have.status])}</span></div>` : ""}</div>
       ${have ? icon("chev") : `<button class="seen" data-action="libadd" data-i="${i}" data-v="watchlist" aria-label="Add ${esc(r.title)} to your watchlist">${icon("plus")}</button>`}</div>`;
   }
+  // 0.5.9: the main numbers for a set of library titles (the strip on top of Library and Anime, and Stats)
+  function watchStats(items) {
+    let mins = 0, rewatches = 0, done = 0, eps = 0;
+    const r = { movie: [], show: [], ep: [] };
+    for (const it of items) {
+      if (it.status === "watched") done++;
+      if (it.type === "movie") { const w = Math.max(it.watches.length, it.status === "watched" ? 1 : 0); mins += (it.runtime || 0) * w; rewatches += Math.max(0, it.watches.length - 1); }
+      else { const n = Object.keys(it.eps || {}).length; eps += n; mins += n * (it.runtime || it.epRuntime || 0); }
+      if (it.rating > 0) r[it.type === "show" ? "show" : "movie"].push(it.rating);
+      for (const v of Object.values(it.er || {})) if (v > 0) r.ep.push(v);
+    }
+    const A = a => (a.length ? Math.round((a.reduce((x, y) => x + y, 0) / a.length) * 10) / 10 : null);
+    const all = [...r.movie, ...r.show];
+    return { n: items.length, done, pct: items.length ? Math.round((100 * done) / items.length) : 0, hours: Math.round(mins / 60), eps, rewatches,
+      avgMovie: A(r.movie), avgShow: A(r.show), avgEp: A(r.ep), avgAll: A(all), nMovie: r.movie.length, nShow: r.show.length, nEp: r.ep.length };
+  }
+  function watchStrip(items) {
+    const s = watchStats(items);
+    return `<div class="sstrip"><div><b>${fmt(s.n)}</b><span>titles</span></div><div><b>${s.pct}%</b><span>watched</span></div>${s.hours ? `<div><b>${fmt(s.hours)} h</b><span>watched</span></div>` : ""}
+      <div><b>${s.avgAll != null ? "★ " + s.avgAll : "–"}</b><span>average</span></div>${s.avgMovie != null ? `<div><b>★ ${s.avgMovie}</b><span>films</span></div>` : ""}${s.avgShow != null ? `<div><b>★ ${s.avgShow}</b><span>series</span></div>` : ""}
+      ${s.avgEp != null ? `<div><b>★ ${s.avgEp}</b><span>episodes (${fmt(s.nEp)})</span></div>` : ""}${s.rewatches ? `<div><b>${fmt(s.rewatches)}</b><span>rewatches</span></div>` : ""}</div>`;
+  }
   function libTile(it) {
     const n = it.type === "show" && it.status === "watching" ? lib.nextEp(it) : null;
     const s = ui.libF === "watchlist" || ui.libF === "services" ? streamsFor(it) : null;
@@ -2089,6 +2142,7 @@
         <select data-libtype="1" aria-label="Type">${[["all", "Films & series"], ["movie", "Films"], ["show", "Series"]].map(([k, l]) => `<option value="${k}" ${ty === k ? "selected" : ""}>${l}</option>`).join("")}</select>
         <select data-libsort="1" aria-label="Sort">${[["recent", "Recent"], ["title", "Title"], ["rating", "Rating"], ["year", "Year"]].map(([k, l]) => `<option value="${k}" ${(ui.libSort || "recent") === k ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       ${f === "services" ? `<p class="small muted">Watchlist titles on ${esc(myServices().join(", "))}${feat("vpn") ? ", or elsewhere with a VPN" : ""}. Where things stream is looked up after each sync (needs a TMDB key).</p>` : ""}
+      ${watchStrip(list)}
       <div class="row" style="margin:0 0 10px;gap:8px">${ui.sel ? `<b class="grow">${fmt(ui.sel.size)} selected</b><button class="btn quiet small" data-action="libselall">Select all ${fmt(Math.min(list.length, lim))}</button><button class="btn quiet small" data-action="libselend">Done</button>` : `<span class="grow"></span><button class="btn quiet small" data-action="libselstart">Select</button>`}</div>
       ${ui.sel && ui.sel.size ? `<div class="chips" style="position:sticky;top:0;z-index:5;background:var(--bg);padding:6px 0;margin-bottom:8px">${[["watched", "Watched"], ["watchlist", "Watchlist"], ["watching", "Watching"], ["paused", "Paused"], ["dropped", "Dropped"]].map(([v, l]) => `<button class="chip" data-action="libbulk" data-v="${v}">${l}</button>`).join("")}<button class="chip" data-action="libbulk" data-v="list">${icon("plus")}List</button><button class="chip" data-action="libbulk" data-v="tag">Tag</button><button class="chip" data-action="libbulk" data-v="remove">Remove</button></div>` : ""}
       ${list.length ? Kit.grid(list.slice(0, lim).map(libTile)) : `<p class="muted">Nothing here yet.</p>`}
@@ -2339,6 +2393,7 @@
   let changeTimer = null;
   // something changed in a section: refresh the widget and the backup file a little later
   function changed(what) {
+    webSyncSoon();
     clearTimeout(changeTimer);
     const run = () => { if (ui.job) { changeTimer = setTimeout(run, 20000); return; } // not in the middle of a sync
       statusSoon().catch(() => {}).then(() => { try { updateWidget(); } catch (e) { /* optional */ } try { backupToFile(false).catch(() => {}); } catch (e) { /* next time */ } }); };
@@ -2978,6 +3033,64 @@
   }
   // posters, dates and streaming in the background, after the sync has reported
   let detailsRunning = false;
+  // ---- 0.5.9: two-way sync with the Saga website (site/server.js). Each file the phone or the website changed since
+  // they last agreed is sent; the server merges it entry by entry (site/merge.js) and both keep the result.
+  const WEB_FILES = ["canonsync.json", "library.json", "games.json", "books.json", "dw.json"];
+  const fileStamp = t => (t ? t.length + ":" + t.slice(-24) : "");
+  let webSyncing = false, webSyncT = null;
+  // its own small file, so keeping track doesn't itself change the synced files
+  const WS = { get: () => { try { return JSON.parse(Native.load("web_sync.json") || "{}") || {}; } catch (e) { return {}; } }, set: o => Native.save("web_sync.json", JSON.stringify(Object.assign(WS.get(), o))) };
+  function webSyncSoon(ms = 30000) { if (!db.get("web_sync_url") || db.get("web_sync_auto", "1") !== "1") return; clearTimeout(webSyncT); webSyncT = setTimeout(() => syncWithWebServer(false).catch(() => {}), ms); }
+  async function syncWithWebServer(loud) {
+    const base = String(db.get("web_sync_url", "")).trim().replace(/\/+$/, "");
+    if (!base || webSyncing || ui.job) return "";
+    webSyncing = true;
+    const H = Object.assign({ Accept: "application/json" }, db.get("web_sync_key") ? { Authorization: "Bearer " + db.get("web_sync_key") } : {});
+    const http = C.robust(Native.http, { timeout: 120000, tries: 2 });
+    let sent = 0, got = 0;
+    try {
+      saveAllNow(); // everything written first
+      const m = await http("GET", base + "/api/sync/manifest", { headers: H });
+      if (m.status === 401) throw new Error("the website asked for the sync key (Settings › Accounts and sync › Saga website)");
+      if (m.status !== 200) throw new Error(`the website answered ${m.status || m.error || "nothing"}`);
+      const man = JSON.parse(m.body).files || {};
+      const last = WS.get().state || {};
+      const changedHere = [];
+      for (const n of WEB_FILES) {
+        const local = Native.load(n) || "";
+        const st = last[n] || {}, srv = man[n] && man[n].sha256;
+        if (local && fileStamp(local) === st.local && (!srv || srv === st.server)) continue;
+        if (!local && !srv) continue;
+        await C.breathe(0);
+        const r = await http("POST", base + "/api/sync/file/" + n, { headers: Object.assign({ "Content-Type": "application/json" }, H), body: local || "" });
+        if (r.status !== 200) throw new Error(`${n}: the website answered ${r.status || r.error}`);
+        const j = JSON.parse(r.body);
+        sent++;
+        if (j.text !== local) { applyWebFile(n, j.text); got++; changedHere.push(n); }
+        last[n] = { local: fileStamp(Native.load(n) || j.text), server: j.sha256 }; // what's on the phone now, as the phone wrote it
+        WS.set({ state: last });
+      }
+      const msg = !sent ? "nothing to do" : `${sent} file${sent === 1 ? "" : "s"} compared${got ? `, changes from the website in ${changedHere.map(n => n.replace(".json", "")).join(", ")}` : ""}`;
+      WS.set({ at: Date.now(), msg });
+      if (got) { invalidate(); render(); }
+      if (loud) toast("Website: " + msg);
+      return msg;
+    } catch (e) {
+      WS.set({ at: Date.now(), msg: "failed: " + e.message }); logError("website sync", e.message);
+      if (loud) toast("Website sync failed: " + e.message);
+      return "failed: " + e.message;
+    } finally { webSyncing = false; }
+  }
+  // a merged file from the website replaces the one in memory and on the phone
+  function applyWebFile(n, text) {
+    if (!text) return;
+    const d = JSON.parse(text);
+    if (n === "canonsync.json") { db.loadData(d); db.flush(true); }
+    else if (n === "library.json") { const fresh = new L.Library({ load: () => text }); lib.items = fresh.items; lib.adopted = fresh.adopted; lib.outbox = fresh.outbox; libWrite(true); libMirror(); }
+    else if (n === "games.json") { games.fromJSON(d); Native.save(n, text); }
+    else if (n === "books.json") { books.fromJSON(d); Native.save(n, text); }
+    else if (n === "dw.json") { Native.save(n, text); try { Kit.mods.timeline.reset(); } catch (e) { /* not loaded */ } }
+  }
   // 0.5.7: what follows a sync runs one thing after another, after the sync's own save, instead of all at once
   let afterRunning = false;
   async function afterSync() {
@@ -2996,6 +3109,7 @@
       await fillImages();
       await db.settled();
       await backupToFile(false).catch(() => {});
+      if (db.get("web_sync_url") && db.get("web_sync_auto", "1") === "1") await syncWithWebServer(false);
     } catch (e) { logError("after sync", e.message); }
     afterRunning = false;
   }
@@ -3624,6 +3738,7 @@
       case "tlhome": closeOverlay(); go("timeline"); Kit.mods.timeline.openStory(el.dataset.k); break;
       case "yearstep": ui.year = (ui.year || new Date().getFullYear()) + (+el.dataset.v); render(); break;
       case "wrapped": openWrapped(); break;
+      case "websync": syncWithWebServer(true).then(() => render()); break;
       case "pickedit": ui.pickEdit = !ui.pickEdit; render(); break;
       // 0.5.8: select many titles in the library and change them together
       case "libselstart": ui.sel = new Set(); render(); break;
@@ -3916,6 +4031,7 @@
     try { const bs = Android.stamp("books.json"); if (bs && bs !== ui.bStamp) { if (ui.bStamp) { const t = Native.load("books.json"); if (t) books.fromJSON(JSON.parse(t)); } ui.bStamp = bs; } } catch (e) { /* not in the app */ }
     applyPending();
     livePull();
+    if (Date.now() - (WS.get().at || 0) > 10 * 60000) webSyncSoon(3000);
     if (!BantaAI.isOpen()) render();
   };
 
@@ -3944,5 +4060,5 @@
   const last = parseFloat(db.get("last_sync", "0")) || 0;
   const hasSources = db.get("username") || db.get("imdb_user") || db.get("canon_urls") || db.get("imdb_lists");
   if (db.get("auto_sync") === "1" && hasSources && Date.now() / 1000 - last > AUTO_SYNC_HOURS * 3600) { db.set("sync_open", "0"); doSync(); db.set("sync_open", "1"); }
-  window.__app = { whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
+  window.__app = { syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
 })();

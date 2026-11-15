@@ -523,8 +523,9 @@ const mock = () => {
         return { overflow: document.documentElement.scrollWidth - innerWidth, navW: nav.width, navH: nav.height, mainL: main.left, topTop: top.top };
       });
       if (m.overflow > 1) throw new Error(`${name}/${tab}: horizontal overflow ${m.overflow}px`);
-      if (w >= 840 && !(m.navW < 120 && m.mainL >= m.navW - 1)) throw new Error(`${name}/${tab}: no rail ${JSON.stringify(m)}`);
-      if (w < 840 && h > 540 && m.navW < Math.min(w, 640) - 40) throw new Error(`${name}/${tab}: bottom nav expected ${JSON.stringify(m)}`);
+      // 0.5.9: the rail from 680 px (the Fold's inner screen), with names (200 px) from 1024 px
+      if (w >= 680 && !(m.navW < (w >= 1024 ? 210 : 120) && m.mainL >= m.navW - 1)) throw new Error(`${name}/${tab}: no rail ${JSON.stringify(m)}`);
+      if (w < 680 && h > 540 && m.navW < Math.min(w, 640) - 40) throw new Error(`${name}/${tab}: bottom nav expected ${JSON.stringify(m)}`);
       await page.screenshot({ path: `${OUT}/fold-${name}-${tab}.png` });
     }
   }
