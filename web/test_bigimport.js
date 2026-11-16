@@ -139,6 +139,8 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   ok((await A(() => __app.ui.stalls)) === "", "no screen pauses during the big sync: " + await A(() => __app.ui.stalls));
   await pg.waitForFunction(() => window.__backupFile && window.__files["library.json"] && window.__files["canonsync.json"] && !__app.db._flushing && !__app.db._timer, null, { timeout: 60000 });
   await pg.waitForTimeout(4500);
+  // 0.6.3: a redraw after the sync can bring the library copy up to date and save once more: wait for the file to catch up
+  await pg.waitForFunction(() => { try { return JSON.parse(window.__files["canonsync.json"]).items.length === __app.db.itemsMap.size && !__app.db._timer && !__app.db._flushing; } catch (e) { return false; } }, null, { timeout: 60000 }).catch(() => {});
   const st = await A(() => { const c = JSON.parse(window.__files["canonsync.json"]), l = JSON.parse(window.__files["library.json"]), b = JSON.parse(window.__backupFile);
     return { max: window.__maxCall, canon: c.items.length === __app.db.itemsMap.size && c.items.length > 20000, noCacheInMain: !c.tmdbCache.length, lib: Object.keys(l.items).length === __app.lib.all().length && __app.lib.all().length > 10000,
       backup: b.canon.items.length === c.items.length && Object.keys(b.library.items).length === Object.keys(l.items).length && !!b.games && !!b.books, log: (window.__files["cache.log"] || "").split("\n").filter(Boolean).length }; });
