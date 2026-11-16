@@ -2220,6 +2220,42 @@ fragment T on MovieOrShowOrSeasonOrEpisode {
     db.cacheSet(ck, out);
     return out;
   }
+  // 0.6.5: "because you rated X": TMDB's recommendations for your best-rated titles (most recent first), added up so
+  // a title several of your favourites lead to comes first. seeds: [{ title, year, type, tmdb, imdb, rating }] (rating 1-10).
+  // have(t) says whether a { type, tmdb, title, year } is already yours (library, dismissed). Kept 3 days.
+  const TMDB_GENRES = { 28: "Action", 12: "Adventure", 16: "Animation", 35: "Comedy", 80: "Crime", 99: "Documentary", 18: "Drama", 10751: "Family", 14: "Fantasy", 36: "History", 27: "Horror",
+    10402: "Music", 9648: "Mystery", 10749: "Romance", 878: "Science fiction", 10770: "TV film", 53: "Thriller", 10752: "War", 37: "Western", 10759: "Action", 10762: "Kids", 10763: "News",
+    10764: "Reality", 10765: "Science fiction", 10766: "Soap", 10767: "Talk", 10768: "War" };
+  async function recommend(db, http, seeds, have = () => false, opt = {}) {
+    const key = db.get("tmdb_key");
+    if (!key) throw new Error("Add a TMDB key in Settings for suggestions.");
+    const t = new TMDB(http, key), now = opt.now || Date.now(), max = opt.seeds || 10;
+    const score = new Map();
+    let used = 0;
+    for (const sd of seeds) {
+      if (used >= max) break;
+      const ck = `recs:${sd.type}:${sd.tmdb || sd.imdb || norm(sd.title)}`;
+      let list = db.cacheGet(ck);
+      if (!list || now - list.at > 3 * 864e5) {
+        const tid = sd.tmdb ? { id: sd.tmdb, tv: sd.type === "show" } : await tmdbIdFor(t, db, { title: sd.title, year: sd.year, imdb: sd.imdb, medium: sd.type === "show" ? "TV Series" : "Movie" }).catch(() => null);
+        if (!tid) continue;
+        const r = await t.get(`/${tid.tv ? "tv" : "movie"}/${tid.id}/recommendations`).catch(() => null);
+        list = { at: now, items: ((r && r.results) || []).slice(0, 20).map(x => ({ tmdb: x.id, type: tid.tv ? "show" : "movie", title: x.title || x.name || "", year: +(x.release_date || x.first_air_date || "").slice(0, 4) || null,
+          poster: x.poster_path ? "https://image.tmdb.org/t/p/w185" + x.poster_path : "", genres: (x.genre_ids || []).map(g => TMDB_GENRES[g]).filter(Boolean), vote: x.vote_average || 0, votes: x.vote_count || 0, overview: x.overview || "" })) };
+        db.cacheSet(ck, list);
+        await breathe(0);
+      }
+      used++;
+      const w = Math.max(0.5, (sd.rating || 8) - 6); // a 10 counts four times a 7
+      list.items.forEach((x, i) => {
+        if (!x.title || x.votes < 30 || have(x)) return;
+        const k = x.type + x.tmdb, e = score.get(k) || Object.assign({ score: 0, because: [] }, x);
+        e.score += w * (1 - i / 25); if (e.because.length < 3 && !e.because.includes(sd.title)) e.because.push(sd.title);
+        score.set(k, e);
+      });
+    }
+    return [...score.values()].map(e => Object.assign(e, { score: e.score * (0.8 + e.vote / 50) })).sort((a, b) => b.score - a.score).slice(0, opt.limit || 40);
+  }
   // 0.6.2: the posters TMDB has for a film or series (the "Change poster" picker)
   async function tmdbPosters(db, http, c) {
     const key = db.get("tmdb_key");
@@ -3539,6 +3575,13 @@ ${blocks.join("\n\n")}`;
   // Trakt and IMDb run side by side (each source in order within its lane, IMDb spaced out); every task has a deadline,
   // so one slow source never holds the rest. A route that only got the first page of a list is reported as PART, not OK,
   // and keeps whatever was there before. Release dates, posters and episode lookups are not part of this: see details().
+  // 0.6.5: sources that keep failing: two syncs in a row or more. { label, streak, okAt (0 = never), msg, days }
+  function sourceHealth(db, now = Date.now()) {
+    let st = {}; try { st = JSON.parse(db.get("sync_state", "{}")); } catch (e) { /* none */ }
+    return Object.entries(st).filter(([, v]) => v && !v.ok && (v.streak || 1) >= 2)
+      .map(([label, v]) => ({ label, streak: v.streak || 2, okAt: v.okAt || 0, msg: v.msg || "", days: v.okAt ? Math.floor((now - v.okAt) / 864e5) : null }))
+      .sort((a, b) => b.streak - a.streak);
+  }
   async function syncAll(db, http, progress, only = null, opt = {}) {
     gqlBlocked = false;
     const tplStore = { get: k => db.get(k, ""), set: (k, v) => db.set(k, v) };
@@ -3662,11 +3705,13 @@ ${blocks.join("\n\n")}`;
           catch (e) { if (http.cancelBrowse && /took longer/.test(e.message)) http.cancelBrowse(); throw e; } // don't leave its page running
           const msg = typeof r === "string" ? r : r.msg, part = r && r.part;
           report.push(`${part ? "PART " : "OK  "}${label}: ${msg}${part ? " (not all of it came through; what arrived is kept. Tap Retry failed, or sign in to IMDb)" : ""}`);
-          state[label] = { ok: !part, at: Date.now(), ms: Date.now() - t0, msg };
+          const was = state[label] || {};
+          state[label] = { ok: !part, at: Date.now(), ms: Date.now() - t0, msg, okAt: part ? (was.okAt || (was.ok ? was.at : 0)) : Date.now(), streak: part ? (was.streak || 0) + 1 : 0 };
           if (part) failed.push(label); else ok++;
         } catch (e) {
           report.push(`FAIL ${label}: ${e.message}`);
-          state[label] = { ok: false, at: Date.now(), ms: Date.now() - t0, msg: e.message };
+          const was = state[label] || {};
+          state[label] = { ok: false, at: Date.now(), ms: Date.now() - t0, msg: e.message, okAt: was.okAt || (was.ok ? was.at : 0), streak: (was.streak || 0) + 1 };
           failed.push(label);
         }
         L(`end ${label} (${Date.now() - t0} ms)`);
@@ -3718,7 +3763,7 @@ ${blocks.join("\n\n")}`;
     MEDIA, PROFILES, SECRET_RX, norm, parseYear, mediumFromImdb, mediumFromText, ratio, TitleIndex, Store,
     parseCsv, parseImdbText, importImdbCsv, importFranchiseFile, traktEntries, routeTraktFile, storeTrakt, importTraktZip,
     breathe, jsonParts, BUSY: CONFIG_BUSY, consumed, Exclusion, canonStatus, canonStatusAsync, franchiseProgress, upNext, missingCanon, discrepancies, computeStats,
-    personWorks, tmdbPosters, VMap, apiTitles, pageOrApi, gqlInfo, imdbReset: () => { gqlBlocked = false; }, imdbGql, gqlList, gqlRatings, imdbUr, authorizeUrl, exchangeCode, Trakt, traktSync, imdbList, imdbRatings, imdbWatchlist, imdbUserId, listIdFrom, walkTitles, browseTitles, pageExtract, pageProbe, probeFor, TMDB, collectionScan, season0Scan,
+    recommend, sourceHealth, personWorks, tmdbPosters, VMap, apiTitles, pageOrApi, gqlInfo, imdbReset: () => { gqlBlocked = false; }, imdbGql, gqlList, gqlRatings, imdbUr, authorizeUrl, exchangeCode, Trakt, traktSync, imdbList, imdbRatings, imdbWatchlist, imdbUserId, listIdFrom, walkTitles, browseTitles, pageExtract, pageProbe, probeFor, TMDB, collectionScan, season0Scan,
     CONFIG, AI_PRESETS, compatProvider, compatScan, localModels, serverBase, traktOne, traktEpRatings, parseLines, parseMvGroup, relevantNames, promptLine, netHint, robust, pool, details, titleInfo, justWatch, pickDates, dateSummary, bestOffer, cachedInfo, enrichInfo, platformRatings, ratingDiffs, withTimeout, watchProgress, continueWatching, testGemini, gemError, fillPosters, posterKey, aiState, resetAi, canonScan, claudeScan, claudeCall, claudeModels, rankClaudeModel, CLAUDE_DEFAULT, upcomingEpisodes, canonKeys, parseJsonArray, multiverseScan, collectionRows, refreshCollections, tvNext, upcomingEvents, computeAlerts, backgroundRun, fmtWhen, hashId, geminiState, resetGemini, mvGroup, mvExpand, multiverses, mvMap, mvAlias, mvPending, mvDone, geminiProvider, vpnOptions, bestVpn, worldFrom, worldCountries, jwQuery, flag: FLAGS, VPN_DEFAULT, manualScan, franchiseBatches, verifyPrompt, parseVerify, newsBatches, newsPrompt, parseCanonRows, franchiseName, releaseList, releaseKey, parseDate, seeds, rankGeminiModel, resolveGeminiModel, syncAll, sleep,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Core;

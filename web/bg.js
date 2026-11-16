@@ -25,7 +25,7 @@
     const { report, notes } = await C.backgroundRun(db, http);
     for (const n of notes) A.notify(n.id, n.title, n.text, n.tab || "home");
     db.flush();
-    return report + await library(db) + await books() + await games(db);
+    return report + await library(db) + releases() + await books() + await games(db);
   }
 
   // Your library: refresh the episode lists of series you're watching and say when a new one is out
@@ -62,6 +62,34 @@
   }
 
   // Books: ebook price drops for want-to-read books (features "books" and "bookPrices", and the Books setting)
+  // 0.6.5: release day: a game on your wishlist, backlog or Next list, or a book you want, comes out today (once each)
+  function releases(today = new Date().toISOString().slice(0, 10)) {
+    let n = 0;
+    try {
+      const feats = (() => { try { return JSON.parse(A.load("canonsync.json") ? (JSON.parse(A.load("canonsync.json")).settings || {}).features || "{}" : "{}"); } catch (e) { return {}; } })();
+      const G = window.GamesCore;
+      if (G && feats.games !== 0) {
+        const lib = new G.Games({ load: () => A.load("games.json"), save: t => A.save("games.json", t) });
+        const sent = lib.meta.relSent || (lib.meta.relSent = {});
+        for (const g of lib.visible()) if (g.date === today && g.status !== "done" && g.status !== "dropped" && !sent[g.id]) {
+          sent[g.id] = today; n++;
+          A.notify(C.hashId("grel|" + g.id), `Out today: ${g.title}`, [g.platform, g.next ? "on your Next list" : g.status === "wishlist" ? "on your wishlist" : "in your backlog"].filter(Boolean).join(" · "), "games");
+        }
+        if (n) lib.save();
+      }
+      const B = window.BooksCore;
+      if (B && feats.books !== 0) {
+        const lib = new B.Library({ load: () => A.load("books.json"), save: t => A.save("books.json", t) });
+        const sent = lib.settings.relSent || (lib.settings.relSent = {}); let m = 0;
+        for (const b of lib.books) if (b.status === "want" && String(b.published || "").slice(0, 10) === today && !sent[b.id]) {
+          sent[b.id] = today; m++;
+          A.notify(C.hashId("brel|" + b.id), `Out today: ${b.title}`, (b.authors || []).join(", "), "books");
+        }
+        if (m) lib.save(); n += m;
+      }
+    } catch (e) { return `\nFAIL release day: ${e && e.message}`; }
+    return n ? `\nOK  release day: ${n}` : "";
+  }
   // Games: Steam prices for games you want, twice a day at most
   async function games(db) {
     try {

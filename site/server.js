@@ -82,9 +82,9 @@ const tries = new Map();
 const clientIp = req => String(req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
 function limited(ip) { const t = tries.get(ip); if (!t) return false; if (Date.now() - t.first > 15 * 60e3) { tries.delete(ip); return false; } return t.n >= 5; }
 function failed(ip) { const t = tries.get(ip) || { n: 0, first: Date.now() }; t.n++; tries.set(ip, t); }
-const LOGIN = msg => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Saga · sign in</title>
+const LOGIN = (msg, next = "") => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Saga · sign in</title>
 <style>body{font:16px/1.5 system-ui,sans-serif;background:#0d1117;color:#e6edf3;display:grid;place-items:center;min-height:100dvh;margin:0}form{background:#161b22;border:1px solid #30363d;border-radius:16px;padding:28px;width:min(340px,88vw)}h1{font-size:22px;margin:0 0 16px}input{width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #30363d;background:#0d1117;color:inherit;font:inherit}button{margin-top:14px;width:100%;padding:12px;border-radius:10px;border:0;background:#6d8bff;color:#fff;font:600 16px system-ui}p{color:#f0883e;font-size:14px;margin:10px 0 0}</style></head>
-<body><form method="post" action="api/auth/login"><h1>Saga</h1><input name="user" placeholder="Name" autocomplete="username" autocapitalize="off" autofocus required style="margin-bottom:10px"><input type="password" name="password" placeholder="Password" autocomplete="current-password" required><button>Sign in</button>${msg ? `<p>${msg}</p>` : ""}</form></body></html>`;
+<body><form method="post" action="api/auth/login"><h1>Saga</h1><input name="user" placeholder="Name" autocomplete="username" autocapitalize="off" autofocus required style="margin-bottom:10px"><input type="password" name="password" placeholder="Password" autocomplete="current-password" required>${next ? `<input type="hidden" name="next" value="${String(next).replace(/[^a-z0-9/_.-]/gi, "")}">` : ""}<button>Sign in</button>${msg ? `<p>${msg}</p>` : ""}</form></body></html>`;
 
 // ---- the last version each file had when the phone and the server agreed (the base of the next merge)
 const basePath = (dir, n) => path.join(dir, ".sync", n);
@@ -132,6 +132,45 @@ function writeAtomic(dir, name, buf) {
 }
 
 // ---- a .zip export opened: text entries come back as text (the same shape the phone app gives)
+// 0.6.5: a ZIP of files (deflated), for "Download a backup"
+const CRC = (() => { const t = new Int32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c; } return t; })();
+const crc32 = b => { let c = -1; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 0xff] ^ (c >>> 8); return (c ^ -1) >>> 0; };
+function zipFiles(files) {
+  const parts = [], central = []; let off = 0;
+  const d = new Date(), dt = ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xffff, dd = (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xffff;
+  for (const f of files) {
+    const name = Buffer.from(f.name, "utf8"), raw = f.data, z = zlib.deflateRawSync(raw), crc = crc32(raw);
+    const lh = Buffer.alloc(30); lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(0x0800, 6); lh.writeUInt16LE(8, 8); lh.writeUInt16LE(dt, 10); lh.writeUInt16LE(dd, 12);
+    lh.writeUInt32LE(crc, 14); lh.writeUInt32LE(z.length, 18); lh.writeUInt32LE(raw.length, 22); lh.writeUInt16LE(name.length, 26); lh.writeUInt16LE(0, 28);
+    const ch = Buffer.alloc(46); ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(20, 4); ch.writeUInt16LE(20, 6); ch.writeUInt16LE(0x0800, 8); ch.writeUInt16LE(8, 10); ch.writeUInt16LE(dt, 12); ch.writeUInt16LE(dd, 14);
+    ch.writeUInt32LE(crc, 16); ch.writeUInt32LE(z.length, 20); ch.writeUInt32LE(raw.length, 24); ch.writeUInt16LE(name.length, 28); ch.writeUInt32LE(off, 42);
+    parts.push(lh, name, z); central.push(ch, name); off += 30 + name.length + z.length;
+  }
+  const cd = Buffer.concat(central), end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10); end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(off, 16);
+  return Buffer.concat(parts.concat([cd, end]));
+}
+// every file under dir (skipping the names given), as { name, data }
+function filesUnder(dir, skip = () => false, pre = "") {
+  const out = [];
+  if (!fs.existsSync(dir)) return out;
+  for (const n of fs.readdirSync(dir)) {
+    const rel = pre + n, f = path.join(dir, n);
+    if (skip(rel)) continue;
+    const st = fs.statSync(f);
+    if (st.isDirectory()) out.push(...filesUnder(f, skip, rel + "/")); else if (st.isFile()) out.push({ name: rel, data: fs.readFileSync(f) });
+  }
+  return out;
+}
+// 0.6.5: app updates put in <data>/apk/ by the owner. Everyone signed in sees the Starter builds; the owner sees all
+// (the owner's own build holds the owner's keys).
+const APK_DIR = path.join(DATA, "apk");
+function apksFor(user) {
+  if (!fs.existsSync(APK_DIR)) return [];
+  const owner = !AUTH || user === AUTH.owner || user === "";
+  return fs.readdirSync(APK_DIR).filter(n => /\.apk$/i.test(n) && (owner || /starter/i.test(n)))
+    .map(n => ({ name: n, size: fs.statSync(path.join(APK_DIR, n)).size, at: fs.statSync(path.join(APK_DIR, n)).mtimeMs })).sort((a, b) => b.at - a.at);
+}
 function unzip(buf) {
   let eocd = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
@@ -184,7 +223,7 @@ const handler = isPublic => async (req, res) => {
     // (on plain http, like http://100.x.x.x:8787, browsers dropped it, so you were asked to sign in again)
     const MSG = { wrong: "Wrong name or password.", wait: "Too many tries. Wait 15 minutes." };
     const secure = req.socket.encrypted || /^https$/i.test(String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim()) ? "; Secure" : "";
-    if (p === "/login" && req.method === "GET") return send(res, (MSG[url.searchParams.get("e")] && url.searchParams.get("e") === "wait") ? 429 : 200, LOGIN(!AUTH ? "No password is set yet: on the server run  node server.js --set-password" : MSG[url.searchParams.get("e")] || ""), "text/html; charset=utf-8");
+    if (p === "/login" && req.method === "GET") return send(res, (MSG[url.searchParams.get("e")] && url.searchParams.get("e") === "wait") ? 429 : 200, LOGIN(!AUTH ? "No password is set yet: on the server run  node server.js --set-password" : MSG[url.searchParams.get("e")] || "", url.searchParams.get("next") || ""), "text/html; charset=utf-8");
     if (p === "/api/auth/login" && req.method !== "POST") { res.writeHead(303, { Location: "../../login" }); return res.end(); }
     if (p === "/api/auth/login" && req.method === "POST") {
       const ip = clientIp(req);
@@ -192,9 +231,10 @@ const handler = isPublic => async (req, res) => {
       const body = (await readBody(req, 8192)).toString("utf8");
       const form = /^\s*\{/.test(body) ? JSON.parse(body) : Object.fromEntries(new URLSearchParams(body));
       const name = String(form.user || (AUTH && Object.keys(AUTH.users).length === 1 ? Object.keys(AUTH.users)[0] : "")).trim().toLowerCase();
-      if (!checkPassword(name, form.password || "")) { failed(ip); res.writeHead(303, { Location: "../../login?e=wrong", "X-Saga-Login": "wrong" }); return res.end(); }
+      const next = String(form.next || "").replace(/[^a-z0-9/_.-]/gi, "").replace(/^\/+|\.\./g, "");
+      if (!checkPassword(name, form.password || "")) { failed(ip); res.writeHead(303, { Location: `../../login?e=wrong${next ? "&next=" + encodeURIComponent(next) : ""}`, "X-Saga-Login": "wrong" }); return res.end(); }
       tries.delete(ip);
-      res.writeHead(303, { Location: "../../", "X-Saga-Login": "ok", "Set-Cookie": `saga_session=${newSession(name)}; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}`, "Cache-Control": "no-store" });
+      res.writeHead(303, { Location: "../../" + next, "X-Saga-Login": "ok", "Set-Cookie": `saga_session=${newSession(name)}; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}`, "Cache-Control": "no-store" });
       return res.end();
     }
     if (p === "/api/auth/logout") { res.writeHead(303, { Location: "../../login", "Set-Cookie": `saga_session=; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=0` }); return res.end(); }
@@ -228,9 +268,54 @@ const handler = isPublic => async (req, res) => {
     const user = whoIs(req, isPublic);
     if (user === null) {
       if (p.startsWith("/api/")) return send(res, 401, '{"error":"sign in"}');
-      res.writeHead(302, { Location: "login" }); return res.end();
+      const next = p.slice(1).replace(/[^a-z0-9/_.-]/gi, "");
+      res.writeHead(302, { Location: next && next !== "index.html" ? `login?next=${encodeURIComponent(next)}` : "login" }); return res.end();
     }
     const DIR = dirOf(user);
+    // 0.6.5: updates for the phone app, and a backup of your files
+    if (p === "/api/apk") return send(res, 200, JSON.stringify(apksFor(user)));
+    if (p === "/download") {
+      const list = apksFor(user), esc2 = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+      return send(res, 200, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Saga · download</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;background:#14121B;color:#ece8f4;max-width:560px;margin:0 auto;padding:24px}a.b{display:block;padding:14px 16px;margin:10px 0;border-radius:12px;background:#2a2537;color:inherit;text-decoration:none}small{color:#a39cb3}</style></head>
+<body><h1>Saga for Android</h1>${list.length ? list.map(a => `<a class="b" href="download/${encodeURIComponent(a.name)}"><b>${esc2(a.name)}</b><br><small>${(a.size / 1048576).toFixed(1)} MB · ${new Date(a.at).toISOString().slice(0, 10)}</small></a>`).join("")
+        : "<p>No app updates here yet.</p>"}<p><small>Download, open the file and tap Install (allow installs from your browser once). Your data stays: an update never wipes it.</small></p><p><a href="./" style="color:#b9a6ff">Back to Saga</a></p></body></html>`, "text/html; charset=utf-8");
+    }
+    if (p.startsWith("/download/")) {
+      const n = decodeURIComponent(p.slice(10)), a = apksFor(user).find(x => x.name === n);
+      if (!a) return send(res, 404, "Not found", "text/plain");
+      res.writeHead(200, { "Content-Type": "application/vnd.android.package-archive", "Content-Disposition": `attachment; filename="${n.replace(/"/g, "")}"`, "Content-Length": a.size, "Cache-Control": "no-store" });
+      return fs.createReadStream(path.join(APK_DIR, n)).pipe(res);
+    }
+    if (p === "/api/backup") {
+      // your own files (the owner's: everything but other people's folders, the apps and the sign-in file)
+      const files = filesUnder(DIR, rel => /^(users|apk|\.sync)(\/|$)/.test(rel) || rel === "auth.json" || /^\.daily\//.test(rel));
+      res.writeHead(200, { "Content-Type": "application/zip", "Content-Disposition": `attachment; filename="saga-backup-${user || "me"}-${new Date().toISOString().slice(0, 10)}.zip"`, "Cache-Control": "no-store" });
+      return res.end(zipFiles(files));
+    }
+    // 0.6.5: friends on the same website. Each person chooses to share; only then do the others see their films,
+    // series, games and books (title, status, rating; no notes, no diary, no keys).
+    if (p === "/api/share") {
+      const f = path.join(DIR, "share.json");
+      if (req.method === "POST") { let on = false; try { on = !!JSON.parse((await readBody(req, 4096)).toString("utf8")).on; } catch (e) { /* off */ } writeAtomic(DIR, "share.json", Buffer.from(JSON.stringify({ on, at: Date.now() }))); return send(res, 200, JSON.stringify({ on })); }
+      let on = false; try { on = !!JSON.parse(fs.readFileSync(f, "utf8")).on; } catch (e) { /* off */ }
+      return send(res, 200, JSON.stringify({ on }));
+    }
+    if (p === "/api/people" && AUTH) {
+      const me = user || AUTH.owner, out = [];
+      const read = (d, n) => { try { return JSON.parse(fs.readFileSync(path.join(d, n), "utf8")); } catch (e) { return null; } };
+      for (const n of Object.keys(AUTH.users)) {
+        if (n === me) continue;
+        const d = dirOf(n === AUTH.owner ? "" : n), sh = read(d, "share.json");
+        if (!sh || !sh.on) continue;
+        const L = read(d, "library.json") || {}, G = read(d, "games.json") || {}, B = read(d, "books.json") || {};
+        out.push({ name: n,
+          lib: Object.values(L.items || {}).map(i => ({ type: i.type, title: i.title, year: i.year || null, imdb: i.imdb || null, tmdb: i.tmdb || null, status: i.status, rating: i.rating || 0, poster: i.poster || "" })),
+          games: (G.games || []).filter(g => !g.hidden).map(g => ({ title: g.title, date: g.date || "", platform: g.platform || "", status: g.status, rating: g.rating || 0 })),
+          books: (B.books || []).map(b => ({ title: b.title, authors: (b.authors || []).slice(0, 2), status: b.status, rating: b.rating || 0 })) });
+      }
+      return send(res, 200, JSON.stringify({ me, people: out }));
+    }
     if (p === "/api/me") return send(res, 200, JSON.stringify({ user: user || null, users: AUTH ? Object.keys(AUTH.users).length : 0 }));
     if (p.startsWith("/api/")) {
       if (p === "/api/all" && req.method === "GET") {
@@ -309,6 +394,7 @@ const handler = isPublic => async (req, res) => {
 //   node server.js --remove-user name                  (their files stay in data/users/<name>)
 //   node server.js --users                             (who has an account)
 //   node server.js --rename-user old new               (e.g. me → banta)
+//   node server.js --backup [file.zip]                 (all accounts' files in one ZIP)
 //   node server.js --key [name]                         (that person's sync key, for the phone app and Jellyfin / Plex)
 //   node server.js --tailscale name login@example.com  (that Tailscale login opens that person's Saga on the tailnet port)
 const argv = process.argv.slice(2), cmd = argv[0] || "";
@@ -323,6 +409,11 @@ if (cmd === "--set-password" || cmd === "--add-user") {
   const done = p2 => { if (!p2 || p2.length < 8) { console.error("At least 8 characters."); process.exit(1); } const u = setPassword(name, p2);
     console.log(`Password set for ${name}${(loadAuth() || {}).owner === name ? " (owner)" : ""}. Sync key for ${name}'s phone app (Settings › Accounts and sync › Saga website):\n  ${u.token}`); process.exit(0); };
   if (pw) done(pw); else ask(`New password for ${name}: `, done);
+} else if (cmd === "--backup") {
+  // 0.6.5: everything (all accounts, sign-in file included) into one ZIP, e.g. onto a USB stick
+  const out = argv[1] || `saga-backup-${new Date().toISOString().slice(0, 10)}.zip`;
+  const files = filesUnder(DATA, rel => /^(apk|\.daily)(\/|$)|\/\.daily\//.test(rel));
+  fs.writeFileSync(out, zipFiles(files)); console.log(`${files.length} files saved to ${path.resolve(out)}`); process.exit(0);
 } else if (cmd === "--rename-user") {
   // 0.6.5: e.g. the "me" that an old single-password setup became → your own name
   const a = loadAuth(), from = String(argv[1] || "").toLowerCase(), to = String(argv[2] || "").trim().toLowerCase();

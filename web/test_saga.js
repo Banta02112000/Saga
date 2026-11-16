@@ -20,6 +20,8 @@ const mock = (seed) => {
   const reply = (m, url, body) => {
     const J = (o, st) => ({ status: st || 200, body: JSON.stringify(o) });
     if (/^https:\/\/saga\.test\//.test(url) && window.__webSrv) return window.__webSrv(m, url, body);
+    if (/raw\.githubusercontent\.com\/Banta02112000\/Saga\/main\/web\/app\.js/.test(url)) return { status: 200, body: 'const VERSION = "9.9.9";' };
+    if (/themoviedb\.org\/3\/movie\/949\/recommendations/.test(url)) return J({ results: [{ id: 500, title: "Suggested Film", release_date: "2010-01-01", vote_average: 7.5, vote_count: 400, genre_ids: [80], poster_path: "/s.jpg" }] });
     if (/themoviedb\.org\/3\/movie\/949(\?|$)/.test(url)) return J({ id: 949, title: "Heat", release_date: "1995-12-15", credits: { crew: [{ job: "Director", name: "Ann Director" }], cast: [{ name: "Al Actor" }] }, external_ids: { imdb_id: "tt0113277" } });
     if (/themoviedb\.org\/3\/search\/person/.test(url)) return J({ results: [{ id: 7, name: "Ann Director", popularity: 9, known_for_department: "Directing" }] });
     if (/themoviedb\.org\/3\/person\/7\/combined_credits/.test(url)) return J({ cast: [], crew: [{ id: 949, media_type: "movie", title: "Heat", release_date: "1995-12-15", job: "Director", vote_count: 9 }, { id: 5, media_type: "movie", title: "Thief", release_date: "1981-03-27", job: "Director", vote_count: 3 }] });
@@ -278,7 +280,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.6.4", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.6.5", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();
@@ -647,6 +649,50 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   ok(n62.picker && n62.poster, "Change poster");
   ok(n62.spoilerHidden && n62.spoilerShown, "unwatched episode names hidden (switch in Settings)");
   ok(n62.quick, "search: one-tap next episode");
+  // ---- 0.6.5: why a title is here, switching a list off with its titles, updates, suggestions, friends
+  const n65 = await A(async () => {
+    const out = {}, wait = async (f, ms = 3000) => { const t = Date.now(); while (Date.now() - t < ms) { if (f()) return true; await new Promise(r => setTimeout(r, 30)); } return false; };
+    const click = sel => { const el = document.querySelector(sel); if (el) el.click(); return !!el; };
+    __app.db.addItems([{ title: "Only On Fam", year: 2018, imdb: "tt9000001", medium: "TV Series" }, { title: "Also Rated", year: 2017, imdb: "tt9000002" }, { title: "Fam Touched", year: 2016, imdb: "tt9000003" }], "imdb", "list", "Family watch");
+    __app.db.addItems([{ title: "Also Rated", year: 2017, imdb: "tt9000002", rating: 7 }], "imdb", "rated");
+    const a = __app.lib.add({ type: "show", title: "Only On Fam", year: 2018, imdb: "tt9000001" }, "watchlist").item;
+    const b = __app.lib.add({ type: "movie", title: "Also Rated", year: 2017, imdb: "tt9000002" }, "watched").item;
+    const c = __app.lib.add({ type: "movie", title: "Fam Touched", year: 2016, imdb: "tt9000003" }, "watchlist").item; c.notes = "mine";
+    __app.lib.save();
+    __app.openLib(a.id); const why = document.querySelector("#overlay details.why");
+    out.why = !!why && /IMDb list “Family watch”/.test(why.textContent);
+    __app.openLib(b.id); out.why2 = /IMDb ratings · rated 7/.test(document.querySelector("#overlay details.why").textContent);
+    __app.openLib(a.id); click('#overlay [data-action="listpurge"]');
+    out.dlg = await wait(() => /1 title that only this list brought/.test((document.querySelector("#overlay .dialog") || {}).textContent || ""));
+    click("#dlgOk");
+    out.purged = !__app.lib.get(a.id) && !!__app.lib.get(b.id) && !!__app.lib.get(c.id);
+    click("#toast .undo"); out.undone = !!__app.lib.get(a.id);
+    // update
+    __app.db.set("upd_at", "0"); document.querySelector('[data-action="updcheck"]') || __app.go("settings");
+    await new Promise(r => setTimeout(r, 10));
+    __app.db.set("web_sync_url", "https://saga.test"); __app.go("home");
+    const btn = document.createElement("button"); btn.dataset.action = "updcheck"; document.body.appendChild(btn); btn.click(); btn.remove();
+    out.upd = await wait(() => /Saga 9\.9\.9 is out/.test(document.querySelector("#view").textContent) && !!document.querySelector('[data-action="updget"]'));
+    click('[data-action="updhide"]'); out.updHidden = !/Saga 9\.9\.9 is out/.test(document.querySelector("#view").textContent);
+    // suggestions (Heat is rated 9 and has TMDB id 949)
+    const h = __app.lib.find({ type: "movie", tmdb: 949 }); if (h) h.rating = 9; __app.lib.save();
+    const rb = document.createElement("button"); rb.dataset.action = "recsnow"; document.body.appendChild(rb); rb.click(); rb.remove();
+    out.recs = await wait(() => /For you/.test(document.querySelector("#view").textContent) && /Suggested Film/.test(document.querySelector("#view").textContent) && /Because you rated Heat/.test(document.querySelector("#view").textContent));
+    click('[data-action="rechide"]'); out.recHide = !/Suggested Film/.test(document.querySelector("#view").textContent);
+    // friends (as the website would send them)
+    __app.db.cacheSet("people:now", { at: Date.now(), people: [{ name: "pal", lib: [{ type: "movie", title: "Heat", year: 1995, imdb: "tt0113277", tmdb: 949, status: "watched", rating: 8 }, { type: "movie", title: "Pal Loves", year: 2005, tmdb: 77, status: "watched", rating: 10 }], games: [], books: [] }] });
+    __app.go("home"); const hv = document.querySelector("#view").textContent;
+    out.friends = /You and pal/.test(hv) && /pal loved, you haven't seen/.test(hv) && /Pal Loves/.test(hv);
+    out.friendAdd = click('[data-action="friendadd"]') && !!__app.lib.find({ type: "movie", title: "Pal Loves", year: 2005 });
+    if (h) { __app.openLib(h.id); out.friendOn = /pal: Watched · ★ 8/.test(document.querySelector("#overlay").textContent); }
+    document.querySelector("#overlay").innerHTML = ""; __app.db.set("web_sync_url", "");
+    return out;
+  });
+  ok(n65.why && n65.why2, "Why is this here? names the list and the rating: " + JSON.stringify(n65));
+  ok(n65.dlg && n65.purged && n65.undone, "switching a list off removes only titles it alone brought and you haven't touched; Undo");
+  ok(n65.upd && n65.updHidden, "a newer Saga is announced on Home, with Get it, and can be hidden");
+  ok(n65.recs && n65.recHide, "For you: suggestions from your ratings, Not interested");
+  ok(n65.friends && n65.friendAdd && n65.friendOn, "friends: You and …, what they loved, their rating on a title");
   for (const [w, h] of [[390, 844], [820, 1100], [1280, 860]]) {
     await pg.setViewportSize({ width: w, height: h });
     await A(() => { __app.go("home"); __app.render(); });

@@ -383,7 +383,7 @@
   const HEAD = { title: /^(title|name|game)$/, date: /^(og )?release( date)?$|^(og )?date$|^released$/, platform: /^(og )?platform$/, rn: /^remake( name)?$/, rd: /^remake( release)? date$/,
     rp: /^remake platform$/, owned: /^owned( platform)?$|^owned on$/, hours: /^(hltb|hours|how long to beat|time to beat)$/, hb: /^hltb (bundle|remake)$|^remake hours$/,
     imdbR: /^(rating|imdb( rating)?|imdb score|score)$/, franchise: /^franchise$|^series$/, multiverse: /^multiverse|universe$/, next: /^next$/, status: /^status$/,
-    my: /^my rating$|^your rating$/, notes: /^notes?$/ };
+    my: /^my rating$|^your rating$/, notes: /^notes?$/, plays: /^finished( dates?)?$|^completion dates?$/ };
   // rows (arrays, first row with "Title" is the header) → your games. A row matches a game you have by title,
   // release date and platform (two releases of the same game on different consoles stay apart); the list's own
   // columns are updated, your status, rating, plays and notes are kept. Returns counts.
@@ -434,6 +434,8 @@
         if (!g.multiverse) g.multiverse = g.franchise;
         setStatus(g, ST[txt(r, "status").toLowerCase()] || "backlog");
         if (g.status === "done") g.plays = []; // finished, but the list doesn't say when: no made-up play date
+        const pd = txt(r, "plays").split(/[\s,;]+/).map(isoOf).filter(Boolean);
+        if (pd.length) { g.plays = pd.sort(); if (g.status !== "done") g.status = "done"; }
         const my = num(get(r, "my")); if (my) g.rating = Math.round(my);
         if (txt(r, "notes")) g.notes = txt(r, "notes");
         lib.games.push(g);

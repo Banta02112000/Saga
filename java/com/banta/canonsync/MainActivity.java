@@ -45,7 +45,10 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setAllowFileAccess(true);
-        s.setTextZoom(100);
+        // 0.6.5: follow Android's font size (Settings › Display › Font size), within limits the layout handles
+        float fs = 1f;
+        try { fs = getResources().getConfiguration().fontScale; } catch (Throwable t) { fs = 1f; }
+        s.setTextZoom(Math.max(85, Math.min(160, Math.round(fs * 100))));
         bridge = new Bridge(this, this, web, null);
         web.addJavascriptInterface(bridge, "Android");
         web.addJavascriptInterface(new Shared(this, appName()), "Banta");

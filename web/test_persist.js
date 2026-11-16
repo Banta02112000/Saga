@@ -2,6 +2,8 @@
 // Doctor Who ratings only into a phone that already has her data from an earlier version.
 const PRIVATE = require("fs").existsSync(require("path").join(__dirname, "../legacy/assets/gc/mine.js")); // personal data, absent from the public repo
 if (!PRIVATE) { console.log("PERSISTENCE TESTS SKIPPED (need the private games and Doctor Who data)"); process.exit(0); }
+// the first game of the private list, read here so no title of hers is written in this (public) file
+const FIRST = (() => { const t = require("fs").readFileSync(require("path").join(__dirname, "../legacy/assets/gc/mine.js"), "utf8"); const m = /\{"t":("(?:[^"\\]|\\.)*"),"od":("(?:[^"\\]|\\.)*")/.exec(t); return `${JSON.parse(m[1])}|${JSON.parse(m[2])}`; })();
 const { chromium } = require("playwright");
 const http = require("http"), fs = require("fs"), path = require("path");
 const ROOT = path.join(__dirname, "..");
@@ -28,12 +30,13 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
 
   // update over an earlier version: her save data is there
   ctx = await b.newContext();
+  await ctx.addInitScript(f => { window.__first = f; }, FIRST);
   await ctx.addInitScript(() => { window.Android = new Proxy({}, { get: () => () => "" });
     if (!sessionStorage.getItem("seeded")) { sessionStorage.setItem("seeded", "1");
-      if (location.pathname.startsWith("/gc/") && localStorage.getItem("gc_mine") === null) { localStorage.setItem("gc_done", JSON.stringify({ "Mega Man: Dr. Wily's Revenge|July 26, 1991": 1700000000000 })); localStorage.setItem("gc_set", JSON.stringify({ auto: 1, lastSync: 1 })); }
+      if (location.pathname.startsWith("/gc/") && localStorage.getItem("gc_mine") === null) { localStorage.setItem("gc_done", JSON.stringify({ [window.__first]: 1700000000000 })); localStorage.setItem("gc_set", JSON.stringify({ auto: 1, lastSync: 1 })); }
       if (location.pathname.startsWith("/dw/") && localStorage.getItem("dwcanon.mine") === null) localStorage.setItem("dwcanon.v1", JSON.stringify({ works: {}, ui: {} })); } });
   gc = await page(ctx, "/gc/index.html");
-  const ID = "Mega Man: Dr. Wily's Revenge|July 26, 1991";
+  const ID = FIRST;
   const g = await gc.evaluate(ID => ({ n: all().length, done: !!done[ID], mine: localStorage.getItem("gc_mine"), base: (JSON.parse(localStorage.getItem("gc_base") || "[]")).length, user: SET.imdbUser, lists: SET.imdbLists.length }), ID);
   ok(g.n === 1305 && g.done && g.mine === "1" && g.base === 1305 && g.user && g.lists === 11, "existing Games data kept, list carried over: " + JSON.stringify(g));
   // an edit sticks across a reload, the shipped list never overwrites it

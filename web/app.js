@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.6.4";
+  const VERSION = "0.6.5";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -241,6 +241,7 @@
   const pct = f => `${Math.round(f * 100)}%`;
 
   const ICON = {
+    x: '<path d="M6 6l12 12M18 6 6 18"/>',
     undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
     home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>',
     stats: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
@@ -296,6 +297,14 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.6.5", ["Why is this here? at the bottom of every film and series: the lists and ratings it came from. Switch a list off and remove the titles only it brought (anything you rated, ticked or noted stays; Undo).",
+      "A source that keeps failing gets a warning on Home and in Sync (how many days, what went wrong, what to do), and a notification on the third failure in a row.",
+      "Updates: Home says when a newer Saga is out; Get it opens your Saga website's download page. Settings › About › Check for updates.",
+      "For you on Home: suggestions from the films and series you rated 8 or more, by type and genre, with Add and Not interested.",
+      "Friends on your Saga website: switch sharing on (Settings › Accounts and sync) to see You and … on Home (taste match, both want to watch, what they loved) and their rating on a title.",
+      "Notifications on release day for games on your wishlist, backlog or Next list, and books you want.",
+      "Website: download a backup of your files; the Games export has the spreadsheet's columns, so it imports again.",
+      "Get started steps on a fresh install. The app follows Android's font size."]],
     ["0.6.4", ["Import your own games list: Settings › Import › Choose export files takes an Excel (.xlsx) or CSV spreadsheet with columns like Title, OG Release Date, OG Platform, Remake…, Owned Platform, HLTB, Rating, Franchise, Multiverse, Next. A preview first; importing again updates the list's columns and keeps your status, ratings, plays and notes; the same game on two consoles stays two entries; Undo puts things back."]],
     ["0.6.3", ["Posters and covers fade in as they load instead of popping in."]],
     ["0.6.2", ["Smoother during and after a sync: the screen is drawn from the last canon check while the new one is worked out in slices; repeated lookups of the synced titles are answered from memory; the progress bar updates at most 4 times a second; background lookups of posters, new seasons and streaming pause regularly.",
@@ -394,6 +403,25 @@
     ["5.4.1", ["Episode ratings from Trakt and IMDb, and rating episodes in the app.", "Steam Web API key option.", "IMDb lists counted correctly."]],
     ["5.4", ["Undo, tags, Picked for you, calendar export, shareable canon lists, error log, daily copy of your data."]],
   ];
+  // ---- 0.6.5: is there a newer Saga? The public code says which version is current; the app itself comes from your
+  // website's download page (the website's owner puts it there). Checked at most once a day.
+  const UPDATE_URL = "https://raw.githubusercontent.com/Banta02112000/Saga/main/web/app.js";
+  const verNum = v => String(v || "").split(".").map(x => parseInt(x, 10) || 0).reduce((a, x, i) => a + x * Math.pow(1000, 3 - i), 0);
+  async function checkUpdate(loud) {
+    if (!loud && Date.now() - (+db.get("upd_at", "0") || 0) < 20 * 3600e3) return db.get("upd_ver", "");
+    let v = "";
+    try {
+      const r = await Native.http("GET", UPDATE_URL + "?t=" + Math.floor(Date.now() / 3600e3), { headers: { Accept: "text/plain" } });
+      const m = r && r.status === 200 && /const VERSION = "([\d.]+)"/.exec(r.body || "");
+      if (!m) throw new Error(r && r.status ? `HTTP ${r.status}` : "no answer");
+      v = verNum(m[1]) > verNum(VERSION) ? m[1] : "";
+      db.set("upd_at", String(Date.now())); db.set("upd_ver", v);
+    } catch (e) { if (loud) toast(`Couldn't check for updates: ${e.message}`); return ""; }
+    if (loud) toast(v ? `Saga ${v} is out` : `Saga ${VERSION} is the newest`);
+    if (v) render();
+    return v;
+  }
+  function updateUrl() { const u = db.get("web_sync_url", "").replace(/\/+$/, ""); return u ? u + "/download" : ""; }
   function whatsNew(force) {
     const seen = db.get("seen_version", "");
     const fresh = !seen && !lib.all().length && !db.items(null, null).length;
@@ -1291,6 +1319,11 @@
         ${field("web_sync_key", "Sync key", { secret: true, hint: "Printed by  node server.js --set-password  on the server (needed for a public address; through Tailscale it works without one)." })}
         <label class="switch"><input type="checkbox" data-setting="web_sync_auto" ${db.get("web_sync_auto", "1") === "1" ? "checked" : ""}><span>Sync with the website by itself<small class="muted" style="display:block">After each sync, when you open the app, and a little after you change something.</small></span></label>
         <button class="btn" data-action="websync" ${db.get("web_sync_url") ? "" : "disabled"}>${icon("sync")}Sync with the website now</button>
+        ${window.__sagaWeb || db.get("web_sync_url") ? `<label class="switch"><input type="checkbox" data-action="webshare" ${db.get("web_share") === "1" ? "checked" : ""}><span>Share my films, series, games and books with the other people on this website<small class="muted" style="display:block">They see titles, status and ratings (not notes, diary or keys), and you see theirs if they share too: “You and …” on Home, and their rating on a title.</small></span></label>
+        <button class="btn small" data-action="peoplenow">Refresh friends</button>` : ""}
+        ${window.__sagaWeb ? `<a class="btn" href="api/backup" download>${icon("box")}Download a backup of your files (.zip)</a>`
+          : db.get("web_sync_url") ? `<button class="btn" data-action="open" data-url="${esc(db.get("web_sync_url").replace(/\/+$/, "") + "/api/backup")}">${icon("box")}Download the website's copy (.zip)</button>` : ""}
+        <p class="small muted" style="margin:0">Phone and website hold the same files, so either one can rebuild the other. For a copy of every account on the Pi (onto a USB stick, say): <code>node server.js --backup /media/usb/saga.zip</code>.</p>
         ${WS.get().at ? `<p class="small muted" style="margin:0">Last: ${esc(new Date(WS.get().at).toLocaleString(lang() === "it" ? "it-IT" : "en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }))} · ${esc(WS.get().msg || "")}</p>` : ""}
       </section>
       <section class="stack">
@@ -1433,6 +1466,7 @@
         <p class="small muted" style="margin:0">Saga ${esc(VERSION)}, pre-alpha.</p>
         <p class="small muted" style="margin:0">This product uses the TMDB API but is not endorsed or certified by TMDB. Other data comes from Trakt, IMDb, TVmaze, Jikan, AniList, Open Library, Google Books, Steam, IsThereAnyDeal and CheapShark.</p>
         <button class="btn small" data-action="whatsnew">What's new</button>
+        <button class="btn small" data-action="updcheck">Check for updates</button>
       </section>
       <section>
         <h2>Data</h2>
@@ -1952,6 +1986,41 @@
     }
     return [...m.values()].sort((a, b) => a.source.localeCompare(b.source) || a.name.localeCompare(b.name));
   }
+  // ---- 0.6.5: where a title came from. Every synced row (not Saga's own copy) that is the same title.
+  const SRC_NAME = { imdb: "IMDb", trakt: "Trakt", letterboxd: "Letterboxd", csv: "an import", url: "a canon list" };
+  const KIND_NAME = { watched: "watched", rated: "ratings", watchlist: "watchlist", list: "list", collection: "collection" };
+  function originsIndex() {
+    const ix = new Map(), put = (k, r) => { if (!k) return; const a = ix.get(k); if (a) a.push(r); else ix.set(k, [r]); };
+    for (const r of db.items()) { if (r.source === "app") continue; put(r.imdb && "i:" + r.imdb, r); put(r.tmdb && "t:" + r.tmdb, r); put(r.norm && "n:" + r.norm, r); }
+    return ix;
+  }
+  function originsOf(it, ix = originsIndex()) {
+    const tv = it.type === "show", nm = C.norm(it.title), out = new Set();
+    const same = r => (r.medium === "TV Series") === tv && r.medium !== "Video Game" && r.medium !== "Episode";
+    for (const k of [it.imdb && "i:" + it.imdb, it.tmdb && "t:" + it.tmdb]) for (const r of (k && ix.get(k)) || []) if (same(r)) out.add(r);
+    for (const r of ix.get("n:" + nm) || []) if (same(r) && (!it.year || !r.year || Math.abs(r.year - it.year) <= 1) && (!it.imdb || !r.imdb || r.imdb === it.imdb)) out.add(r);
+    return [...out];
+  }
+  const originKey = r => `${r.source}|${r.kind === "list" ? r.list_name || "" : "#" + r.kind}`;
+  const originLabel = r => `${SRC_NAME[r.source] || r.source} ${KIND_NAME[r.kind] || r.kind}${r.kind === "list" && r.list_name ? ` “${r.list_name}”` : ""}${r.rating ? ` · rated ${r.rating}` : ""}${r.date ? ` · ${String(r.date).slice(0, 10)}` : ""}`;
+  // something you did in Saga: these titles are never removed with a list
+  const yours = it => it.rating > 0 || it.watches.some(Boolean) || Object.keys(it.eps || {}).length > 0 || !!it.notes || it.ratedHere;
+  // the titles that only a given list brought, that you haven't touched
+  function listOnlyItems(source, name) {
+    const ix = originsIndex(), k = `${source}|${name || ""}`;
+    return lib.all().filter(it => { if (yours(it)) return false; const o = originsOf(it, ix); return o.length > 0 && o.every(r => originKey(r) === k); });
+  }
+  function whyHtml(it) {
+    const o = originsOf(it), seen = new Set();
+    const rows = o.filter(r => { const k = originKey(r); if (seen.has(k)) return false; seen.add(k); return true; });
+    const lists = rows.filter(r => r.kind === "list");
+    return `<details class="why"><summary class="small muted">Why is this here?</summary><div class="small" style="margin:6px 0 10px">
+      <p class="muted" style="margin:0 0 6px">Added ${esc(new Date(it.added || Date.now()).toLocaleDateString(lang() === "it" ? "it-IT" : "en-GB", { day: "numeric", month: "short", year: "numeric" }))}${it.src ? ` by ${esc(SRC_NAME[it.src] || (it.src === "sync" ? "a sync" : it.src))}` : ""}.</p>
+      ${rows.length ? `<ul style="margin:0;padding-left:18px">${rows.map(r => `<li>${esc(originLabel(r))}${r.kind === "list" ? (listOn(r.source, r.list_name) ? "" : ` <span class="muted">(switched off)</span>`) : ""}</li>`).join("")}</ul>`
+        : `<p class="muted" style="margin:0">Not on any of your synced lists or ratings now: you added it, an import did, or a list it was on has changed since.</p>`}
+      ${lists.filter(r => listOn(r.source, r.list_name)).map(r => `<button class="btn quiet small" style="margin-top:6px" data-action="listpurge" data-k="${esc(r.source + "|" + (r.list_name || ""))}">Switch off “${esc(r.list_name || "list")}” and remove its titles…</button>`).join("")}
+    </div></details>`;
+  }
   let listMemo = null; // { st, lists } for one library pass; cleared when the pass ends
   function listOn(source, name) {
     if (listMemo) { const k = `${source}|${name || ""}`; if (k in listMemo.on) return listMemo.on[k]; return (listMemo.on[k] = listOnRaw(source, name, listMemo.lists)); }
@@ -2410,6 +2479,8 @@
         ${(() => { const x = streamsFor(it); return x ? `<p class="small" style="margin:4px 0 8px">${x.mine ? `On ${esc(shortName(x.o.name))}${x.o.res ? ` in ${esc(x.o.res)}` : ""}, one of your services` : x.o ? `Streaming on ${esc(shortName(x.o.name))}` : `Not in Italy: ${esc(x.vpn.flag)} ${esc(shortName(x.vpn.name))} with a VPN`}</p>` : ""; })()}
         ${it.anime && it.mal ? relHtml(it) : ""}
         ${libExtrasHtml(it)}
+        ${(() => { const f = friendsOn(it); return f.length ? `<p class="small" style="margin:8px 0">${f.map(x => `<b>${esc(x.name)}</b>: ${esc(LST[x.status] || x.status)}${x.rating ? ` · ★ ${x.rating}` : ""}`).join(" · ")}</p>` : ""; })()}
+        ${whyHtml(it)}
         <button class="sheetbtn" data-action="libwhere">${icon("eye")}Where to watch and details</button>
         <button class="sheetbtn" data-action="open" data-url="${esc(it.imdb ? `https://www.imdb.com/title/${it.imdb}/` : `https://www.imdb.com/find/?q=${encodeURIComponent(it.title + " " + (it.year || ""))}`)}">${icon("open")}Open on IMDb</button>
         <button class="sheetbtn" data-action="mlistadd" data-k="lib:${esc(it.id)}">${icon("plus")}Add to a list</button>
@@ -2803,9 +2874,56 @@
     if (w) return { img: w.poster, kicker: "On your watchlist", title: w.title, text: [w.year, w.type === "show" ? "Series" : "Film"].filter(Boolean).join(" · "), btns: `<button class="btn primary" data-action="libopen" data-id="${esc(w.id)}">Open</button>` };
     return null;
   }
+  // ---- 0.6.5: suggestions from your ratings ("For you" on Home). Worked out after a sync, at most once a day.
+  const recsHidden = () => { try { return new Set(JSON.parse(db.get("recs_hide", "[]"))); } catch (e) { return new Set(); } };
+  const recsNow = () => { const r = db.cacheGet("recs:now"); return r && r.items ? r : null; };
+  async function recsRefresh(loud) {
+    if (!db.get("tmdb_key") || (!loud && recsNow() && Date.now() - recsNow().at < 20 * 3600e3)) return;
+    const seeds = lib.all().filter(it => it.rating >= 8 && (it.type === "movie" || it.type === "show"))
+      .sort((a, b) => String(b.ratedAt || b.watches[b.watches.length - 1] || "").localeCompare(String(a.ratedAt || a.watches[a.watches.length - 1] || "")) || b.rating - a.rating)
+      .slice(0, 12).map(it => ({ title: it.title, year: it.year, type: it.type, tmdb: it.tmdb, imdb: it.imdb, rating: it.rating }));
+    if (!seeds.length) { if (loud) toast("Rate a few films or series 8 or more first"); return; }
+    const hid = recsHidden();
+    try {
+      const items = await C.recommend(db, Native.http, seeds, x => hid.has(x.type + x.tmdb) || !!lib.find({ type: x.type, tmdb: x.tmdb, title: x.title, year: x.year }));
+      db.cacheSet("recs:now", { at: Date.now(), items });
+      if (loud) toast(`${items.length} suggestions`); render();
+    } catch (e) { if (loud) toast(e.message); }
+  }
+  function recsHtml() {
+    const R = recsNow(); if (!R) return "";
+    const hid = recsHidden(), f = ui.recF || "all";
+    let items = R.items.filter(x => !hid.has(x.type + x.tmdb) && !lib.find({ type: x.type, tmdb: x.tmdb, title: x.title, year: x.year }));
+    if (!items.length) return "";
+    const genres = Object.entries(items.reduce((m, x) => { for (const g of x.genres.slice(0, 2)) m[g] = (m[g] || 0) + 1; return m; }, {})).sort((a, b) => b[1] - a[1]).slice(0, 5).map(x => x[0]);
+    items = items.filter(x => f === "all" || (f === "movie" || f === "show" ? x.type === f : x.genres.includes(f))).slice(0, 10);
+    const chip = (k, l) => `<button class="chip ${f === k ? "on" : ""}" data-action="recf" data-v="${esc(k)}">${esc(l)}</button>`;
+    return `<section>${Kit.head("For you", `<button class="btn quiet small" data-action="recsnow">Refresh</button>`)}
+      <div class="chips" style="margin-bottom:8px">${chip("all", "All")}${chip("movie", "Films")}${chip("show", "Series")}${genres.map(g => chip(g, g)).join("")}</div>
+      <div class="listcard">${items.map(x => `<div class="item"><img class="thumb" loading="lazy" src="${esc(x.poster)}" alt="" data-fb="ph" data-fbc="thumb ph ${x.type === "show" ? "series" : "movie"}" data-fbt="${esc(initials(x.title))}">
+        <div class="grow" style="min-width:0"><b class="ell">${esc(x.title)}</b><div class="small muted ell">${esc([x.year, x.type === "show" ? "Series" : "Film", x.genres.slice(0, 2).join(", "), x.vote ? "★ " + x.vote.toFixed(1) : ""].filter(Boolean).join(" · "))}</div>
+        <div class="small muted ell">Because you rated ${esc(x.because.join(", "))}</div></div>
+        <button class="btn quiet small" data-action="recadd" data-k="${esc(x.type + x.tmdb)}">${icon("plus")}Add</button><button class="iconbtn" data-action="rechide" data-k="${esc(x.type + x.tmdb)}" aria-label="Not interested">${icon("x")}</button></div>`).join("") || `<p class="small muted" style="padding:8px">Nothing in this group.</p>`}</div></section>`;
+  }
+  // 0.6.5: first steps on a fresh install (the Starter build), each ticked when done
+  function startHtml() {
+    const steps = [
+      ["features", "Pick your tabs", "Films and series, Games, Books, Doctor Who: switch off what you don't use.", db.get("features_seen") === "1"],
+      ["accounts", "Add a TMDB key", "Free from themoviedb.org: posters, details, new seasons, suggestions.", !!db.get("tmdb_key")],
+      ["accounts", "Connect Trakt or IMDb", "Brings your ratings, watchlist and history; a rating counts as watched.", !!(db.get("username") || db.get("imdb_user"))],
+      ["accounts", "Your Saga website", "The address and sync key you were given: your data on your phone and the web, and friends.", !!db.get("web_sync_url")],
+      ["importhub", "Import from other apps", "Letterboxd, Goodreads, HowLongToBeat, Steam, MyAnimeList, a games spreadsheet…", !!db.get("hub_last")],
+    ];
+    const done = steps.filter(x => x[3]).length;
+    return `<section>${Kit.head(`Get started · ${done} of ${steps.length}`)}<div class="listcard">${steps.map(([k, t, d, ok]) => `<div class="item" data-action="go" data-sec="settings" data-scroll="${k}" role="button">
+      <span class="tilecheck" style="position:static;${ok ? "" : "opacity:.35"}" aria-label="${ok ? "Done" : "To do"}">${icon(ok ? "check" : "chev")}</span><div class="grow"><b>${esc(t)}</b><div class="small muted">${esc(d)}</div></div></div>`).join("")}</div></section>`;
+  }
   function renderHome() {
     const st = status(), parts = [];
     // 0.5.8: a line when the last sync failed in part or is old, with the way to it
+    { const nv = db.get("upd_ver", ""); if (nv && verNum(nv) > verNum(VERSION) && db.get("upd_hide") !== nv) parts.push(`<div class="nextbox" style="margin-bottom:12px"><div class="grow small"><b>Saga ${esc(nv)} is out</b> (you have ${VERSION}). ${updateUrl() ? "Get it from your Saga website; your data stays." : "Ask whoever gave you Saga for the new version; your data stays."}</div>${updateUrl() ? `<button class="btn small" data-action="updget">Get it</button>` : ""}<button class="iconbtn" data-action="updhide" aria-label="Hide">${icon("x")}</button></div>`); }
+    { const sick = C.sourceHealth(db);
+      if (!ui.job && sick.length) parts.push(`<div class="nextbox warnbox" style="margin-bottom:12px" data-action="go" data-sec="sync" role="button"><div class="grow small"><b>${esc(healthText(sick[0]))}</b>${sick.length > 1 ? ` · and ${sick.length - 1} more` : ""}<div class="muted ell">${esc(sick[0].msg)}</div></div><span class="small">Fix ›</span></div>`); }
     { const last = parseFloat(db.get("last_sync", "0")) || 0, fails = failedLabels(), h = last ? (Date.now() / 1000 - last) / 3600 : null;
       if (!ui.job && (db.get("username") || db.get("imdb_user")) && (fails.length || h == null || h > 48))
         parts.push(`<div class="nextbox" style="margin-bottom:12px" data-action="go" data-sec="sync"><div class="grow small">${h == null ? "Not synced yet" : `Last sync ${h > 48 ? `${Math.round(h / 24)} days ago` : `${Math.max(1, Math.round(h))} h ago`}`}${fails.length ? ` · ${fails.length} part${fails.length === 1 ? "" : "s"} failed: ${esc(fails.slice(0, 3).join(", "))}` : ""}</div><span class="small">Open ›</span></div>`); }
@@ -2815,7 +2933,7 @@
         <p>Search and add films, series, games and books, tick episodes as you go, log every rewatch with its date, and find the gaps in your franchises.</p>
         <div class="row wrap"><button class="btn primary" data-action="go" data-sec="library">${icon("missing")}Search and add</button>
         <button class="btn" data-action="go" data-sec="settings" data-scroll="importhub">${icon("upload")}Import</button>
-        <button class="btn" data-action="go" data-sec="settings" data-scroll="accounts">${icon("sync")}Connect Trakt / IMDb</button></div></div></section>`;
+        <button class="btn" data-action="go" data-sec="settings" data-scroll="accounts">${icon("sync")}Connect Trakt / IMDb</button></div></div></section>${startHtml()}`;
     }
     const h = homeHero();
     if (h) parts.push(`<section class="hero2"><div class="bg${h.img ? "" : " gen"}" style="${h.img ? `background-image:url('${esc(h.img)}')` : `--h:${Kit.hue(h.title)}`}"></div>
@@ -2823,6 +2941,8 @@
     const cont = homeContinue();
     if (cont.length) parts.push(`<section>${Kit.head("Continue")}${Kit.rail(cont)}</section>`);
     const rec = recentAll(16);
+    { const fy = recsHtml(); if (fy) parts.push(fy); }
+    { const fr = friendsHtml(); if (fr) parts.push(fr); }
     if (rec.length) parts.push(`<section>${Kit.head("Recently watched, played and read", `<button class="btn quiet small" data-action="recentall">Diary</button>`)}${Kit.rail(rec.map(recentTile))}</section>`);
     if (db.get("home_calendar", "1") === "1") {
       const soon = comingUp(14);
@@ -3080,6 +3200,7 @@
       ${!ui.job && ui.stalls ? `<section class="card"><div class="kicker">The screen paused during this job</div><p class="small" style="margin:6px 0 10px">${esc(ui.stalls)}</p><button class="btn small" data-action="copystalls">Copy this line</button></section>` : ""}
       <section class="card"><div class="row"><span class="st ${liveOn() ? "ok" : ""}" style="width:12px;height:12px;border-radius:50%;background:${liveOn() ? "var(--ok)" : "var(--faint)"};flex:none"></span><div class="grow"><b>Live sync with Trakt</b>
         <div class="small muted">${!db.get("username") ? "Add your Trakt username in Settings." : !liveOn() ? "Off. Switch it on in Settings › Trakt." : db.get("token") ? `On: what you log goes to Trakt within seconds; Trakt is checked every 10 minutes while the app is open, and in the background.${db.get("live_pull_at") ? ` Last check ${esc(new Date(+db.get("live_pull_at")).toLocaleTimeString(lang() === "it" ? "it-IT" : "en-GB", { hour: "2-digit", minute: "2-digit" }))}.` : ""}` : "On for reading: your public profile is checked every 3 hours. Sign in to Trakt to send what you log here."}</div></div></div></section>
+      ${(() => { const sick = C.sourceHealth(db); return sick.length ? `<section>${Kit.head("Keeps failing")}<div class="listcard">${sick.map(h => `<div class="srcrow"><span class="st fail"></span><div class="grow"><b>${esc(healthText(h))}</b><div class="small muted">${esc(h.msg)}</div><div class="small muted">${/IMDb/i.test(h.label) ? "IMDb: sign in to IMDb in Settings › Accounts, or check the list is public." : /Trakt/i.test(h.label) ? "Trakt: sign in again in Settings › Accounts." : "Check the address in Settings, or remove the source."}</div></div></div>`).join("")}</div></section>` : ""; })()}
       <section>${Kit.head("Sources")}<div class="listcard">${sources.length ? sources.map(l => srcRow(l, state[l], ui.job && /Syncing (.+)/.test(ui.status || "") && (ui.status || "").includes(l))).join("") : `<p class="muted small" style="padding:10px 0">No sources yet. Add your Trakt username or IMDb profile in Settings.</p>`}</div>
         <button class="btn small" style="margin-top:10px" data-action="go" data-sec="settings" data-scroll="accounts">Accounts and lists</button></section>
       <section>${Kit.head("Connection test", `<button class="btn quiet small" data-action="nettest"${ui.netTesting ? " disabled" : ""}>${ui.netTesting ? "Testing…" : "Test"}</button>`)}<div class="listcard">${ui.netTest ? ui.netTest.map(t => `<div class="srcrow"><span class="st ${t.ok ? "ok" : "fail"}"></span><div class="grow"><b>${esc(t.name)}</b><div class="small muted">${esc(t.msg)}</div></div></div>`).join("") : `<p class="muted small" style="padding:10px 0">Checks whether your phone can reach Trakt, TMDB, IMDb and the other sources. If one is blocked here but opens on another network, the block is on the network, not in the app.</p>`}</div></section>
@@ -3183,6 +3304,52 @@
   // its own small file, so keeping track doesn't itself change the synced files
   const WS = { get: () => { try { return JSON.parse(Native.load("web_sync.json") || "{}") || {}; } catch (e) { return {}; } }, set: o => Native.save("web_sync.json", JSON.stringify(Object.assign(WS.get(), o))) };
   function webSyncSoon(ms = 30000) { if (!db.get("web_sync_url") || db.get("web_sync_auto", "1") !== "1") return; clearTimeout(webSyncT); webSyncT = setTimeout(() => syncWithWebServer(false).catch(() => {}), ms); }
+  // ---- 0.6.5: friends on your Saga website (each person decides to share; see /api/people on the server)
+  async function webApi(method, pth, body) {
+    if (window.__sagaWeb) { const r = await fetch(pth, { method, credentials: "same-origin", headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined }); if (!r.ok) throw new Error(`the website answered ${r.status}`); return r.json(); }
+    const base = String(db.get("web_sync_url", "")).trim().replace(/\/+$/, "");
+    if (!base) throw new Error("set the website address first");
+    const H = Object.assign({ Accept: "application/json" }, body ? { "Content-Type": "application/json" } : {}, db.get("web_sync_key") ? { Authorization: "Bearer " + db.get("web_sync_key") } : {});
+    const r = await Native.http(method, base + "/" + pth, { headers: H, body: body ? JSON.stringify(body) : undefined });
+    if (r.status !== 200) throw new Error(`the website answered ${r.status || r.error || "nothing"}`);
+    return JSON.parse(r.body);
+  }
+  const people = () => { const p = db.cacheGet("people:now"); return (p && p.people) || []; };
+  async function peopleRefresh(loud) {
+    if (!window.__sagaWeb && !db.get("web_sync_url")) return;
+    try { const r = await webApi("GET", "api/people"); db.cacheSet("people:now", { at: Date.now(), people: r.people || [] }); if (loud) toast(r.people.length ? `${r.people.length} sharing with you` : "Nobody shares with you yet"); render(); }
+    catch (e) { if (loud) toast(`Friends: ${e.message}`); }
+  }
+  // the same title in a friend's library
+  const friendKey = x => x.imdb ? "i:" + x.imdb : x.tmdb ? "t:" + x.type + x.tmdb : "n:" + x.type + C.norm(x.title) + (x.year || "");
+  function friendsOn(it) {
+    const out = [];
+    for (const P of people()) { const f = P.lib.find(x => (it.imdb && x.imdb === it.imdb) || (it.tmdb && x.tmdb === it.tmdb && x.type === it.type) || (x.type === it.type && C.norm(x.title) === C.norm(it.title) && (!it.year || !x.year || Math.abs(x.year - it.year) <= 1)));
+      if (f) out.push({ name: P.name, status: f.status, rating: f.rating }); }
+    return out;
+  }
+  // you and one friend: taste match on titles you both rated, both seen, both want, what they loved that you haven't seen
+  function friendCompare(P) {
+    const mine = new Map(lib.all().map(it => [friendKey(it), it]));
+    const both = [], bothWant = [], loved = [];
+    for (const x of P.lib) {
+      const it = mine.get(friendKey(x)) || lib.find({ type: x.type, imdb: x.imdb, tmdb: x.tmdb, title: x.title, year: x.year });
+      if (it && it.rating && x.rating) both.push([it.rating, x.rating]);
+      if (it && it.status === "watchlist" && x.status === "watchlist") bothWant.push(it);
+      if (!it && x.rating >= 8) loved.push(x);
+    }
+    const match = both.length >= 3 ? Math.round(100 - both.reduce((a, [m, f]) => a + Math.abs(m - f), 0) / both.length * 11) : null;
+    const seen = P.lib.filter(x => x.status === "watched" || x.status === "watching").filter(x => { const it = mine.get(friendKey(x)); return it && (it.status === "watched" || it.status === "watching"); }).length;
+    return { match: match == null ? null : Math.max(0, Math.min(100, match)), rated: both.length, seen, bothWant, loved: loved.sort((a, b) => b.rating - a.rating) };
+  }
+  function friendsHtml() {
+    const ps = people(); if (!ps.length) return "";
+    return ps.map(P => { const c = friendCompare(P);
+      return `<section>${Kit.head(`You and ${esc(P.name)}`)}
+        <div class="sstrip"><div><b>${c.match == null ? "–" : c.match + "%"}</b><span>taste match${c.rated ? ` (${c.rated} both rated)` : ""}</span></div><div><b>${fmt(c.seen)}</b><span>both watched</span></div><div><b>${fmt(c.bothWant.length)}</b><span>both want to watch</span></div><div><b>${fmt(P.games.filter(g => g.status === "done").length)}</b><span>games ${esc(P.name)} finished</span></div></div>
+        ${c.bothWant.length ? `<h4>You both want to watch</h4><div class="listcard">${c.bothWant.slice(0, 8).map(it => `<div class="item" data-action="libopen" data-id="${esc(it.id)}">${libThumb(it)}<b class="grow ell">${esc(it.title)}</b><span class="small muted">${esc(it.year || "")}</span></div>`).join("")}</div>` : ""}
+        ${c.loved.length ? `<h4>${esc(P.name)} loved, you haven't seen</h4><div class="listcard">${c.loved.slice(0, 8).map((x, i) => `<div class="item"><div class="grow" style="min-width:0"><b class="ell">${esc(x.title)}</b><div class="small muted">${esc([x.year, x.type === "show" ? "Series" : "Film", "★ " + x.rating].filter(Boolean).join(" · "))}</div></div><button class="btn quiet small" data-action="friendadd" data-p="${esc(P.name)}" data-i="${P.lib.indexOf(x)}">${icon("plus")}Add</button></div>`).join("")}</div>` : ""}</section>`; }).join("");
+  }
   async function syncWithWebServer(loud) {
     const base = String(db.get("web_sync_url", "")).trim().replace(/\/+$/, "");
     if (!base || webSyncing || ui.job) return "";
@@ -3236,6 +3403,9 @@
   // 0.5.7: what follows a sync runs one thing after another, after the sync's own save, instead of all at once
   let afterRunning = false;
   async function afterSync() {
+    setTimeout(() => checkUpdate(false).catch(() => {}), 5000);
+    setTimeout(() => recsRefresh(false).catch(() => {}), 9000);
+    setTimeout(() => peopleRefresh(false).catch(() => {}), 12000);
     if (afterRunning) return;
     afterRunning = true;
     try {
@@ -3605,8 +3775,12 @@
       for (const b of books.books) rows.push([b.title, b.authors[0] || "", BC.bookIsbn(b), b.rating ? Math.round(b.rating / 2) : 0, { want: "to-read", reading: "currently-reading", read: "read", dnf: "did-not-finish" }[b.status], b.finished ? new Date(b.finished).toISOString().slice(0, 10).replace(/-/g, "/") : "", new Date(b.added || Date.now()).toISOString().slice(0, 10).replace(/-/g, "/"), (b.shelves || []).join(" "), b.pages || "", BC.readsOf(b).length]);
       name = "saga-goodreads.csv"; text = csv(rows);
     } else {
-      const rows = [["Title", "Platform", "Status", "Release", "Rating", "Finished dates", "Playthroughs", "Franchise", "Multiverse", "Owned on", "Hours", "Steam app"]];
-      for (const g of games.visible()) rows.push([g.title, g.platform, g.status, g.date || g.dateText, g.rating || "", g.plays.join(" "), g.plays.length, g.franchise, g.multiverse, g.owned, g.hours || "", g.steam || ""]);
+      // 0.6.5: the same columns the games spreadsheet import reads, so this file can be edited and imported again
+      const NA = v => (v === null || v === undefined || v === "" ? "N/A" : v);
+      const rows = [["Title", "OG Release Date", "OG Platform", "Remake Name", "Remake Release Date", "Remake Platform", "Owned Platform", "HLTB", "HLTB Bundle", "Rating", "Franchise", "Multiverse", "Next",
+        "Status", "My rating", "Finished dates", "Notes", "Steam app"]];
+      for (const g of games.visible()) rows.push([g.title, g.date || g.dateText || "N/A", NA(g.platform), g.remake ? g.remake.title : "N/A", g.remake ? NA(g.remake.date) : "N/A", g.remake ? NA(g.remake.platform) : "N/A",
+        NA(g.owned), NA(g.hours), NA(g.hoursRemake), NA(g.imdbR), g.franchise || "", g.multiverse || "", g.next ? "X" : "", g.status, g.rating || "", g.plays.join(" "), g.notes || "", g.steam || ""]);
       name = "saga-games.csv"; text = csv(rows);
     }
     Native.saveAs(name, text).then(ok => toast(ok ? `${name} saved` : "Not saved"));
@@ -3812,6 +3986,8 @@
     });
   }
 
+  // 0.6.5: a source that keeps failing, in words: "IMDb ratings hasn't worked for 4 days (3 syncs in a row)"
+  const healthText = h => `${h.label} ${h.okAt ? `hasn't worked for ${h.days ? `${h.days} day${h.days === 1 ? "" : "s"}` : "a day"}` : "has never worked"} (${h.streak} syncs in a row)`;
   const failedLabels = () => { try { return JSON.parse(db.get("last_failed", "[]")); } catch (e) { return []; } };
   const labelOf = line => (line.match(/^(?:OK|FAIL|PART)\s+([^:]+):/) || [])[1];
 
@@ -3828,6 +4004,7 @@
         ui.report = (ui.report || "").split("\n").map(l => fresh.get(labelOf(l)) || l).join("\n");
       } else ui.report = r.report;
       db.set("last_report", ui.report);
+      for (const h of C.sourceHealth(db)) if (h.streak === 3) Native.notify(C.hashId("sick|" + h.label), `${h.label} keeps failing`, `${healthText(h)}: ${h.msg}`.slice(0, 200), "sync");
       invalidate();
       await C.breathe();
       if (feat("streamAlerts")) for (const n of C.streamAlerts(db, await statusSoon(), myServices())) Native.notify(n.id, n.title, n.text, n.tab);
@@ -3914,12 +4091,33 @@
         if (!rows.length) { toast("No canon entries in this multiverse yet"); break; }
         const text = `# ${name}\n` + rows.map(c => `${c.title}${c.year ? ` (${c.year})` : ""}`).join("\n") + "\n";
         Native.saveAs(`${name.replace(/[^\w ]+/g, "").trim() || "canon"} canon list.txt`, text).then(ok => toast(ok ? `${rows.length} entries saved. Anyone can load it with Settings › Import › Franchise mapping file.` : "Not saved")); break; }
+      case "listpurge": { const [src, ...nm] = el.dataset.k.split("|"), name = nm.join("|"), gone = listOnlyItems(src, name);
+        const total = syncedLists().find(l => l.source === src && l.name === name);
+        confirmDialog(`Switch off “${name || src}”?`, `${gone.length ? `${fmt(gone.length)} title${gone.length === 1 ? "" : "s"} that only this list brought will be removed` : "No titles came only from this list"}. Titles also on another list or in your ratings, and anything you've rated, ticked or written notes on, stay.${total ? ` The list has ${fmt(total.n)} entries.` : ""}`, "Switch off and remove", () => {
+          const before = JSON.stringify(lib.toJSON());
+          let st = {}; try { st = JSON.parse(db.get("lib_lists", "{}")) || {}; } catch (e) { st = {}; }
+          st[el.dataset.k] = 0; db.set("lib_lists", JSON.stringify(st));
+          for (const it of gone) lib.remove(it.id);
+          libSave(); closeOverlay(); ui.libOpen = null; render();
+          toast(`List switched off, ${fmt(gone.length)} title${gone.length === 1 ? "" : "s"} removed`, () => { const j = JSON.parse(before); lib.items = j.items; lib.adopted = j.adopted; lib.outbox = j.outbox || []; lib._ix = null; delete st[el.dataset.k]; db.set("lib_lists", JSON.stringify(st)); libSave(); render(); });
+        });
+        break; }
       case "listlib": { let st = {}; try { st = JSON.parse(db.get("lib_lists", "{}")) || {}; } catch (e) { st = {}; }
         const [src, ...nm] = el.dataset.k.split("|"), on = el.dataset.on ? true : !listOn(src, nm.join("|")); st[el.dataset.k] = on ? 1 : 0; db.set("lib_lists", JSON.stringify(st));
         const b = libTotals(); libAdopt(); libSave(); const a = libTotals(); toast(on ? `List switched on: ${fmt(a.titles - b.titles)} titles added` : "List switched off (titles already added stay)"); render(); break; }
       case "lookback": { delete lib.adopted[el.dataset.k]; const b = libTotals(); libAdopt(); libSave(); const a = libTotals(); toast(a.titles > b.titles ? "Brought into the library" : "Updated"); render(); break; }
       case "theme": setLook("saga_theme", el.dataset.v === "night" ? "" : el.dataset.v); render(); break;
       case "whatsnew": whatsNew(true); break;
+      case "updcheck": checkUpdate(true); break;
+      case "recsnow": recsRefresh(true); break;
+      case "webshare": { const on = el.checked; db.set("web_share", on ? "1" : "0"); webApi("POST", "api/share", { on }).then(() => { toast(on ? "Sharing with the other people on the website" : "Not sharing any more"); peopleRefresh(false); }, e => { toast(e.message); db.set("web_share", on ? "0" : "1"); render(); }); break; }
+      case "peoplenow": peopleRefresh(true); break;
+      case "friendadd": { const P = people().find(x => x.name === el.dataset.p), x = P && P.lib[+el.dataset.i]; if (x) { libAdd({ type: x.type, title: x.title, year: x.year, imdb: x.imdb, tmdb: x.tmdb, poster: x.poster }, "watchlist"); render(); } break; }
+      case "recf": ui.recF = el.dataset.v; render(); break;
+      case "recadd": { const x = (recsNow() || { items: [] }).items.find(y => y.type + y.tmdb === el.dataset.k); if (x) { libAdd({ type: x.type, title: x.title, year: x.year, tmdb: x.tmdb, poster: x.poster, overview: x.overview }, "watchlist"); render(); } break; }
+      case "rechide": { const h = recsHidden(); h.add(el.dataset.k); db.set("recs_hide", JSON.stringify([...h].slice(-500))); render(); toast("Won't suggest it again", () => { const h2 = recsHidden(); h2.delete(el.dataset.k); db.set("recs_hide", JSON.stringify([...h2])); render(); }); break; }
+      case "updget": Native.openUrl(updateUrl()); break;
+      case "updhide": db.set("upd_hide", db.get("upd_ver", "")); render(); break;
       case "undo": { const f = undoFn; undoFn = null; $("#toast").classList.remove("show"); if (f) { try { f(); } catch (e) { logError("undo", e.message); } } break; }
       case "errcopy": Native.copy(`Saga ${VERSION} error log\n` + errLog().map(x => `${new Date(x.at).toISOString()} [${x.k}] ${x.s || ""} v${x.v}${x.n > 1 ? " x" + x.n : ""}: ${x.m}`).join("\n")); toast("Error log copied"); break;
       case "librandom": { const pool = lib.all().filter(x => x.status === "watchlist"); if (!pool.length) { toast("Your watchlist is empty"); break; } const pick = pool[Math.floor(Math.random() * pool.length)]; openLib(pick.id); toast(`How about ${pick.title}?`); break; }
@@ -4182,6 +4380,7 @@
     if (el.dataset && el.dataset.lang) { BantaShell.setLang(el.value); toast(el.value === "it" ? "Italiano attivo" : "English on"); render(); return; }
     if (el.dataset && el.dataset.feature) {
       BantaShell.setFeature(el.dataset.feature, el.checked);
+      db.set("features_seen", "1");
       if (el.dataset.feature === "streamAlerts") { db.set("stream_alerts", el.checked ? "1" : "0"); db.flush(); }
       toast(`${FEATURES.find(f => f[0] === el.dataset.feature)[1]}: ${el.checked ? "on" : "off"}`);
       return;
@@ -4263,6 +4462,8 @@
   if (lsGet("saga_theme")) setLook("saga_theme", lsGet("saga_theme")); // the phone's bars follow the theme
   // (automated test browsers skip it unless they ask, so it doesn't cover what they're testing)
   setTimeout(() => { try { if (!$(".sheet") && !BantaAI.isOpen() && (!navigator.webdriver || window.__wantWhatsNew)) whatsNew(false); } catch (e) { logError("whatsnew", e.message); } }, 900);
+  // 0.6.5: friends, suggestions and the update check also when no sync runs (the website, a quick look)
+  if (!navigator.webdriver) setTimeout(() => { peopleRefresh(false).catch(() => {}); recsRefresh(false).catch(() => {}); checkUpdate(false).catch(() => {}); }, 15000);
   setInterval(() => { if (!document.hidden) livePull(); }, 5 * 60000);
   setTimeout(() => { fillImages().catch(() => {}); if (secOn("games")) GC.linkSteam(games, Saga.http, 40, 700).then(n => { if (n) { games.save(); if (!document.querySelector("#overlay .sheet")) render(); } }).catch(() => {}); }, 2500);
   if (db.get("bg_enabled", "1") === "1" && !db.get("notif_asked")) { Native.requestNotifications(); db.set("notif_asked", "1"); }
