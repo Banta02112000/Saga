@@ -20,6 +20,10 @@ const mock = (seed) => {
   const reply = (m, url, body) => {
     const J = (o, st) => ({ status: st || 200, body: JSON.stringify(o) });
     if (/^https:\/\/saga\.test\//.test(url) && window.__webSrv) return window.__webSrv(m, url, body);
+    if (/themoviedb\.org\/3\/movie\/949(\?|$)/.test(url)) return J({ id: 949, title: "Heat", release_date: "1995-12-15", credits: { crew: [{ job: "Director", name: "Ann Director" }], cast: [{ name: "Al Actor" }] }, external_ids: { imdb_id: "tt0113277" } });
+    if (/themoviedb\.org\/3\/search\/person/.test(url)) return J({ results: [{ id: 7, name: "Ann Director", popularity: 9, known_for_department: "Directing" }] });
+    if (/themoviedb\.org\/3\/person\/7\/combined_credits/.test(url)) return J({ cast: [], crew: [{ id: 949, media_type: "movie", title: "Heat", release_date: "1995-12-15", job: "Director", vote_count: 9 }, { id: 5, media_type: "movie", title: "Thief", release_date: "1981-03-27", job: "Director", vote_count: 3 }] });
+    if (/themoviedb\.org\/3\/(movie|tv)\/\d+\/images/.test(url)) return J({ posters: [{ file_path: "/p1.jpg", vote_average: 7 }, { file_path: "/p2.jpg", vote_average: 5 }] });
     if (/api\.trakt\.tv\/users\/banta\/watched\/movies/.test(url)) return J([{ movie: { title: "Heat", year: 1995, ids: { imdb: "tt0113277", tmdb: 949 } }, last_watched_at: "2024-03-01T20:00:00Z" }]);
     if (/api\.trakt\.tv\/users\/banta\/watched\/shows/.test(url)) return J([{ show: { title: "Severance", year: 2022, ids: { imdb: "tt11280740", tmdb: 95396 } }, last_watched_at: "2025-01-20T21:00:00Z", seasons: [{ number: 1, episodes: [{ number: 1, plays: 1, last_watched_at: "2024-12-01T21:00:00Z" }, { number: 2, plays: 1, last_watched_at: "2024-12-02T21:00:00Z" }] }] }]);
     if (/api\.trakt\.tv\/users\/banta\/ratings/.test(url)) return J([]);
@@ -274,7 +278,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.6.1", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.6.2", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();
@@ -460,12 +464,13 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
       return Object.keys(out); });
     ok(!miss.length, "every control has a spoken name: " + JSON.stringify(miss.slice(0, 10))); await A(() => __app.go("home")); }
   // ---- 0.5.8: universe dashboard, smart lists by rules, Year in review, widget reading button
-  const uv = await A(() => {
+  const uv = await A(async () => {
     const G = Kit.mods.games, gl = __app.games; const g = gl.add({ title: "Alien: Isolation", date: "2014-10-07", franchise: "Alien", multiverse: "Alien" }, "backlog").game;
     __app.db.replaceCanon("tmdb", [{ franchise: "Alien", title: "Alien", year: 1979, medium: "Movie", date: "1979-05-25" }, { franchise: "Alien", title: "Aliens", year: 1986, medium: "Movie", date: "1986-07-18" }, { franchise: "Alien", title: "Prometheus", year: 2012, medium: "Movie", date: "2012-05-30" }]);
     __app.invalidate(); __app.ui.mv = "Alien"; __app.go("mv"); __app.render();
+    for (let i = 0; i < 60 && !/Films/.test(document.querySelector("#view").textContent); i++) await new Promise(r => setTimeout(r, 50)); // 0.6.2: redrawn once the new canon check is in
     const t1 = document.querySelector("#view").textContent;
-    return { ok: /Universe/.test(t1) && /Films/.test(t1) && /Games/.test(t1) && /Alien: Isolation/.test(t1), n: __app.universeEntries("Alien").length, gid: g.id };
+    return { ok: /Universe/.test(t1) && /Films/.test(t1) && /Games/.test(t1) && /Alien: Isolation/.test(t1), n: __app.universeEntries("Alien").length, gid: g.id, ov: document.querySelector("#overlay").innerHTML.length, t: t1.slice(0, 300), sec: __app.ui.sec };
   });
   ok(uv.ok && uv.n === 4, "universe dashboard: films and games together with bars per medium: " + JSON.stringify(uv));
   await pg.click('[data-action="uedit"]');
@@ -579,6 +584,52 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   ok(n61.moved && n61.deleted && n61.undone, "Doctor Who: drag order, hold to delete, undo");
   ok(n61.series, "game sheet: same series, and the franchise opens the universe");
   ok(n61.wiped && n61.unwiped, "Start over clears by category, and undo puts it back");
+  // ---- 0.6.2: drawing never redoes the canon check in one go; people, posters, spoilers, Ctrl+K, quick actions
+  const n62 = await A(async () => {
+    const out = {}, C = window.Core;
+    __app.go("home"); await new Promise(r => setTimeout(r, 300));
+    const orig = C.canonStatus; let sync = 0; C.canonStatus = (...a) => { sync++; return orig(...a); };
+    __app.lib.add({ type: "movie", title: "Fresh Film", year: 2024 }, "watchlist"); __app.lib.save();
+    const t0 = performance.now(); __app.render(); out.renderMs = Math.round(performance.now() - t0); out.syncInRender = sync;
+    C.canonStatus = orig;
+    let rows = 0; const dr = __app.lib.dbRows.bind(__app.lib); __app.lib.dbRows = () => { rows++; return dr(); };
+    __app.db.items(); __app.db.items(); __app.db.items("imdb"); out.mirrorRows = rows; __app.lib.dbRows = dr;
+    __app.db.set("tmdb_key", "k");
+    const heat = __app.lib.add({ type: "movie", title: "Heat", year: 1995, imdb: "tt0113277", tmdb: 949 }, "watched").item; heat.rating = 9; __app.lib.save();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
+    out.ctrlK = !!document.querySelector('[data-input="allQ"]');
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); out.esc = !document.querySelector("#overlay").innerHTML;
+    const click = sel => { const el = document.querySelector(sel); if (el) el.click(); return !!el; };
+    const wait = async (f, ms = 3000) => { const t = Date.now(); while (Date.now() - t < ms) { if (f()) return true; await new Promise(r => setTimeout(r, 30)); } return false; };
+    __app.openLib(heat.id);
+    out.castBtn = click('[data-action="libcast"]');
+    out.cast = await wait(() => document.querySelector('#overlay [data-action="person"]'));
+    out.person = click('#overlay [data-action="person"]') && await wait(() => /Thief/.test(document.querySelector("#overlay").textContent) && /your average/.test(document.querySelector("#overlay").textContent));
+    out.personMine = /In your library/.test(document.querySelector("#overlay").textContent) && /9/.test((document.querySelector("#overlay .sstrip") || {}).textContent || "");
+    out.added = click('#overlay [data-action="personadd"]') && !!__app.lib.find({ type: "movie", title: "Thief", year: 1981 });
+    __app.openLib(heat.id); click('[data-action="libposters"]');
+    out.picker = await wait(() => document.querySelectorAll(".postpick button").length === 2);
+    click('.postpick button[data-i="1"]'); out.poster = heat.poster === "https://image.tmdb.org/t/p/w185/p2.jpg";
+    const sev = __app.lib.add({ type: "show", title: "Spoiler Show", year: 2020 }, "watching").item;
+    sev.epl = [[1, 1, "2020-01-01", "Pilot"], [1, 2, "2020-01-08", "The Big Twist"], [1, 3, "2020-01-15", "Aftermath"]]; sev.eps = { [Lib.epKey(1, 1)]: "2020-01-02" }; __app.lib.save();
+    __app.openLib(sev.id); const txt = document.querySelector("#overlay").textContent;
+    out.spoilerHidden = /Pilot/.test(txt) && !/Aftermath/.test(txt);
+    __app.db.set("spoiler_hide", "0"); __app.openLib(sev.id); out.spoilerShown = /Aftermath/.test(document.querySelector("#overlay").textContent); __app.db.set("spoiler_hide", "1");
+    __app.ui.allQ = "spoiler"; document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }));
+    out.quick = click('#allRes [data-action="libnext"]') && Object.keys(sev.eps).length === 2;
+    const g1 = __app.games.add({ title: "Studio Game One", dev: "Test Studio" }, "done").game; g1.rating = 8; __app.games.add({ title: "Studio Game Two", dev: "Test Studio" }, "backlog"); __app.games.save();
+    Kit.mods.games.open(g1.id); out.studio = click('#overlay [data-action="gstudio"]') && /Studio Game Two/.test(document.querySelector("#overlay").textContent) && /finished/.test(document.querySelector("#overlay").textContent);
+    document.querySelector("#overlay").innerHTML = "";
+    return out;
+  });
+  ok(n62.studio, "game studio sheet");
+  ok(n62.syncInRender === 0, "drawing after a change uses the last canon answer: " + JSON.stringify(n62));
+  ok(n62.mirrorRows <= 1, "the library is copied into the sync store once, not on every question");
+  ok(n62.ctrlK && n62.esc, "Ctrl+K opens the search, Escape closes it");
+  ok(n62.castBtn && n62.cast && n62.person && n62.personMine && n62.added, "cast & crew open a person's work, with your average and Add: " + JSON.stringify(n62));
+  ok(n62.picker && n62.poster, "Change poster");
+  ok(n62.spoilerHidden && n62.spoilerShown, "unwatched episode names hidden (switch in Settings)");
+  ok(n62.quick, "search: one-tap next episode");
   for (const [w, h] of [[390, 844], [820, 1100], [1280, 860]]) {
     await pg.setViewportSize({ width: w, height: h });
     await A(() => { __app.go("home"); __app.render(); });

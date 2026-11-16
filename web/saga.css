@@ -312,3 +312,11 @@ html[data-theme="light"] .hero2 .btn:not(.primary) { background: rgba(255,255,25
 .tl .tli.holding { animation: tlhold .65s linear; }
 @keyframes tlhold { from { background: transparent; } to { background: color-mix(in srgb, #e5484d 22%, transparent); } }
 .tlgrip { flex: none; padding: 10px 6px 10px 12px; margin-left: 4px; color: var(--faint); font-size: 18px; letter-spacing: -3px; touch-action: none; cursor: grab; }
+
+/* 0.6.2: people in the details, the poster picker */
+.plink { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); text-underline-offset: 2px; }
+.plink:hover { color: var(--accent, #c9a7ff); }
+.postpick { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; margin: 6px 0 10px; }
+.postpick button { padding: 0; border: 2px solid transparent; border-radius: 10px; overflow: hidden; background: none; aspect-ratio: 2 / 3; cursor: pointer; }
+.postpick button[aria-pressed="true"] { border-color: var(--accent, #c9a7ff); }
+.postpick img { width: 100%; height: 100%; object-fit: cover; display: block; }

@@ -119,13 +119,25 @@
           return `<div class="item"><div class="grow" style="min-width:0"><b class="ell">${esc(d.title)}</b><div class="small muted">${esc([d.date ? d.date.slice(0, 4) : "", d.price ? eur(d.price.eur) + (d.price.disc ? ` −${d.price.disc}%` : "") : ""].filter(Boolean).join(" · "))}</div></div>${have ? `<span class="small muted">In your games</span>` : `<button class="btn quiet small" data-action="gdlcadd" data-i="${i}">${K.icon("plus")}Add</button>`}</div>`; }).join("")}</div>` : `<p class="small muted">No DLC on Steam.</p>`}`)
         : `<button class="sheetbtn" data-action="gextras">${K.icon("plus")}DLC and studio (from Steam)</button>`) : ""}`;
   }
+  // 0.6.2: a studio: its games you have (how many finished, your average, hours), and a Steam search for the rest
+  function studioHtml(dev) {
+    const gs = lib().visible().filter(x => x.dev === dev).sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+    const done = gs.filter(x => x.status === "done").length, rated = gs.filter(x => x.rating > 0);
+    const avg = rated.length ? Math.round(rated.reduce((a, x) => a + x.rating, 0) / rated.length * 10) / 10 : null;
+    const mins = gs.reduce((a, x) => a + (G.playedMins ? G.playedMins(x) : 0), 0);
+    return `<h3 style="margin:0">${esc(dev)}</h3><p class="small muted" style="margin:2px 0 8px">Studio</p>
+      <div class="sstrip"><div><b>${gs.length}</b><span>your games</span></div><div><b>${done}</b><span>finished</span></div><div><b>${avg === null ? "–" : avg}</b><span>your average</span></div><div><b>${mins ? Math.round(mins / 60) : "–"}</b><span>hours</span></div></div>
+      <div class="listcard">${gs.map(x => `<div class="item" data-action="gopen" data-id="${esc(x.id)}"><b class="grow ell">${esc(x.title)}</b><span class="small muted">${esc([G.yearOf(x), G.LABEL[x.status], x.rating ? "★ " + x.rating : ""].filter(Boolean).join(" · "))}</span></div>`).join("")}</div>
+      <p class="small muted">Only games where the studio is known are counted: open a game and tap “DLC and studio” to fill it in.</p>
+      <button class="sheetbtn" data-action="gstudiosteam" data-dev="${esc(dev)}">${K.icon("missing")}Search Steam for ${esc(dev)}</button>`;
+  }
   function sheetHtml(g) {
     const t = today(), L = Saga.lang();
     const plays = g.plays.map((d, i) => `<div class="logrow"><span class="grow">${i + 1}. ${esc(K.when(d, L))}</span><button class="btn quiet small" data-action="gunplay" data-i="${i}" aria-label="Remove this playthrough">✕</button></div>`).join("");
     const facts = [["Release", g.date ? K.when(g.date, L) + (g.date > t ? " (upcoming)" : "") : g.dateText || "Not announced"], ["Platform", g.platform], ["Owned on", g.owned],
       ["Remake", g.remake ? [g.remake.title, g.remake.platform, g.remake.date ? K.when(g.remake.date, L) : ""].filter(Boolean).join(" · ") : ""],
       ["IMDb rating", g.imdbR ? `★ ${g.imdbR}` : ""], ["Time to beat", g.hours ? `${g.hours} h${g.hoursRemake ? ` (remake ${g.hoursRemake} h)` : ""}` : ""],
-      ["Franchise", g.franchise], ["Multiverse", g.multiverse !== g.franchise ? g.multiverse : ""]].filter(x => x[1]);
+      ["Studio", g.dev || ""], ["Franchise", g.franchise], ["Multiverse", g.multiverse !== g.franchise ? g.multiverse : ""]].filter(x => x[1]);
     const pr = g.price;
     return `${K.sheetHero({ title: g.title, img: cover(g), kind: "game" }, `<div class="small muted">${esc([G.yearOf(g), g.platform, g.franchise].filter(Boolean).join(" · "))}</div>`)}
       <div class="seg2" style="grid-template-columns:repeat(3,1fr);margin:6px 0 12px">${G.STATUSES.map(s => `<button data-action="gst" data-v="${s}" aria-pressed="${g.status === s}">${G.LABEL[s]}</button>`).join("")}</div>
@@ -142,7 +154,7 @@
       ${pr || g.steam ? `<h4>Price</h4><div class="nextbox"><div class="grow">${pr ? `<b>${esc(eur(pr.eur))}</b>${pr.disc ? ` <span class="pbadge">−${pr.disc}%</span> <s class="small muted">${esc(eur(pr.retail))}</s>` : ""}<div class="small muted">Steam Italy${pr.low != null && pr.low < pr.eur ? ` · lowest seen ${esc(eur(pr.low))}` : ""}</div>` : `<span class="small muted">No price yet: it's checked on the next sync.</span>`}</div></div>
         <label class="field"><span>Alert me at or below (€)</span><input type="number" inputmode="decimal" step="0.01" data-gtarget="1" value="${g.target != null ? g.target : ""}" placeholder="any big discount"></label>` : ""}
       <h4>Prices in other stores</h4>${storesHtml(g)}
-      <h4>Details</h4><div class="listcard">${facts.map(([k, v]) => `<div class="row small" style="min-height:38px;border-bottom:1px solid var(--line)" ${k === "Franchise" || k === "Multiverse" ? `data-action="mvopen" data-mv="${esc(v)}" role="button"` : ""}><span class="muted" style="width:42%">${esc(k)}</span><span class="grow">${esc(v)}${k === "Franchise" || k === "Multiverse" ? ` <span class="muted">›</span>` : ""}</span></div>`).join("")}</div>
+      <h4>Details</h4><div class="listcard">${facts.map(([k, v]) => `<div class="row small" style="min-height:38px;border-bottom:1px solid var(--line)" ${k === "Franchise" || k === "Multiverse" ? `data-action="mvopen" data-mv="${esc(v)}" role="button"` : k === "Studio" ? `data-action="gstudio" data-dev="${esc(v)}" role="button"` : ""}><span class="muted" style="width:42%">${esc(k)}</span><span class="grow">${esc(v)}${k === "Franchise" || k === "Multiverse" || k === "Studio" ? ` <span class="muted">›</span>` : ""}</span></div>`).join("")}</div>
       <label class="field" style="margin-top:12px"><span>Notes</span><textarea rows="2" data-gnotes="1" placeholder="Difficulty, mods, who you played with…">${esc(g.notes)}</textarea></label>
       ${relatedHtml(g)}
       <h4>Where to get it</h4>${G.storeLinks(g).map(([n, u]) => `<button class="sheetbtn" data-action="open" data-url="${esc(u)}">${K.icon("open")}${esc(n)}</button>`).join("")}
@@ -176,6 +188,8 @@
     const reopen = () => { save(); if (g) open(g.id); Saga.render(); };
     switch (a) {
       case "gopen": open(el.dataset.id); return true;
+      case "gstudio": Saga.sheet(studioHtml(el.dataset.dev)); return true;
+      case "gstudiosteam": Saga.close(); ui.open = null; ui.res = []; ui.sq = el.dataset.dev; Saga.render(); search(); return true;
       case "gfilter": ui.f = el.dataset.v; ui.lim = 120; Saga.render(); return true;
       case "gview": ui.view = el.dataset.v; Saga.render(); return true;
       case "gmore": ui.lim += 120; Saga.render(); return true;

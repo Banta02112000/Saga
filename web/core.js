@@ -302,7 +302,7 @@
 
     reset() {
       this.settings = {};
-      this.itemsMap = new Map();
+      this.itemsMap = new VMap();
       this.exclusionsMap = new Map();
       this.canonMap = new Map();
       this.specialsMap = new Map();
@@ -459,7 +459,17 @@
       return n;
     }
 
+    // 0.6.2: the same question asked again (the canon check, stats, the Home screen) is answered from the last answer,
+    // until a row is added or removed. A copy is handed out, so a caller sorting it changes nothing here.
     items(source = null, kinds = null) {
+      const m = this.itemsMap, key = `${source || "*"}|${(kinds || []).join(",")}`;
+      if (!(m instanceof VMap)) return this.itemsScan(source, kinds);
+      if (!this._itemsCache || this._itemsCache.ver !== m.ver || this._itemsCache.map !== m) this._itemsCache = { ver: m.ver, map: m, q: new Map() };
+      let hit = this._itemsCache.q.get(key);
+      if (!hit) { hit = this.itemsScan(source, kinds); this._itemsCache.q.set(key, hit); }
+      return hit.slice();
+    }
+    itemsScan(source = null, kinds = null) {
       const out = [];
       for (const r of this.itemsMap.values()) {
         if (source && r.source !== source) continue;
@@ -1130,6 +1140,13 @@
   // dropped connections, server errors (5xx) and rate limits (429, honouring Retry-After). The in-app browser is kept.
   // a short pause so the screen can redraw and take taps between heavy steps
   const breathe = (ms = 16) => new Promise(r => setTimeout(r, ms));
+  // 0.6.2: a Map that counts its changes, so Store.items() can keep its answers until a row is added or removed
+  class VMap extends Map {
+    constructor(it) { super(it); this.ver = 0; }
+    set(k, v) { this.ver = (this.ver || 0) + 1; return super.set(k, v); }
+    delete(k) { const r = super.delete(k); if (r) this.ver++; return r; }
+    clear() { this.ver++; return super.clear(); }
+  }
   function robust(http, opt = {}) {
     if (http && http.robust) return http;
     const timeout = opt.timeout || 45000, tries = opt.tries || 3, log = opt.log || null;
@@ -2081,9 +2098,10 @@
     const t = new TMDB(http, key);
     const todo = status.filter(c => !c.poster && c.medium !== "Video Game" && db.cacheGet(posterKey(c)) === null);
     todo.sort((a, b) => (a.have - b.have) || (b.year || 0) - (a.year || 0)); // missing first, newest first
-    let calls = 0, found = 0;
+    let calls = 0, found = 0, turn = 0;
     for (const c of todo) {
       if (calls >= budget) break;
+      if (++turn % 5 === 0) await breathe(0);
       let p = null;
       try {
         if (c.imdb) {
@@ -2176,6 +2194,42 @@ fragment T on MovieOrShowOrSeasonOrEpisode {
     return { offers: offerList(node.offers), abroad, date: node.content.originalReleaseDate || null, imdbScore: sc.imdbScore || null, imdbVotes: sc.imdbVotes || null, tomato: sc.tomatoMeter || null };
   }
 
+  // 0.6.2: a person's films and series (TMDB), most known first; kept for 14 days
+  async function personWorks(db, http, name, now = Date.now()) {
+    const key = db.get("tmdb_key");
+    if (!key) throw new Error("Add a TMDB key in Settings to see their other work.");
+    const ck = `person:${norm(name)}`, hit = db.cacheGet(ck);
+    if (hit && now - hit.at < 14 * 864e5) return hit;
+    const t = new TMDB(http, key);
+    const r = await t.get("/search/person", { query: name });
+    const p = ((r && r.results) || []).sort((a, b) => (norm(b.name) === norm(name)) - (norm(a.name) === norm(name)) || (b.popularity || 0) - (a.popularity || 0))[0];
+    if (!p) { const out = { at: now, id: null, name, dept: "", works: [] }; db.cacheSet(ck, out); return out; }
+    const cr = await t.get(`/person/${p.id}/combined_credits`);
+    const seen = new Map();
+    for (const [x, role] of [].concat(((cr && cr.cast) || []).map(x => [x, x.character ? `as ${x.character}` : "Actor"]), ((cr && cr.crew) || []).map(x => [x, x.job || "Crew"]))) {
+      if (x.media_type !== "movie" && x.media_type !== "tv") continue;
+      if (x.media_type === "tv" && x.character && /himself|herself|themselves|self\b/i.test(x.character)) continue; // talk shows, award nights
+      const k = x.media_type + x.id, old = seen.get(k);
+      if (old) { if (!old.roles.includes(role)) old.roles.push(role); continue; }
+      const date = x.release_date || x.first_air_date || "";
+      seen.set(k, { tmdb: x.id, type: x.media_type === "tv" ? "show" : "movie", title: x.title || x.name || "", year: date ? +date.slice(0, 4) : null,
+        poster: x.poster_path ? "https://image.tmdb.org/t/p/w185" + x.poster_path : "", pop: (x.vote_count || 0) + (x.popularity || 0), roles: [role] });
+    }
+    const works = [...seen.values()].filter(w => w.title).sort((a, b) => b.pop - a.pop).slice(0, 80);
+    const out = { at: now, id: p.id, name: p.name, dept: p.known_for_department || "", works };
+    db.cacheSet(ck, out);
+    return out;
+  }
+  // 0.6.2: the posters TMDB has for a film or series (the "Change poster" picker)
+  async function tmdbPosters(db, http, c) {
+    const key = db.get("tmdb_key");
+    if (!key) throw new Error("Add a TMDB key in Settings to choose a poster.");
+    const t = new TMDB(http, key);
+    const tid = await tmdbIdFor(t, db, c);
+    if (!tid) throw new Error("TMDB doesn't know this title");
+    const r = await t.get(`/${tid.tv ? "tv" : "movie"}/${tid.id}/images`, { include_image_language: "en,it,null" });
+    return ((r && r.posters) || []).sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0)).slice(0, 40).map(x => "https://image.tmdb.org/t/p/w185" + x.file_path);
+  }
   async function tmdbIdFor(t, db, c) {
     const tv = c.medium === "TV Series";
     if (c.tmdb) return { id: String(c.tmdb), tv };
@@ -2329,8 +2383,10 @@ fragment T on MovieOrShowOrSeasonOrEpisode {
       .map(c => ({ c, p: nexts.has(c.norm + "|" + c.year) ? 0 : (c.date ? c.date >= today : (c.year || 0) >= year) ? 1 : (c.year || 0) >= year - 1 ? 2 : 3 }))
       .filter(x => x.p < 3).sort((a, b) => a.p - b.p);
     let done = 0, fresh = 0, errs = 0;
+    let turn = 0;
     for (const { c } of pick) {
       if (done >= budget) break;
+      if (++turn % 5 === 0) await breathe(0);
       const before = cachedInfo(db, c);
       try {
         const info = await titleInfo(db, http, c);
@@ -2351,9 +2407,10 @@ fragment T on MovieOrShowOrSeasonOrEpisode {
       const c = id ? db.cacheGet(`tv:${id}`) : null;
       return { it, id, checked: c ? c.checked : 0, c };
     }).sort((a, b) => a.checked - b.checked);
-    let calls = 0, checked = 0, premieres = 0, withEpisodes = 0;
+    let calls = 0, checked = 0, premieres = 0, withEpisodes = 0, turn = 0;
     for (const x of list) {
       if (calls >= budget) break;
+      if (++turn % 5 === 0) await breathe(0);
       if (!x.id && x.it.imdb) {
         if (db.cacheGet(`tvfind:${x.it.imdb}`)) continue; // known to have no TMDB match
         const res = await t.get(`/find/${x.it.imdb}`, { external_source: "imdb_id" });
@@ -3661,7 +3718,7 @@ ${blocks.join("\n\n")}`;
     MEDIA, PROFILES, SECRET_RX, norm, parseYear, mediumFromImdb, mediumFromText, ratio, TitleIndex, Store,
     parseCsv, parseImdbText, importImdbCsv, importFranchiseFile, traktEntries, routeTraktFile, storeTrakt, importTraktZip,
     breathe, jsonParts, BUSY: CONFIG_BUSY, consumed, Exclusion, canonStatus, canonStatusAsync, franchiseProgress, upNext, missingCanon, discrepancies, computeStats,
-    apiTitles, pageOrApi, gqlInfo, imdbReset: () => { gqlBlocked = false; }, imdbGql, gqlList, gqlRatings, imdbUr, authorizeUrl, exchangeCode, Trakt, traktSync, imdbList, imdbRatings, imdbWatchlist, imdbUserId, listIdFrom, walkTitles, browseTitles, pageExtract, pageProbe, probeFor, TMDB, collectionScan, season0Scan,
+    personWorks, tmdbPosters, VMap, apiTitles, pageOrApi, gqlInfo, imdbReset: () => { gqlBlocked = false; }, imdbGql, gqlList, gqlRatings, imdbUr, authorizeUrl, exchangeCode, Trakt, traktSync, imdbList, imdbRatings, imdbWatchlist, imdbUserId, listIdFrom, walkTitles, browseTitles, pageExtract, pageProbe, probeFor, TMDB, collectionScan, season0Scan,
     CONFIG, AI_PRESETS, compatProvider, compatScan, localModels, serverBase, traktOne, traktEpRatings, parseLines, parseMvGroup, relevantNames, promptLine, netHint, robust, pool, details, titleInfo, justWatch, pickDates, dateSummary, bestOffer, cachedInfo, enrichInfo, platformRatings, ratingDiffs, withTimeout, watchProgress, continueWatching, testGemini, gemError, fillPosters, posterKey, aiState, resetAi, canonScan, claudeScan, claudeCall, claudeModels, rankClaudeModel, CLAUDE_DEFAULT, upcomingEpisodes, canonKeys, parseJsonArray, multiverseScan, collectionRows, refreshCollections, tvNext, upcomingEvents, computeAlerts, backgroundRun, fmtWhen, hashId, geminiState, resetGemini, mvGroup, mvExpand, multiverses, mvMap, mvAlias, mvPending, mvDone, geminiProvider, vpnOptions, bestVpn, worldFrom, worldCountries, jwQuery, flag: FLAGS, VPN_DEFAULT, manualScan, franchiseBatches, verifyPrompt, parseVerify, newsBatches, newsPrompt, parseCanonRows, franchiseName, releaseList, releaseKey, parseDate, seeds, rankGeminiModel, resolveGeminiModel, syncAll, sleep,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Core;

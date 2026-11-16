@@ -132,4 +132,7 @@
   };
   window.__sagaWeb = { pending: function () { return unsent; }, files: function () { return Object.keys(files); }, user: "" };
   fetch(api("me")).then(function (r) { return r.json(); }).then(function (m) { window.__sagaWeb.user = m.user || ""; }).catch(function () {});
+  // 0.6.2: installable, and the app and its pictures open even when the server can't be reached.
+  // Browsers only allow this on https (a Cloudflare Tunnel, Tailscale serve) or on localhost.
+  try { if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("sw.js").catch(noop); } catch (e) { /* not available */ }
 })();

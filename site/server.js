@@ -11,11 +11,18 @@
 "use strict";
 const http = require("http"), fs = require("fs"), path = require("path"), zlib = require("zlib"), crypto = require("crypto");
 const { mergeText } = require("./merge.js");
+const hooks = require("./webhooks.js");
 const PORT = +(process.env.SAGA_PORT || 8787), HOST = process.env.SAGA_HOST || "127.0.0.1";
 const PUBLIC_PORT = +(process.env.SAGA_PUBLIC_PORT || 8788), TRUST_TS = process.env.SAGA_TRUST_TAILSCALE !== "0";
 const DATA = path.resolve(process.env.SAGA_DATA || path.join(__dirname, "data"));
 const WEB = path.resolve(process.env.SAGA_WEB || path.join(__dirname, "web"));
 const SHIM = fs.readFileSync(path.join(__dirname, "web-shim.js"));
+// 0.6.2: installable app (manifest) and the offline copy of the app and its pictures (service worker)
+const SW = fs.readFileSync(path.join(__dirname, "sw.js"));
+const MANIFEST = JSON.stringify({ name: "Saga", short_name: "Saga", start_url: "./", scope: "./", display: "standalone", background_color: "#14121B", theme_color: "#14121B",
+  description: "Films, series, games, books and Doctor Who in one place",
+  icons: [{ src: "icon-192.png", sizes: "192x192", type: "image/png" }, { src: "icon-512.png", sizes: "512x512", type: "image/png" }] });
+const ICONS = Object.fromEntries(["icon-192.png", "icon-512.png"].filter(n => fs.existsSync(path.join(__dirname, n))).map(n => [n, fs.readFileSync(path.join(__dirname, n))]));
 const KEEP_DAYS = 7, MAX_BODY = 200 * 1024 * 1024;
 fs.mkdirSync(path.join(DATA, ".daily"), { recursive: true });
 fs.mkdirSync(path.join(DATA, ".sync"), { recursive: true });
@@ -186,6 +193,32 @@ const handler = isPublic => async (req, res) => {
     }
     if (p === "/api/auth/logout") { res.writeHead(303, { Location: "login", "Set-Cookie": "saga_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0" }); return res.end(); }
     if (p === "/api/health") return send(res, 200, JSON.stringify({ ok: true, auth: !!AUTH }));
+    if (p === "/manifest.json") return send(res, 200, MANIFEST, "application/manifest+json");
+    if (p === "/sw.js") { res.writeHead(200, { "Content-Type": TYPES[".js"], "Cache-Control": "no-cache", "Service-Worker-Allowed": "/" }); return res.end(SW); }
+    if (ICONS[p.slice(1)]) { res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "max-age=604800" }); return res.end(ICONS[p.slice(1)]); }
+    // 0.6.2: Jellyfin and Plex say what was watched: POST /api/webhook/jellyfin?key=<sync key> (or Authorization: Bearer <sync key>)
+    if (p.startsWith("/api/webhook/")) {
+      const kind = p.slice(13);
+      if (kind !== "jellyfin" && kind !== "plex") return send(res, 404, '{"error":"jellyfin or plex"}');
+      if (req.method !== "POST") return send(res, 405, '{"error":"POST only"}');
+      const ip = clientIp(req);
+      if (limited(ip)) return send(res, 429, '{"error":"too many tries, wait 15 minutes"}');
+      const key = url.searchParams.get("key") || String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+      let who = null;
+      if (AUTH && key) for (const [n, u] of Object.entries(AUTH.users)) if (u.token && eqSafe(key, u.token)) who = n;
+      if (who === null) { failed(ip); return send(res, 401, '{"error":"wrong or missing key"}'); }
+      let ev;
+      try { ev = hooks.parse(kind, await readBody(req), req.headers["content-type"]); } catch (e) { return send(res, 400, JSON.stringify({ error: e.message })); }
+      if (!ev) return send(res, 200, '{"ok":true,"changed":false}'); // pauses, starts, other events
+      const D = dirOf(who), f = path.join(D, "library.json");
+      const out = hooks.apply(fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "", ev, require(path.join(WEB, "library.js")));
+      if (!out) return send(res, 200, '{"ok":true,"changed":false}');
+      writeAtomic(D, "library.json", Buffer.from(out.text));
+      remember(D + "|library.json", out.text);
+      announce(D, ["library.json"], kind);
+      console.log(new Date().toISOString(), `${kind}: ${out.title} ${out.what} (${who || "owner"})`);
+      return send(res, 200, JSON.stringify({ ok: true, changed: true, title: out.title, what: out.what }));
+    }
     const user = whoIs(req, isPublic);
     if (user === null) {
       if (p.startsWith("/api/")) return send(res, 401, '{"error":"sign in"}');
@@ -256,7 +289,8 @@ const handler = isPublic => async (req, res) => {
     const f = path.resolve(WEB, rel);
     if (!f.startsWith(WEB + path.sep) || !fs.existsSync(f) || !fs.statSync(f).isFile()) return send(res, 404, "Not found", "text/plain");
     let body = fs.readFileSync(f);
-    if (rel === "index.html") body = Buffer.from(body.toString("utf8").replace(/<script src="boot\.js"><\/script>/, '<script src="web-shim.js"></script><script src="boot.js"></script>'));
+    if (rel === "index.html") body = Buffer.from(body.toString("utf8").replace(/<script src="boot\.js"><\/script>/, '<script src="web-shim.js"></script><script src="boot.js"></script>')
+      .replace("</head>", '<link rel="manifest" href="manifest.json"><meta name="theme-color" content="#14121B"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png"></head>'));
     send(res, 200, body, TYPES[path.extname(f).toLowerCase()] || "application/octet-stream");
   } catch (e) {
     console.error(new Date().toISOString(), req.method, req.url, e);
@@ -268,6 +302,7 @@ const handler = isPublic => async (req, res) => {
 //   node server.js --add-user name [password]         (the same, for someone new)
 //   node server.js --remove-user name                  (their files stay in data/users/<name>)
 //   node server.js --users                             (who has an account)
+//   node server.js --key [name]                         (that person's sync key, for the phone app and Jellyfin / Plex)
 //   node server.js --tailscale name login@example.com  (that Tailscale login opens that person's Saga on the tailnet port)
 const argv = process.argv.slice(2), cmd = argv[0] || "";
 const ask = (q, cb) => { process.stdout.write(q); let buf = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", d => { buf += d; if (buf.includes("\n")) cb(buf.trim()); }); };
@@ -290,6 +325,10 @@ if (cmd === "--set-password" || cmd === "--add-user") {
   const a = loadAuth(); if (!a) { console.log("No accounts yet."); process.exit(0); }
   for (const [n, u] of Object.entries(a.users)) console.log(`${n}${n === a.owner ? " (owner)" : ""}${u.tailscale ? `  · Tailscale: ${u.tailscale}` : ""}`);
   process.exit(0);
+} else if (cmd === "--key") {
+  const a = loadAuth(), n = String(argv[1] || (a && a.owner) || "").toLowerCase();
+  if (!a || !a.users[n] || !a.users[n].token) { console.error("No such account (see --users)."); process.exit(1); }
+  console.log(a.users[n].token); process.exit(0);
 } else if (cmd === "--tailscale") {
   const a = loadAuth(), n = String(argv[1] || "").toLowerCase();
   if (!a || !a.users[n] || !argv[2]) { console.error("Usage: --tailscale name login"); process.exit(1); }

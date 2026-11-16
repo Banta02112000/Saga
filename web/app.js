@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.6.1";
+  const VERSION = "0.6.2";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -201,6 +201,9 @@
   const status = () => {
     if (memo) return memo;
     if (ui.job && lastMemo) { if (typeof statusSoon === "function") setTimeout(() => statusSoon().catch(() => {}), 0); return lastMemo; }
+    // 0.6.2: drawing the screen uses the last answer and works out the new one in slices, then draws again
+    // (not right after a tap: what you just changed must show as changed)
+    if (inRender && lastMemo && typeof statusSoon === "function" && Date.now() - lastTap > 1500) { refreshSoon(); return lastMemo; }
     // 0.6.1: opening the app: the first screen comes at once, the canon parts a moment later (worked out in slices)
     if (inRender && !lastMemo && !bootStatus.done && typeof statusSoon === "function") {
       if (!bootStatus.p) bootStatus.p = new Promise(r => setTimeout(r, 60)).then(() => statusSoon()).then(() => { bootStatus.done = true; if (!$("#overlay").innerHTML) render(); }, () => { bootStatus.done = true; });
@@ -209,7 +212,11 @@
     if (typeof mirrorNow === "function") mirrorNow();
     return (memo = lastMemo = C.canonStatus(db, threshold()));
   };
-  let memoGen = 0, memoAsync = null;
+  let memoGen = 0, memoAsync = null, refreshP = null, lastTap = 0;
+  function refreshSoon() {
+    if (refreshP) return;
+    refreshP = new Promise(r => setTimeout(r, 0)).then(() => statusSoon()).then(() => { refreshP = null; if (memo && !$("#overlay").innerHTML) render(); }, () => { refreshP = null; });
+  }
   const invalidate = () => { memo = null; memoGen++; };
   // 0.5.7: the same, worked out in slices so the screen stays free (after a sync, for the widget and pictures)
   async function statusSoon() {
@@ -288,6 +295,13 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.6.2", ["Smoother during and after a sync: the screen is drawn from the last canon check while the new one is worked out in slices; repeated lookups of the synced titles are answered from memory; the progress bar updates at most 4 times a second; background lookups of posters, new seasons and streaming pause regularly.",
+      "Directors, creators and actors are tappable: a sheet with their work, what of it is in your library, how much you've watched and your average rating, and Add for the rest. Films and series have Cast & crew at the bottom.",
+      "Change poster: pick any of TMDB's posters for a film or series.",
+      "Games: the Studio row opens the studio's games you have (finished, your average, hours) and a Steam search.",
+      "Search: grouped by tab, with one-tap Watched and next episode. On a computer: Ctrl+K (Cmd+K) or / opens it, Escape closes any sheet.",
+      "Website: Jellyfin and Plex can tick what you watch (see site/README); installable as an app, and it opens without the server (on https).",
+      ]],
     ["0.6.1", ["Back while searching clears the search first, then goes to the previous screen (not straight to Home).",
       "Home › Continue: tick a series' next episode as watched from its tile, without opening it.",
       "Settings › Backup › Start over: clear IMDb, Trakt, your library, games, books, Doctor Who or lists one by one, for a clean base. A copy is kept and Undo puts everything back.",
@@ -402,7 +416,18 @@
   window.addEventListener("error", e => logError("error", `${e.message} (${String(e.filename || "").split("/").pop()}:${e.lineno || 0})`));
   window.addEventListener("unhandledrejection", e => logError("error", (e.reason && (e.reason.stack || e.reason.message)) || e.reason));
 
+  // 0.6.2: the bar and the text change at most every 250 ms (a sync sends hundreds of updates a second at times)
+  let progLast = 0, progTimer = null, progNext = null;
   function setProgress(frac, text) {
+    // a text still waiting to be shown is kept; no text means "leave the text as it is"
+    const pendingText = progTimer && progNext ? progNext[1] : undefined;
+    progNext = [frac, text === undefined ? pendingText : text];
+    const wait = 250 - (Date.now() - progLast);
+    if (wait > 0 && frac !== null) { if (!progTimer) progTimer = setTimeout(() => { progTimer = null; const [f, t] = progNext; setProgressNow(f, t); }, wait); return; }
+    clearTimeout(progTimer); progTimer = null; setProgressNow(frac, progNext[1]);
+  }
+  function setProgressNow(frac, text) {
+    progLast = Date.now();
     $("#jobfill").style.width = frac === null ? "0" : `${Math.round(Math.max(0, Math.min(1, frac)) * 100)}%`;
     if (text !== undefined) {
       ui.status = text;
@@ -469,6 +494,7 @@
       toast(ui.status);
     } finally {
       clearInterval(tick); clearInterval(watch);
+      clearTimeout(progTimer); progTimer = null; // 0.6.2: a late progress update must not cover the job's last message
       // 0.5.7.1: the phone's own screen thread (taps and scrolling) is watched too, and smaller hitches are reported
       let native = { total: 0, list: [] };
       try { const A = window.Android; if (A && A.screenReport) { A.watchScreen(false); const t = String(A.screenReport() || "0").split("\n"); native = { total: +t[0] || 0, list: t.slice(1).map(l => l.split("\t")).map(([ms, w]) => [+ms, w || ""]) }; } } catch (e) { /* older app */ }
@@ -616,6 +642,37 @@
       ${rest.length ? `<details class="report"><summary>${fmt(rest.length)} other service${rest.length === 1 ? "" : "s"}</summary>${rest.slice(0, 25).map(svc).join("")}</details>` : ""}
       <p class="small muted" style="margin:6px 0 0">Watching another country's catalogue through a VPN can break a service's terms of use.</p>`;
   }
+  // 0.6.2: directors, creators and actors open a sheet of their work
+  const personLink = n => `<a href="#" class="plink" data-action="person" data-name="${esc(n)}">${esc(n)}</a>`;
+  const peopleLine = inf => [inf.crew.length ? `${inf.tv ? "Created by" : "Directed by"} ${inf.crew.map(personLink).join(", ")}` : "",
+    inf.cast.length ? `With ${inf.cast.slice(0, 5).map(personLink).join(", ")}` : ""].filter(Boolean).join(" · ");
+  async function openPerson(name) {
+    ui.person = { name, busy: true };
+    drawPerson();
+    try { ui.person = Object.assign({ name }, await C.personWorks(db, Native.http, name)); }
+    catch (e) { ui.person = { name, err: e.message }; }
+    if (ui.person.name === name || ui.person.err) drawPerson();
+  }
+  function drawPerson() {
+    const P = ui.person; if (!P) return;
+    let body;
+    if (P.busy) body = `<p class="small muted">Asking TMDB…</p>`;
+    else if (P.err) body = `<p class="small muted">${esc(P.err)}</p>`;
+    else if (!P.works.length) body = `<p class="small muted">TMDB doesn't know ${esc(P.name)}.</p>`;
+    else {
+      const rows = P.works.map((w, i) => ({ w, i, have: lib.find({ tmdb: w.tmdb, type: w.type, title: w.title, year: w.year }) }));
+      const mine = rows.filter(x => x.have), rated = mine.filter(x => x.have.rating), seen = mine.filter(x => x.have.status === "watched");
+      const avg = rated.length ? Math.round(rated.reduce((a, x) => a + x.have.rating, 0) / rated.length * 10) / 10 : null;
+      const line = x => `<div class="item"${x.have ? ` data-action="libopen" data-id="${esc(x.have.id)}"` : ""}><div class="grow" style="min-width:0"><b class="ell">${esc(x.w.title)}</b>
+        <div class="small muted ell">${esc([x.w.year, x.w.type === "show" ? "Series" : "Film", x.w.roles.slice(0, 2).join(", ")].filter(Boolean).join(" · "))}</div></div>
+        ${x.have ? `<span class="small muted">${esc(LST[x.have.status])}${x.have.rating ? ` · ★ ${x.have.rating}` : ""}</span>` : `<button class="btn quiet small" data-action="personadd" data-i="${x.i}">${icon("plus")}Add</button>`}</div>`;
+      body = `<div class="sstrip"><div><b>${mine.length}</b><span>in your library</span></div><div><b>${seen.length}</b><span>watched</span></div><div><b>${avg === null ? "–" : avg}</b><span>your average</span></div><div><b>${P.works.length}</b><span>on TMDB</span></div></div>
+        ${mine.length ? `<h4>In your library</h4><div class="listcard">${mine.map(line).join("")}</div>` : ""}
+        <h4>Best known</h4><div class="listcard">${rows.filter(x => !x.have).slice(0, 40).map(line).join("")}</div>`;
+    }
+    $("#overlay").innerHTML = `<div class="scrim bottom" data-action="dismiss"><div class="sheet" role="dialog" aria-modal="true">
+      <h3 style="margin:0">${esc(P.name)}</h3>${P.dept ? `<p class="small muted" style="margin:2px 0 8px">${esc(P.dept)}</p>` : ""}${body}</div></div>`;
+  }
   async function loadDetails(c) {
     const target = c.kind === "episode" || c.kind === "next" ? { title: c.show, imdb: c.imdb, medium: "TV Series", tmdb: (c.hideKey || "").split("tv:")[1] || null }
       : { title: c.title, year: c.year, imdb: c.imdb, tmdb: c.tmdb, medium: c.medium };
@@ -642,7 +699,7 @@
       ${dates}${sources}
       ${facts.length ? `<p class="small" style="margin:10px 0 0">${facts.map(esc).join(" · ")}</p>` : ""}
       ${scores.length ? `<p class="small muted" style="margin:4px 0 0">${scores.map(esc).join(" · ")}</p>` : ""}
-      ${inf.crew.length ? `<p class="small muted" style="margin:4px 0 0">${inf.tv ? "Created by" : "Directed by"} ${esc(inf.crew.join(", "))}${inf.cast.length ? ` · With ${esc(inf.cast.slice(0, 3).join(", "))}` : ""}</p>` : ""}
+      ${inf.crew.length || inf.cast.length ? `<p class="small muted" style="margin:4px 0 0">${peopleLine(inf)}</p>` : ""}
       <h4>Where to watch in ${esc(inf.region)}</h4>${offers}
       ${inf.offers.length && inf.offers.every(o => !o.res) ? `<p class="small muted">Picture quality unavailable${inf.jwError ? ` (JustWatch ${inf.jwError === "switched off" ? "switched off in Settings" : "didn't respond"})` : ""}.</p>` : ""}
       ${worldHtml(inf)}
@@ -1484,14 +1541,15 @@
     const mine = lib.all().filter(it => L.norm(it.title).includes(q)).slice(0, 20);
     const online = `<div class="row wrap" style="margin-top:14px"><button class="btn small" data-action="searchweb" data-v="watch">${icon("missing")}Films & series online</button>${secOn("games") ? `<button class="btn small" data-action="searchweb" data-v="games">Steam</button>` : ""}${secOn("books") ? `<button class="btn small" data-action="searchweb" data-v="books">Books online</button>` : ""}</div>`;
     if (!res.length && !mine.length) return `<p class="muted">Nothing in your lists.</p>${online}`;
-    return (mine.length ? `<div class="kicker" style="margin:6px 0">Your library</div>${Kit.grid(mine.map(it => Kit.tile({ title: it.title, img: it.poster, kind: it.type, done: it.status === "watched", attrs: `data-action="libopen" data-id="${esc(it.id)}"` }, it.title, LST[it.status])))}` : "") + (res.length ? `<div class="kicker" style="margin:16px 0 6px">Everywhere else</div>` : "") + res.map((r, i) => `<div class="item" data-action="sres" data-i="${i}"><span class="xic ${r.app}">${icon(r.app === "games" ? "pad" : r.app === "dw" ? "box" : r.app === "books" ? "book" : "missing")}</span>
-      <div class="grow"><div class="row"><b class="grow ell">${esc(r.title)}</b><span class="pbadge">${({ canon: "Canon", games: "Games", dw: "Doctor Who", books: "Books" })[r.app]}</span></div>
-      <div class="small muted ell">${esc(r.sub)}${r.done ? " · ✓ done" : r.state === "listed" ? " · on your list" : ""}</div></div>${icon("chev")}</div>`).join("") + online;
-    // eslint-disable-next-line no-unreachable
-    const LABEL = { canon: "Canon", games: "Games", dw: "Doctor Who", books: "Books" };
-    return res.map((r, i) => `<div class="item" data-action="sres" data-i="${i}"><span class="xic ${r.app}">${icon(r.app === "games" ? "pad" : r.app === "dw" ? "box" : r.app === "books" ? "book" : "missing")}</span>
-      <div class="grow"><div class="row"><b class="grow ell">${esc(r.title)}</b><span class="pbadge">${LABEL[r.app]}</span></div>
-      <div class="small muted ell">${esc(r.sub)}${r.done ? " · ✓ done" : r.state === "listed" ? " · on your list" : ""}</div></div>${icon("chev")}</div>`).join("");
+    // 0.6.2: grouped by tab; films and series get a one-tap Watched / next episode
+    const quick = it => { if (it.type === "show") { const n = lib.nextEp(it); return n && !n.upcoming ? `<button class="btn quiet small" data-action="libnext" data-id="${esc(it.id)}" data-s="${n.s}" data-e="${n.e}">${icon("check")}S${n.s} E${n.e}</button>` : ""; }
+      return it.status === "watched" ? "" : `<button class="btn quiet small" data-action="sqwatch" data-id="${esc(it.id)}">${icon("check")}Watched</button>`; };
+    const libRows = mine.map(it => `<div class="item" data-action="libopen" data-id="${esc(it.id)}">${libThumb(it)}<div class="grow" style="min-width:0"><b class="ell">${esc(it.title)}</b><div class="small muted ell">${esc([it.year, it.type === "show" ? "Series" : "Film", LST[it.status]].filter(Boolean).join(" · "))}</div></div>${quick(it)}</div>`).join("");
+    const LABEL = { canon: "Canon and lists", games: "Games", books: "Books and manga", dw: "Doctor Who" };
+    const groups = ["games", "books", "dw", "canon"].map(app => [app, res.map((r, i) => [r, i]).filter(([r]) => r.app === app)]).filter(([, l]) => l.length);
+    return (mine.length ? `<div class="kicker" style="margin:6px 0">Films and series · ${mine.length}</div><div class="listcard">${libRows}</div>` : "")
+      + groups.map(([app, l]) => `<div class="kicker" style="margin:16px 0 6px">${LABEL[app]} · ${l.length}</div>` + l.map(([r, i]) => `<div class="item" data-action="sres" data-i="${i}"><span class="xic ${r.app}">${icon(r.app === "games" ? "pad" : r.app === "dw" ? "box" : r.app === "books" ? "book" : "missing")}</span>
+      <div class="grow"><b class="ell">${esc(r.title)}</b><div class="small muted ell">${esc(r.sub)}${r.done ? " · ✓ done" : r.state === "listed" ? " · on your list" : ""}</div></div>${icon("chev")}</div>`).join("")).join("") + online;
   }
   function openSearch() {
     $("#overlay").innerHTML = `<div class="scrim bottom" data-action="dismiss"><div class="sheet searchsheet" role="dialog" aria-modal="true">
@@ -2250,6 +2308,18 @@
   function stars(rating) {
     return `<span class="stars">${[1, 2, 3, 4, 5].map(i => `<button data-action="librate" data-v="${i}" class="${rating >= i * 2 ? "on" : rating === i * 2 - 1 ? "half" : ""}" aria-label="${i} stars">★</button>`).join("")}</span>`;
   }
+  // 0.6.2: cast and crew (each opens their work) and a choice of posters, at the bottom of a film or series
+  function libExtrasHtml(it) {
+    if (!db.get("tmdb_key")) return "";
+    const cc = ui.libCast && ui.libCast.id === it.id ? ui.libCast : null, pp = ui.libPosters && ui.libPosters.id === it.id ? ui.libPosters : null;
+    const cast = !cc ? `<button class="sheetbtn" data-action="libcast">${icon("list")}Cast & crew</button>`
+      : cc.busy ? `<p class="small muted">Asking TMDB…</p>` : cc.err ? `<p class="small muted">${esc(cc.err)}</p>`
+      : cc.inf ? `<h4>Cast & crew</h4><p class="small">${peopleLine(cc.inf) || "TMDB lists nobody."}</p>` : `<p class="small muted">TMDB doesn't know this title.</p>`;
+    const post = !pp ? `<button class="sheetbtn" data-action="libposters">${icon("box")}Change poster</button>`
+      : pp.busy ? `<p class="small muted">Loading posters…</p>` : pp.err ? `<p class="small muted">${esc(pp.err)}</p>`
+      : `<h4>Pick a poster</h4><div class="postpick">${pp.list.map((u, i) => `<button data-action="libposter" data-i="${i}" aria-label="Poster ${i + 1}" aria-pressed="${u === it.poster}"><img src="${esc(u)}" alt="" loading="lazy"></button>`).join("") || `<p class="small muted">No posters on TMDB.</p>`}</div>`;
+    return cast + post;
+  }
   // 0.6.1: related anime (its films, sequels, side stories) at the bottom of an anime sheet, on request
   function relHtml(it) {
     const r = ui.rel && ui.rel.id === it.id ? ui.rel : null;
@@ -2308,6 +2378,7 @@
       <div style="margin-top:8px">
         ${(() => { const x = streamsFor(it); return x ? `<p class="small" style="margin:4px 0 8px">${x.mine ? `On ${esc(shortName(x.o.name))}${x.o.res ? ` in ${esc(x.o.res)}` : ""}, one of your services` : x.o ? `Streaming on ${esc(shortName(x.o.name))}` : `Not in Italy: ${esc(x.vpn.flag)} ${esc(shortName(x.vpn.name))} with a VPN`}</p>` : ""; })()}
         ${it.anime && it.mal ? relHtml(it) : ""}
+        ${libExtrasHtml(it)}
         <button class="sheetbtn" data-action="libwhere">${icon("eye")}Where to watch and details</button>
         <button class="sheetbtn" data-action="open" data-url="${esc(it.imdb ? `https://www.imdb.com/title/${it.imdb}/` : `https://www.imdb.com/find/?q=${encodeURIComponent(it.title + " " + (it.year || ""))}`)}">${icon("open")}Open on IMDb</button>
         <button class="sheetbtn" data-action="mlistadd" data-k="lib:${esc(it.id)}">${icon("plus")}Add to a list</button>
@@ -2344,7 +2415,7 @@
         return true; }
       case "libaddas": { const r = (ui.libRes || [])[+el.dataset.i]; if (r) { const x = libAdd(r, el.dataset.v); render(); openLib(x.id); } return true; }
       case "libopen": openLib(el.dataset.id); return true;
-      case "libnext": { const x = lib.get(el.dataset.id); if (x) { const u = libUndo(x); lib.toggleEp(x, +el.dataset.s, +el.dataset.e); libSave(); toast(`Watched ${x.title} S${el.dataset.s} E${el.dataset.e}`, u); render(); } return true; }
+      case "libnext": { const x = lib.get(el.dataset.id); if (x) { const u = libUndo(x); lib.toggleEp(x, +el.dataset.s, +el.dataset.e); libSave(); toast(`Watched ${x.title} S${el.dataset.s} E${el.dataset.e}`, u); render(); if ($("#allRes")) $("#allRes").innerHTML = searchResults(); } return true; }
       case "libadoptnow": { db.set("lib_adopt", "1"); const n = libAdopt(); toast(`${fmt(n)} titles added from your sync`); render(); lib.all().filter(x => x.type === "show").slice(0, 6).forEach(x => libDetails(x)); return true; }
     }
     if (!it) return false;
@@ -3787,6 +3858,7 @@
   document.addEventListener("click", e => {
     const el = e.target.closest("[data-action]");
     if (!el) return;
+    lastTap = Date.now();
     const a = el.dataset.action;
     if (a === "dismiss") { if (e.target === el) closeOverlay(); return; }
     if (a.startsWith("lib") && libAct(a, el)) { if (a === "libseasonopen") return; e.preventDefault(); return; }
@@ -3795,6 +3867,16 @@
     for (const m of Object.values(Kit.mods)) if (m.act && m.act(a, el, e)) { e.preventDefault(); return; }
     switch (a) {
       case "search": openSearch(); break;
+      case "person": openPerson(el.dataset.name); break;
+      case "sqwatch": { const x = lib.get(el.dataset.id); if (x) { const u = libUndo(x); lib.setStatus(x, "watched"); libSave(); toast(`Watched ${x.title}`, u); if ($("#allRes")) $("#allRes").innerHTML = searchResults(); } break; }
+      case "personadd": { const w = ui.person && ui.person.works && ui.person.works[+el.dataset.i]; if (w) { libAdd({ type: w.type, title: w.title, year: w.year, tmdb: w.tmdb, poster: w.poster }, "watchlist"); drawPerson(); } break; }
+      case "libcast": { const it = lib.get(ui.libOpen); if (!it) break; ui.libCast = { id: it.id, busy: true }; openLib(it.id);
+        C.titleInfo(db, Native.http, libCanon(it)).then(inf => { ui.libCast = { id: it.id, inf }; }, e => { ui.libCast = { id: it.id, err: e.message }; }).then(() => { if (ui.libOpen === it.id) openLib(it.id); }); break; }
+      case "libposters": { const it = lib.get(ui.libOpen); if (!it) break; ui.libPosters = { id: it.id, busy: true }; openLib(it.id);
+        C.tmdbPosters(db, Native.http, libCanon(it)).then(list => { ui.libPosters = { id: it.id, list }; }, e => { ui.libPosters = { id: it.id, err: e.message }; }).then(() => { if (ui.libOpen === it.id) openLib(it.id); }); break; }
+      case "libposter": { const it = lib.get(ui.libOpen), P = ui.libPosters; if (!it || !P || !P.list) break; const old = it.poster;
+        it.poster = P.list[+el.dataset.i]; it.posterSet = true; it.updated = Date.now(); libSave(); ui.libPosters = null; openLib(it.id); render();
+        toast("Poster changed", () => { it.poster = old; it.posterSet = false; libSave(); if (ui.libOpen === it.id) openLib(it.id); render(); }); break; }
       case "go": { const sc = el.dataset.scroll; closeOverlay(); if (el.dataset.sec === "settings") ui.setGroup = sc ? SET_ANCHOR[sc] || "" : ""; go(el.dataset.sec); if (sc) setTimeout(() => { const t = document.getElementById(sc); if (t) t.scrollIntoView({ block: "start" }); }, 40); break; }
       case "icsexport": { const c = icsText(); if (!c.n) { toast("Nothing dated in the next six months"); break; } Native.saveAs("saga-upcoming.ics", c.text).then(ok => toast(ok ? `${c.n} dates saved. Open the file to add them to your calendar.` : "Not saved")); break; }
       case "mvshare": { const name = el.dataset.mv, n = C.norm(name), rows = status().filter(c => C.norm(c.franchise) === n).sort((a, b) => C.releaseKey(a).localeCompare(C.releaseKey(b)));
@@ -4045,6 +4127,13 @@
     }, 150);
   });
 
+  // 0.6.2: Ctrl+K / Cmd+K (or / outside a text box) opens the search on a computer; Escape closes any sheet
+  document.addEventListener("keydown", e => {
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || "");
+    if ((e.key === "k" || e.key === "K") && (e.ctrlKey || e.metaKey) && !e.altKey) { e.preventDefault(); openSearch(); return; }
+    if (e.key === "/" && !typing && !$("#overlay").innerHTML) { e.preventDefault(); openSearch(); return; }
+    if (e.key === "Escape" && $("#overlay").innerHTML) { e.preventDefault(); closeOverlay(); }
+  });
   document.addEventListener("keydown", e => {
     if (e.key !== "Enter" || !e.target.dataset) return;
     for (const m of Object.values(Kit.mods)) if (m.enter && m.enter(e.target)) { e.preventDefault(); return; }
@@ -4149,5 +4238,5 @@
   const last = parseFloat(db.get("last_sync", "0")) || 0;
   const hasSources = db.get("username") || db.get("imdb_user") || db.get("canon_urls") || db.get("imdb_lists");
   if (db.get("auto_sync") === "1" && hasSources && Date.now() / 1000 - last > AUTO_SYNC_HOURS * 3600) { db.set("sync_open", "0"); doSync(); db.set("sync_open", "1"); }
-  window.__app = { wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
+  window.__app = { openLib, wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
 })();

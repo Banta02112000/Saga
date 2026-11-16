@@ -19,6 +19,11 @@ const ok = (c, m) => { if (!c) { console.error("FAIL: " + m); process.exit(1); }
     ok(fs.existsSync(path.join(data, "canonsync.json")) && JSON.parse(fs.readFileSync(path.join(data, "canonsync.json"), "utf8")).settings.site_test === "yes", "settings saved on the server");
     await pg.reload(); await pg.waitForFunction(() => window.__app, null, { timeout: 15000 });
     ok(await pg.evaluate(() => __app.lib.all().some(x => x.title === "Website Film") && __app.db.get("site_test") === "yes"), "after reloading, everything is still there");
+    // 0.6.2: installable; the app's files are kept for when the server can't be reached, your data never is
+    const swOk = await pg.evaluate(() => navigator.serviceWorker.ready.then(r => !!r.active));
+    await pg.reload(); await pg.waitForFunction(() => window.__app, null, { timeout: 15000 });
+    const kept = await pg.evaluate(async () => { const c = await caches.open("saga-shell-1"); const k = (await c.keys()).map(r => new URL(r.url).pathname); return k; });
+    ok(swOk && kept.includes("/app.js") && kept.some(k => k === "/" || k === "/index.html") && !kept.some(k => k.startsWith("/api/")), "service worker keeps the app, not the data: " + kept.slice(0, 6).join(" "));
     const r = await pg.evaluate(p => new Promise(res => { const id = "t1"; window.__httpDone = i => res(JSON.parse(Android.take(i))); Android.http(id, "POST", `http://127.0.0.1:${p}/x?y=1`, "Accept: application/json", "{}"); }), port + 1);
     ok(r.status === 200 && r.split === 1 && /\/x\?y=1/.test(await pg.evaluate(() => Android.takeBody("t1"))), "calls to other sites go through the server");
     const bad = await pg.evaluate(() => fetch("api/http", { method: "POST", body: JSON.stringify({ method: "GET", url: "http://example.com/" }) }).then(r => r.json()));

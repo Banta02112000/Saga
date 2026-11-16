@@ -46,6 +46,33 @@ In the phone app: Settings › Accounts and sync › Saga website: the address a
 what changed after each sync, when you open it, and shortly after changes; the server merges entry by entry
 (site/merge.js; where both sides changed the same thing, the phone's wins) and open website pages reload.
 
+## Jellyfin and Plex: ticks itself when you finish something
+The server can mark a film watched (with today's date) or tick an episode when your media server says you finished it.
+The tick shows on open website pages at once and reaches the phone at its next sync. Use your sync key
+(`node server.js --key banta`; each person uses their own key, so it lands in their library).
+
+**Jellyfin**: install the *Webhook* plugin, add a *Generic* destination:
+- Webhook URL: `https://<your Saga address>/api/webhook/jellyfin?key=<sync key>`
+- Notification types: *Playback Stop* (and *User Data Saved* if you also want "mark played" to count)
+- Item types: Movies, Episodes. Tick *Send All Properties* (or use this template):
+```
+{"NotificationType":"{{NotificationType}}","PlayedToCompletion":"{{PlayedToCompletion}}","Played":"{{Played}}","SaveReason":"{{SaveReason}}",
+ "ItemType":"{{ItemType}}","Name":"{{Name}}","Year":"{{Year}}","SeriesName":"{{SeriesName}}","SeasonNumber":"{{SeasonNumber}}",
+ "EpisodeNumber":"{{EpisodeNumber}}","Provider_imdb":"{{Provider_imdb}}","Provider_tmdb":"{{Provider_tmdb}}"}
+```
+
+**Plex** (webhooks need Plex Pass): Settings › Webhooks › Add webhook:
+`https://<your Saga address>/api/webhook/plex?key=<sync key>`. Plex sends *scrobble* at about 90% of a film or episode.
+
+Plex and Jellyfin running on the same Pi can use `http://127.0.0.1:8788/api/webhook/...`. Wrong keys count towards the
+same 5-tries-in-15-minutes limit as the sign-in page.
+
+## Install it as an app
+Open the website in Chrome (or Safari: Share › Add to Home Screen) and choose *Install*. It then opens in its own window,
+and the app's files and the posters you've seen are kept, so it opens fast and even when the server is down (your lists
+need the server). Browsers only allow this on **https** (a Cloudflare Tunnel, `tailscale serve`) or on the Pi itself;
+on plain `http://100.x.x.x:8787` it works as a normal page.
+
 ## Update
 `bash /opt/saga/app/site/update.sh`
 
