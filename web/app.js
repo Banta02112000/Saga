@@ -2,13 +2,14 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.6.2";
+  const VERSION = "0.6.3";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
   // ---- security: the page runs under a Content-Security-Policy (index.html), so no inline handlers anywhere.
   // Broken pictures are handled here: data-fb="rm" removes the picture, "ph" puts the initials placeholder in its place.
   const httpsUrl = u => String(u || "").replace(/^http:\/\//i, "https://");
+  document.addEventListener("load", e => { const t = e.target; if (t && t.tagName === "IMG") t.classList.add("in"); }, true);
   document.addEventListener("error", e => {
     const t = e.target;
     if (!t || t.tagName !== "IMG" || !t.dataset || !t.dataset.fb) return;
@@ -295,6 +296,7 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.6.3", ["Posters and covers fade in as they load instead of popping in."]],
     ["0.6.2", ["Smoother during and after a sync: the screen is drawn from the last canon check while the new one is worked out in slices; repeated lookups of the synced titles are answered from memory; the progress bar updates at most 4 times a second; background lookups of posters, new seasons and streaming pause regularly.",
       "Directors, creators and actors are tappable: a sheet with their work, what of it is in your library, how much you've watched and your average rating, and Add for the rest. Films and series have Cast & crew at the bottom.",
       "Change poster: pick any of TMDB's posters for a film or series.",

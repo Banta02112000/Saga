@@ -82,6 +82,11 @@ input:focus, select:focus, textarea:focus { outline: 2px solid color-mix(in srgb
 /* ---------- posters ---------- */
 .poster { position: relative; display: block; aspect-ratio: 2 / 3; border-radius: var(--r-card); overflow: hidden; background: var(--raised); isolation: isolate; cursor: pointer; border: 0; padding: 0; color: var(--ink); text-align: left; width: 100%; }
 .poster img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* 0.6.3: pictures fade in once loaded (and show anyway after 1.5 s, in case the load was missed) */
+.poster img { opacity: 0; transition: opacity .28s ease-out; animation: imgshow 0s 1.5s forwards; }
+.poster img.in { opacity: 1; animation: none; }
+@keyframes imgshow { to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .poster img { opacity: 1; transition: none; animation: none; } }
 .poster.wide { aspect-ratio: 16 / 9; }
 .poster.square { aspect-ratio: 1; }
 .poster .gen { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; padding: 12px 11px; box-sizing: border-box;
