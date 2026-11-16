@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.6.6";
+  const VERSION = "0.6.7";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -299,6 +299,8 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.6.7", ["Doctor Who: a story told after another timeline waits for it. Falling and The Forbidden Time sit in season 4, but they're told after Ben & Polly's travels end, so they aren't Next up until the Ben & Polly timeline before them is done (the list says “after Ben & Polly: N to go”, the story shows what's left). You can still mark them done whenever you like. When everything left in a timeline is waiting like that, its Next up offers what the other timeline can play next.",
+      "A story listed twice in one timeline (During and After) is Next up at its later place."]],
     ["0.6.6", ["IsThereAnyDeal, much more of it (with your free API key): the best price now in any store for every game you'd still buy or play, with its all-time low (and a notification when a game you want hits it); which subscriptions include it (Game Pass, PS Plus, Switch Online…, and when it leaves); current bundles and every bundle it was ever in.",
       "Games: filters At its lowest and In a subscription, On sale now covers every store, a Best deal sort, and a Low badge on the cover.",
       "Sign in to IsThereAnyDeal (Settings › Accounts): your ITAD waitlist and your Saga wishlist stay in step both ways, and what you finish or own goes to your ITAD collection.",

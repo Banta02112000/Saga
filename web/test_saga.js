@@ -287,7 +287,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.6.6", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.6.7", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();
@@ -720,6 +720,39 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     __app.db.set("itad_key", ""); __app.db.set("itad_auth", "");
     return out;
   });
+  // ---- 0.6.7: Doctor Who stories told "after" in another timeline wait for it (The Forbidden Time, Falling: Ben & Polly)
+  const n67 = await A(() => {
+    const T = Kit.mods.timeline, D = T.data(), out = {}, me = T.mine();
+    const keep = JSON.stringify(me.works || {});
+    const g0 = D.groups.find(g => g.tabs.some(t => t.name === "S4")), S4 = g0.tabs.find(t => t.name === "S4");
+    const gB = D.groups.find(g => g.tabs.some(t => t.name === "Ben & Polly")), BP = gB.tabs.find(t => t.name === "Ben & Polly");
+    const s4 = T.itemsOf(g0, S4), iF = s4.findIndex(it => it.k === "falling|audio|");
+    me.works = {}; for (const it of s4.slice(0, iF)) me.works[it.k] = { done: true };
+    T.saveMine();
+    out.waits = (T.waitsFor("falling|audio|") || {}).tab === "Ben & Polly";
+    const hero = () => { __app.ui.tl = __app.ui.tl || {}; return T.render(); };
+    // the section's Next up skips Falling
+    const nextIn = (g, t) => { const it = T.itemsOf(g, t).find(it => !(me.works[it.k] || {}).done && !T.waitsFor(it.k)); return it && it.k; };
+    out.s4next = nextIn(g0, S4);
+    out.bpForbidden = !!T.waitsFor("theforbiddentime|audio|");
+    T.openStory("falling|audio|"); out.sheet = /Told after the Ben &amp; Polly timeline|Told after the Ben & Polly timeline/.test(document.querySelector("#overlay").innerHTML); document.querySelector("#overlay").innerHTML = "";
+    out.home = (T.next() || {}).k !== "falling|audio|";
+    // S4 with only the two waiting stories left: Next up offers what Ben & Polly can play next
+    for (const it of s4) if (it.k !== "falling|audio|" && it.k !== "theforbiddentime|audio|") me.works[it.k] = { done: true };
+    T.saveMine(); __app.ui.tl = __app.ui.tl || {};
+    const html = T.render.call ? (() => { const d = T.data(); const gi = d.groups.indexOf(g0), ti = g0.tabs.indexOf(S4); T.act("tlgo", { dataset: { g: String(gi), t: String(ti) } }); return T.render(); })() : "";
+    out.fallback = /Next up: [^<]*<span class="muted">\(Ben &amp; Polly first\)/.test(html) && !/Next up: (Falling|The Forbidden Time)/.test(html);
+    // a timeline's own "After" run follows its own order: nothing in Susan waits for Susan
+    const gS = D.groups.find(g => g.tabs.some(t => t.name === "Susan")), SU = gS.tabs.find(t => t.name === "Susan");
+    out.susan = T.itemsOf(gS, SU).every(it => { const w = T.waitsFor(it.k, SU.id); return !w || w.tab !== "Susan"; });
+    // once all of Ben & Polly before its "After" place is done, Falling is free
+    for (const it of BP.items) if (it.k !== "falling|audio|") me.works[it.k] = { done: true };
+    T.saveMine();
+    out.free = !T.waitsFor("falling|audio|");
+    me.works = JSON.parse(keep); T.saveMine();
+    return out;
+  });
+  ok(n67.waits && n67.s4next === "thetenthplanet|tv|" && n67.bpForbidden && n67.sheet && n67.home && n67.free && n67.fallback && n67.susan, "Doctor Who: Falling and The Forbidden Time wait for the Ben & Polly timeline: " + JSON.stringify(n67));
   ok(n66.ran && n66.deal, "IsThereAnyDeal: best price in any store and lowest ever: " + JSON.stringify(n66));
   ok(n66.filter && n66.sheet, "Games: At its lowest filter, Low badge, Best price block with the subscription: " + JSON.stringify(n66) + " " + n66.dbg);
   ok(n66.pkce && n66.signed, "IsThereAnyDeal sign-in comes back to the app and is finished there");

@@ -9,7 +9,8 @@
   let st = null;
   const D = () => window.DW_DATA || { groups: [], types: [], works: {} };
   const load = () => { if (st) return st; try { st = JSON.parse(Saga.Native.load("dw.json") || "null"); } catch (e) { st = null; } st = st || { works: {} }; st.works = st.works || {}; return st; };
-  const save = () => { Saga.Native.save("dw.json", JSON.stringify(st)); Saga.changed("timeline"); };
+  let ver = 0; // 0.6.7: bumped on every change, so the "waits for" index is rebuilt after an edit or a move
+  const save = () => { ver++; Saga.Native.save("dw.json", JSON.stringify(st)); Saga.changed("timeline"); };
   // one-time move: snap_dw.json (old tab) or DW_MINE (own edition), only into an empty timeline
   function migrate(snapText, mine) {
     const s = load();
@@ -48,6 +49,67 @@
       out.forEach((x, i) => { if (pos.has(x.k)) return; let j = -1; for (let p = i - 1; p >= 0 && j < 0; p--) j = res.indexOf(out[p]); res.splice(j + 1, 0, x); });
     }
     return withHidden ? res : res.filter(it => !((load().edits || {})[it.k] || {}).hidden);
+  }
+  // ---- 0.6.7: a story told "after" in another timeline (or later in its own) waits for it. Some stories sit in one
+  // timeline but are framed after another: The Forbidden Time and Falling are in season 4 and in Ben & Polly's
+  // "During", but their last place, in Ben & Polly's "After" section, comes after The Faceless Ones and what follows.
+  // Such a story isn't "next" until everything before that last place is done. Only "After" sections count: a story
+  // appearing in two timelines' main runs follows each timeline's own order, as before.
+  let blockIx = null, blockVer = -1, blockSt = null, lastRaw = null;
+  function blockIndex() {
+    if (blockIx && blockVer === ver && blockSt === load()) return blockIx;
+    const ix = new Map(), hid = load().edits || {};
+    lastRaw = new Map(); // tab id → (k → its last place in the tab's built-in list)
+    for (const g of D().groups) {
+      if (/skipped|not canon/i.test(g.name)) continue;
+      for (const t of g.tabs) {
+        // the full built-in order, cross-references included (Falling's place in Ben & Polly's "After" is one),
+        // without the entries you hid
+        const last = new Map();
+        t.items.forEach((it, i) => { if (!(hid[it.k] || {}).hidden) last.set(it.k, i); });
+        lastRaw.set(t.id, last);
+        for (const [k, i] of last) {
+          if (!/^after/i.test(t.items[i].sub || "") || i === 0) continue;
+          if (!ix.has(k)) ix.set(k, []);
+          ix.get(k).push({ tabId: t.id, tab: t.name, group: g.name, before: t.items.slice(0, i).filter(x => x.k !== k && !(hid[x.k] || {}).hidden).map(x => x.k) });
+        }
+      }
+    }
+    blockIx = ix; blockVer = ver; blockSt = load();
+    return ix;
+  }
+  // what k still waits for in another timeline (the one being looked at follows its own order): { tab, open } or null
+  function waitsFor(k, tabId) {
+    const r = blockIndex().get(k); if (!r) return null;
+    const works = load().works;
+    for (const b of r) { if (b.tabId === tabId) continue; const open = b.before.filter(x => !(works[x] || {}).done); if (open.length) return { tab: b.tab, tabId: b.tabId, open }; }
+    return null;
+  }
+  // an entry of a tab is "next" when it isn't done, isn't listed again later in the same tab (its later place
+  // counts: The Forbidden Time in Ben & Polly's "During" and "After"), and waits for nothing in another timeline
+  function nextable(it, tab, done) {
+    if (done) return false;
+    blockIndex();
+    const raw = tab.items.indexOf(it), last = (lastRaw.get(tab.id) || new Map()).get(it.k);
+    if (raw >= 0 && last != null && raw < last) return false;
+    return !waitsFor(it.k, tab.id);
+  }
+  // the entry to offer as Next up in a tab: the first nextable one; when everything left waits for another timeline,
+  // the first story it waits for there
+  function nextIn(entries, tab) {
+    const e = entries.find(x => nextable(x.it, tab, x.w.me.done));
+    if (e) return e;
+    for (const x of entries) {
+      if (x.w.me.done) continue;
+      const wf = waitsFor(x.it.k, tab.id); if (!wf) continue;
+      // what that timeline can play next (its own first story that waits for nothing); else the first one it's missing
+      let g2 = null, t2 = null;
+      for (const g of D().groups) { const t = g.tabs.find(t => t.id === wf.tabId); if (t) { g2 = g; t2 = t; break; } }
+      const own = t2 ? itemsOf(g2, t2).find(it => wf.open.includes(it.k) && nextable(it, t2, (load().works[it.k] || {}).done)) : null;
+      const k = own ? own.k : wf.open[0];
+      return { it: { k }, w: workOf({ k }), via: wf.tab };
+    }
+    return null;
   }
   // ---- 0.6.1: hold the grip and drag to reorder; hold an entry to delete it (hide it, or remove one you added). Undo for 10 s.
   const snapshot = () => JSON.stringify(load());
@@ -162,20 +224,20 @@
   const histHtml = x => `<div class="hist">${x.hist.map(n => `<i style="height:${Math.round((100 * n) / Math.max(1, ...x.hist))}%" title="${n}"></i>`).join("")}</div><div class="histl">${x.hist.map((_, i) => `<span>${i + 1}</span>`).join("")}</div>`;
   function sectionHero(g, tab) {
     const x = statsOf(entriesOf(g, tab));
-    const nxt = entriesOf(g, tab).find(e => !e.w.me.done);
+    const nxt = nextIn(entriesOf(g, tab), tab);
     return `<div class="card" style="padding:14px;margin-bottom:12px">
       <div class="row" style="gap:10px"><b class="grow" style="font:800 20px/1.1 var(--display)">${esc(tab.name)}</b><span class="muted">${x.d}/${x.n} · ${pct(x)}%</span></div>
       <div class="minibar" style="margin:8px 0"><i style="width:${pct(x)}%"></i></div>
       ${avgChips(x, true)}
       <div class="small muted">${x.rated} rated${tab.avgLine ? ` · reference: ${esc(tab.avgLine)}` : ""}${x.best ? ` · best: ${esc(x.best.t)} (★ ${x.best.r})` : ""}${x.worst && x.worst.k !== (x.best || {}).k ? ` · lowest: ${esc(x.worst.t)} (★ ${x.worst.r})` : ""}</div>
       ${x.rated >= 3 ? `<details style="margin-top:8px"><summary class="small">Rating spread</summary>${histHtml(x)}</details>` : ""}
-      ${nxt ? `<button class="btn small" style="margin-top:10px" data-action="tlnext" data-k="${esc(nxt.it.k)}">Next up: ${esc(nxt.w.title)}</button>` : ""}</div>`;
+      ${nxt ? `<button class="btn small" style="margin-top:10px" data-action="tlnext" data-k="${esc(nxt.it.k)}">Next up: ${esc(nxt.w.title)}${nxt.via ? ` <span class="muted">(${esc(nxt.via)} first)</span>` : ""}</button>` : ""}</div>`;
   }
   function overview() {
     const d = D(), all = canonEntries(null), x = statsOf(all);
     const going = [];
     for (const g of d.groups) { if (/skipped|not canon/i.test(g.name)) continue; d.groups.indexOf(g);
-      g.tabs.forEach((t, ti) => { const e = entriesOf(g, t), y = statsOf(e); if (y.d > 0 && y.d < y.n) going.push({ g, gi: d.groups.indexOf(g), ti, t, y, nx: e.find(z => !z.w.me.done) }); }); }
+      g.tabs.forEach((t, ti) => { const e = entriesOf(g, t), y = statsOf(e); if (y.d > 0 && y.d < y.n) going.push({ g, gi: d.groups.indexOf(g), ti, t, y, nx: nextIn(e, t) }); }); }
     going.sort((a, b) => pct(b.y) - pct(a.y));
     const top = all.filter(e => +e.w.me.rating >= 1).sort((a, b) => b.w.me.rating - a.w.me.rating).slice(0, 15);
     return `<section><div class="kicker">Doctor Who · overview</div>
@@ -216,9 +278,9 @@
         <div class="chips" style="margin-bottom:12px">${[["all", "All"], ["todo", "To do"], ["done", "Done"]].map(([k, l]) => `<button class="chip" data-action="tlstate" data-v="${k}" aria-pressed="${ui.state === k}">${l}</button>`).join("")}<span class="small muted" style="align-self:center">${s.d}/${s.n} in ${esc(tab.name)}</span></div>
         <div class="row wrap" style="margin-bottom:10px"><button class="btn small" data-action="tladd" data-after="">${K.icon("plus")}Add an entry to ${esc(tab.name)}</button>
           ${Object.values(load().edits || {}).some(e => e.hidden) ? `<button class="btn quiet small" data-action="tlhidden">${ui.hidden ? "Leave hidden entries out" : "Show hidden entries"}</button>` : ""}</div>
-        <div class="tl">${items.map(({ it, w }) => { const isNext = !nextSeen && !w.me.done && (nextSeen = true); const ty = typeOf(w.type);
+        <div class="tl">${items.map(({ it, w }) => { const wf = w.me.done ? null : waitsFor(it.k, tab.id), isNext = !nextSeen && nextable(it, tab, w.me.done) && (nextSeen = true); const ty = typeOf(w.type);
           return `<div class="tli${w.me.done ? " on" : ""}" style="--tc:${esc(ty.color)}" data-action="tlopen" data-k="${esc(it.k)}">
-            <div class="grow"><div class="tc">${esc(ty.label)}${isNext ? ' · <span style="color:var(--accent)">next</span>' : ""}</div><b>${esc(w.title)}</b>${w.mine ? ' <span class="small muted">· added by you</span>' : ""}${w.hidden ? ' <span class="small muted">· hidden</span>' : ""}${w.sub ? `<div class="small muted">${esc(w.sub)}</div>` : ""}</div>
+            <div class="grow"><div class="tc">${esc(ty.label)}${isNext ? ' · <span style="color:var(--accent)">next</span>' : ""}${wf ? ` · <span class="muted">after ${esc(wf.tab)}: ${wf.open.length} to go</span>` : ""}</div><b>${esc(w.title)}</b>${w.mine ? ' <span class="small muted">· added by you</span>' : ""}${w.hidden ? ' <span class="small muted">· hidden</span>' : ""}${w.sub ? `<div class="small muted">${esc(w.sub)}</div>` : ""}</div>
             ${w.me.rating ? `<span class="pct">★ ${w.me.rating}</span>` : ""}<span class="tlgrip" aria-label="Hold and drag to move" role="button">⋮⋮</span></div>`; }).join("") || `<p class="muted">Nothing here.</p>`}</div></section>`;
   }
   const typeSelect = (id, cur) => `<select id="${id}">${(D().types || []).map(t => `<option value="${t.id}" ${t.id === cur ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select>`;
@@ -237,6 +299,7 @@
     const w = workOf({ k }), me = load().works[k] || {}, ty = typeOf(w.type);
     ui.open = k;
     Saga.sheet(`<div class="kicker" style="color:${esc(ty.color)}">${esc(ty.label)}</div><h3 style="font:800 26px/1.1 var(--display);margin:6px 0 14px">${esc(w.title)}</h3>
+      ${(() => { const d0 = D(), g0 = d0.groups[ui.g] || d0.groups[0], t0 = ui.g === -1 ? null : g0.tabs[ui.t] || g0.tabs[0], wf = me.done ? null : waitsFor(k, t0 && t0.id); return wf ? `<p class="small" style="margin:0 0 10px">Told after the ${esc(wf.tab)} timeline: it comes after ${wf.open.length} stor${wf.open.length === 1 ? "y" : "ies"} you haven't done there, next ${wf.open.slice(0, 3).map(x => `<a href="#" data-action="tlnext" data-k="${esc(x)}">${esc(workOf({ k: x }).title)}</a>`).join(", ")}${wf.open.length > 3 ? "…" : ""}. You can still mark it done.</p>` : ""; })()}
       <button class="btn ${me.done ? "" : "primary"} block" data-action="tldone">${K.icon("check")}${me.done ? "Done: tap to undo" : "Mark as done"}</button>
       <h4>Your rating</h4><div class="chips">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => `<button class="chip" data-action="tlrate" data-v="${n}" aria-pressed="${me.rating === n}">${n}</button>`).join("")}</div>
       <label class="field" style="margin-top:12px"><span>Notes</span><textarea rows="3" data-tlnotes="1">${esc(me.notes || "")}</textarea></label>
@@ -295,10 +358,10 @@
   function input(el) { if (el.dataset.tlq) { ui.q = el.value; return true; } return false; }
   // the next story to read or watch, for Home
   function next() {
-    for (const g of D().groups) { if (/skipped|not canon/i.test(g.name)) continue; for (const t of g.tabs) for (const it of itemsOf(g, t)) if (!(load().works[it.k] || {}).done) return { k: it.k, title: workOf(it).title, era: t.name, group: g.name, type: workOf(it).type }; }
+    for (const g of D().groups) { if (/skipped|not canon/i.test(g.name)) continue; for (const t of g.tabs) for (const it of itemsOf(g, t)) if (nextable(it, t, (load().works[it.k] || {}).done)) return { k: it.k, title: workOf(it).title, era: t.name, group: g.name, type: workOf(it).type }; }
     return null;
   }
   function recent(limit = 10) { return Object.entries(load().works).filter(([, v]) => v.done && v.at).map(([k, v]) => ({ k, t: workOf({ k }).title, date: v.at })).sort((a, b) => b.date.localeCompare(a.date)).slice(0, limit); }
   const statesFor = () => load();
-  K.mods.timeline = { title: "Doctor Who", statsOf, canonEntries, render, act, change, input, migrate, next, recent, openStory, state: statesFor, reset: () => { st = null; }, deleteEntry, moveEntry, itemsOf, data: () => D() };
+  K.mods.timeline = { title: "Doctor Who", statsOf, canonEntries, render, act, change, input, migrate, next, recent, openStory, state: statesFor, reset: () => { st = null; ver++; }, waitsFor, deleteEntry, moveEntry, itemsOf, data: () => D(), mine: () => load(), saveMine: () => save() };
 })();
