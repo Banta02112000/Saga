@@ -278,7 +278,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.6.3", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.6.4", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();
@@ -403,6 +403,23 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     const u = await A(() => ({ heat: JSON.stringify((__app.lib.all().find(x => x.title === "Heat") || {}).watches || null).indexOf("2024-01-01") >= 0, quest: __app.games.games.some(g => g.title === "Zzz Imported Quest"), hyp: __app.books.books.some(b => b.title === "Hyperion"), btn: !!document.querySelector('[data-action="undoimport"]') }));
     ok(!u.heat && !u.quest && !u.hyp && !u.btn, "undo import: " + JSON.stringify(u));
     ok(await A(() => __app.games.games.length) === gamesBefore, "games back to before the import"); }
+  // 0.6.4: a games spreadsheet (.xlsx) through the same hub: preview, then import
+  await A(() => { const is = (r, t) => `<c r="${r}" t="inlineStr"><is><t>${t}</t></is></c>`, n = (r, v) => `<c r="${r}"><v>${v}</v></c>`;
+    const sheet = `<worksheet><sheetData><row r="1">${is("A1", "Title")}${is("B1", "OG Release Date")}${is("C1", "OG Platform")}${is("D1", "HLTB")}${is("E1", "Franchise")}${is("F1", "Next")}</row>
+      <row r="2">${is("A2", "Sheet Quest")}${n("B2", 36000)}${is("C2", "PS1")}${n("D2", 20)}${is("E2", "Quest")}${is("F2", "X")}</row>
+      <row r="3">${is("A3", "Sheet Quest")}${n("B3", 36000)}${is("C3", "N64")}${is("D3", "N/A")}${is("E3", "Quest")}</row></sheetData></worksheet>`;
+    window.__nextPick = [{ name: "My_Games.xlsx", zip: { "xl/workbook.xml": "<workbook/>", "xl/worksheets/sheet1.xml": sheet }, zipOther: ["xl/media/image1.png"] }]; });
+  await pg.click('[data-action="hubpick"]');
+  await pg.waitForSelector("#dlgOk");
+  const gpv = await A(() => document.querySelector("#overlay .dialog").textContent);
+  ok(/My_Games\.xlsx \(games list\): 2 games: 2 new/.test(gpv) && await A(() => !__app.games.games.some(g => g.title === "Sheet Quest")), "games spreadsheet preview, nothing written yet: " + gpv.slice(0, 200));
+  await pg.click("#dlgOk");
+  await pg.waitForFunction(() => !__app.ui.job && /My_Games/.test(__app.db.get("hub_last") || ""), null, { timeout: 8000 });
+  ok(await A(() => { const q = __app.games.games.filter(g => g.title === "Sheet Quest"); return q.length === 2 && q.some(g => g.platform === "PS1" && g.hours === 20 && g.next) && q.some(g => g.platform === "N64" && g.hours === null); }), "games spreadsheet imported: one entry per console");
+  { const before = await A(() => __app.games.games.filter(g => g.title === "Sheet Quest").length);
+    await A(() => (__app.ui.setGroup = "*", __app.go("settings"))); await pg.click('[data-action="undoimport"]'); await pg.click("#dlgOk");
+    await pg.waitForFunction(() => !__app.ui.job, null, { timeout: 8000 });
+    ok(before === 2 && await A(() => !__app.games.games.some(g => g.title === "Sheet Quest")), "the spreadsheet import can be undone"); }
   // 0.5.4.8: the diary lists everything, newest first, and Your year agrees with it
   { const d = await A(() => { __app.go("home"); const b = document.querySelector('[data-action="recentall"]'); b.click();
       const txt = document.querySelector("#overlay").textContent, items = document.querySelectorAll("#overlay .item").length;

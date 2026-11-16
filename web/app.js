@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.6.3";
+  const VERSION = "0.6.4";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -296,6 +296,7 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.6.4", ["Import your own games list: Settings › Import › Choose export files takes an Excel (.xlsx) or CSV spreadsheet with columns like Title, OG Release Date, OG Platform, Remake…, Owned Platform, HLTB, Rating, Franchise, Multiverse, Next. A preview first; importing again updates the list's columns and keeps your status, ratings, plays and notes; the same game on two consoles stays two entries; Undo puts things back."]],
     ["0.6.3", ["Posters and covers fade in as they load instead of popping in."]],
     ["0.6.2", ["Smoother during and after a sync: the screen is drawn from the last canon check while the new one is worked out in slices; repeated lookups of the synced titles are answered from memory; the progress bar updates at most 4 times a second; background lookups of posters, new seasons and streaming pause regularly.",
       "Directors, creators and actors are tappable: a sheet with their work, what of it is in your library, how much you've watched and your average rating, and Add for the rest. Films and series have Cast & crew at the bottom.",
@@ -1636,6 +1637,7 @@
       </section>`;
   }
   const HUB = [
+    ["Your own games list (.xlsx or .csv)", "A spreadsheet with a Title column and columns like OG Release Date, OG Platform, Remake Name / Release Date / Platform, Owned Platform, HLTB, HLTB Bundle, Rating (IMDb), Franchise, Multiverse, Next (X); Status and My rating are optional. Importing it again updates those columns and keeps your status, ratings, plays and notes; the same game on two consoles stays two entries."],
     ["Letterboxd", "letterboxd.com › Settings › Data › Export your data. Pick the ZIP: diary, ratings, rewatches and watchlist come in with their dates."],
     ["Trakt", "Sync above, or trakt.tv › Settings › Data › Export (ZIP)."],
     ["IMDb", "Sync above, or imdb.com › Your ratings / Watchlist / a list › Export (CSV)."],
@@ -1665,6 +1667,20 @@
   }
   // games and books are handed to their tabs through a shared file and a message
   // games and books go straight into their sections
+  // 0.6.4: a games spreadsheet (.xlsx, or .csv / .tsv) with a Title column and game columns (HLTB, platform, release date,
+  // franchise…), like the All_Games list. Anything else goes to the usual detection.
+  function gameSheetOf(f) {
+    let rows = null;
+    if (f.zip && Object.keys(f.zip).some(n => /(^|\/)xl\/worksheets\/sheet\d+\.xml$/i.test(n))) rows = GC.readXlsx(f.zip);
+    else if (typeof f.text === "string" && /\.(csv|tsv)$/i.test(f.name || "")) { const t = /\.tsv$/i.test(f.name) ? f.text.replace(/\t/g, ",") : f.text; try { rows = C.parseCsv(t); } catch (e) { return null; } }
+    if (!rows) return null;
+    const head = rows.slice(0, 10).find(r => (r || []).some(c => /^(title|name|game)$/i.test(String(c == null ? "" : c).trim())));
+    const hs = (head || []).map(c => String(c == null ? "" : c).trim().toLowerCase());
+    const gameCols = hs.filter(h => /^(hltb|hltb bundle|og release date|og platform|owned platform|remake name|remake platform|multiverse|how long to beat)$/.test(h)).length;
+    if (!head || gameCols < 2) { if (f.zip) throw new Error("a spreadsheet, but not a games list (it needs a Title column and columns like OG Platform, HLTB, Franchise)"); return null; }
+    return rows;
+  }
+  const detectFile = f => { const sheet = gameSheetOf(f); return sheet ? { target: "gamesheet", kind: "Games spreadsheet", sheet } : Imports.detect(f); };
   function handOver(app, file, payload) {
     if (app === "games") { const r = GC.importRows(games, payload.rows || [], payload.kind); games.save(); changed("games"); return r; }
     const imp = payload.rows ? { kind: payload.kind, books: payload.rows.map(r => BC.blankBook(Object.assign({}, r, { finished: r.finished ? Date.parse(r.finished + "T12:00:00") : 0, started: r.started ? Date.parse(r.started + "T12:00:00") : 0 }))) } : BC.readImport(payload.raw, payload.name);
@@ -1676,7 +1692,13 @@
     for (const f of files) {
       if (f.error) { lines.push(`${f.name}: couldn't read (${f.error})`); continue; }
       let d;
-      try { d = Imports.detect(f); } catch (e) { lines.push(`${f.name}: ${e.message}`); continue; }
+      try { d = detectFile(f); } catch (e) { lines.push(`${f.name}: ${e.message}`); continue; }
+      if (d.target === "gamesheet") {
+        if (!feat("games")) { lines.push(`${f.name}: switch the Games tab on in Features first`); continue; }
+        const gr = GC.fromSheet(games, d.sheet); games.save(); changed("games");
+        lines.push(`${f.name}: ${fmt(gr.added)} games added, ${fmt(gr.updated)} updated, ${fmt(gr.same)} unchanged${gr.skipped ? `, ${fmt(gr.skipped)} you had removed left out` : ""}`);
+        continue;
+      }
       if (d.target === "watch") {
         watchRows = watchRows.concat(d.rows || []);
         lines.push(`${d.kind}: ${fmt((d.rows || []).length)} films and series`);
@@ -1721,7 +1743,14 @@
       for (const f of files) {
         if (f.error) { rows.push(`${f.name}: can't be read (${f.error})`); continue; }
         let d;
-        try { d = Imports.detect(f); } catch (e) { rows.push(`${f.name}: ${e.message}`); continue; }
+        try { d = detectFile(f); } catch (e) { rows.push(`${f.name}: ${e.message}`); continue; }
+        if (d.target === "gamesheet") {
+          // a dry run on a copy: exactly what the import will do
+          const copy = new GC.Games(); copy.games = games.games.map(g => Object.assign({}, g)); copy.removed = Object.assign({}, games.removed);
+          const r = GC.fromSheet(copy, d.sheet); total += r.rows;
+          rows.push(`${f.name} (games list): ${fmt(r.rows)} games: ${fmt(r.added)} new, ${fmt(r.updated)} to update, ${fmt(r.same)} already the same${r.skipped ? `, ${fmt(r.skipped)} you had removed (left out)` : ""}${feat("games") ? "" : " (switch Games on in Features first)"}`);
+          continue;
+        }
         if (d.target === "watch") {
           const rs = d.rows || []; let have = 0;
           for (const r of rs) if (lib.find({ type: r.type || "movie", title: r.title, year: r.year, imdb: r.imdb, tmdb: r.tmdb, mal: r.mal })) have++;

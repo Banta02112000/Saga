@@ -341,6 +341,109 @@
     }
     return { added, updated };
   }
+  // ---- 0.6.4: a games spreadsheet (.xlsx, or the same columns as .csv), like the All_Games list:
+  // Title, OG Release Date, OG Platform, Remake Name, Remake Release Date, Remake Platform, Owned Platform, HLTB,
+  // HLTB Bundle, Rating (IMDb), Franchise, Multiverse, Next. Optional: Status, My rating, Notes.
+  const XML_ENT = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+  const unxml = t => String(t || "").replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (m, e) => e[0] === "#" ? String.fromCodePoint(e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : +e.slice(1)) : XML_ENT[e.toLowerCase()]);
+  const colIdx = ref => { const m = /^([A-Z]+)/.exec(ref || ""); if (!m) return -1; let n = 0; for (const ch of m[1]) n = n * 26 + ch.charCodeAt(0) - 64; return n - 1; };
+  // zip: { "xl/worksheets/sheet1.xml": text, "xl/sharedStrings.xml": text, ... } (what the file picker gives for an .xlsx)
+  function readXlsx(zip) {
+    const names = Object.keys(zip || {});
+    const sheetName = names.filter(n => /(^|\/)xl\/worksheets\/sheet\d+\.xml$/i.test(n)).sort((a, b) => (+a.match(/(\d+)\.xml$/i)[1]) - (+b.match(/(\d+)\.xml$/i)[1]))[0];
+    if (!sheetName) throw new Error("not an Excel file (no sheet inside)");
+    const ssName = names.find(n => /(^|\/)xl\/sharedStrings\.xml$/i.test(n));
+    const shared = [];
+    if (ssName) for (const m of zip[ssName].matchAll(/<si>([\s\S]*?)<\/si>/g)) shared.push(unxml([...m[1].matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map(x => x[1]).join("")));
+    const rows = [];
+    for (const rm of zip[sheetName].matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
+      const row = [];
+      for (const cm of rm[1].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+        const at = cm[1], body = cm[2] || "", ref = (at.match(/\br="([A-Z]+\d+)"/) || [])[1], t = (at.match(/\bt="(\w+)"/) || [])[1] || "n";
+        const v = (body.match(/<v>([\s\S]*?)<\/v>/) || [])[1];
+        let val = null;
+        if (t === "s") val = v != null ? shared[+v] : null;
+        else if (t === "inlineStr") val = unxml([...body.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map(x => x[1]).join(""));
+        else if (t === "str" || t === "e") val = v != null ? unxml(v) : null;
+        else if (t === "b") val = v === "1";
+        else val = v != null && v !== "" ? +v : null;
+        const i = ref ? colIdx(ref) : row.length;
+        if (i >= 0) row[i] = val;
+      }
+      rows.push(Array.from(row, x => (x === undefined ? null : x)));
+    }
+    return rows;
+  }
+  // a spreadsheet day number (days since 1899-12-30) or a text date → "YYYY-MM-DD"
+  const sheetDate = v => {
+    if (v == null || v === "") return "";
+    if (typeof v === "number" && v > 59 && v < 80000) return new Date(Math.round((v - 25569) * 864e5)).toISOString().slice(0, 10);
+    return isoOf(v);
+  };
+  const HEAD = { title: /^(title|name|game)$/, date: /^(og )?release( date)?$|^(og )?date$|^released$/, platform: /^(og )?platform$/, rn: /^remake( name)?$/, rd: /^remake( release)? date$/,
+    rp: /^remake platform$/, owned: /^owned( platform)?$|^owned on$/, hours: /^(hltb|hours|how long to beat|time to beat)$/, hb: /^hltb (bundle|remake)$|^remake hours$/,
+    imdbR: /^(rating|imdb( rating)?|imdb score|score)$/, franchise: /^franchise$|^series$/, multiverse: /^multiverse|universe$/, next: /^next$/, status: /^status$/,
+    my: /^my rating$|^your rating$/, notes: /^notes?$/ };
+  // rows (arrays, first row with "Title" is the header) → your games. A row matches a game you have by title,
+  // release date and platform (two releases of the same game on different consoles stay apart); the list's own
+  // columns are updated, your status, rating, plays and notes are kept. Returns counts.
+  function fromSheet(lib, rows) {
+    const hi = rows.findIndex(r => (r || []).some(c => /^(title|name|game)$/i.test(String(c == null ? "" : c).trim())));
+    if (hi < 0) throw new Error("no Title column");
+    const col = {};
+    (rows[hi] || []).forEach((h, i) => { const k = String(h == null ? "" : h).trim().toLowerCase().replace(/\s+/g, " "); for (const [f, re] of Object.entries(HEAD)) if (col[f] === undefined && re.test(k)) col[f] = i; });
+    const get = (r, f) => (col[f] === undefined ? null : r[col[f]]);
+    const txt = (r, f) => { const v = get(r, f); return NA(v) ? "" : String(v).trim(); };
+    const key = (t, d, p) => `${norm(t)}|${d}|${norm(p)}`;
+    const exact = new Map(), byTd = new Map(), byT = new Map(), claimed = new Set();
+    const put = (m, k, g) => { const a = m.get(k); if (a) a.push(g); else m.set(k, [g]); };
+    for (const g of lib.games) { exact.set(key(g.title, g.date, g.platform), g); put(byTd, `${norm(g.title)}|${g.date}`, g); put(byT, norm(g.title), g); }
+    const ST = { done: "done", finished: "done", completed: "done", beaten: "done", playing: "playing", paused: "paused", "on hold": "paused", backlog: "backlog", wishlist: "wishlist", dropped: "dropped", abandoned: "dropped" };
+    let added = 0, updated = 0, skipped = 0, same = 0;
+    for (const r of rows.slice(hi + 1)) {
+      const title = txt(r || [], "title");
+      if (!title) continue;
+      if (lib.removed[norm(title)]) { skipped++; continue; }
+      const od = get(r, "date"), date = sheetDate(od), platform = txt(r, "platform");
+      const rn = txt(r, "rn"), rd = sheetDate(get(r, "rd")), rp = txt(r, "rp");
+      const fields = {
+        title, date, dateText: date ? "" : (NA(od) ? "" : String(od)), platform,
+        remake: rn && (rn !== title || (rd && rd !== date)) ? { title: rn, date: rd, platform: rp } : null,
+        owned: txt(r, "owned"), hours: NA(get(r, "hours")) ? null : num(get(r, "hours")), hoursRemake: NA(get(r, "hb")) ? null : num(get(r, "hb")),
+        imdbR: NA(get(r, "imdbR")) ? null : num(get(r, "imdbR")), franchise: txt(r, "franchise"), multiverse: txt(r, "multiverse") || txt(r, "franchise"),
+        next: col.next !== undefined ? /^(x|y|yes|true|1|✓|✔)$/i.test(txt(r, "next")) : undefined,
+      };
+      let g = exact.get(key(title, date, platform));
+      if (g && claimed.has(g)) g = null;
+      if (!g) g = (byTd.get(`${norm(title)}|${date}`) || []).find(x => !claimed.has(x) && (!x.platform || !platform || norm(x.platform) === norm(platform))) || null;
+      if (!g) { const y = date ? +date.slice(0, 4) : null; // the same title a year either side (a date fixed in the list)
+        g = (byT.get(norm(title)) || []).find(x => !claimed.has(x) && (!y || !yearOf(x) || Math.abs(yearOf(x) - y) <= 1) && (!x.platform || !platform || norm(x.platform) === norm(platform))) || null; }
+      if (g) {
+        let changed = false;
+        for (const [k, v] of Object.entries(fields)) {
+          if (v === undefined || k === "title") continue;
+          if (k === "franchise" || k === "multiverse") { if (!v) continue; }
+          if (JSON.stringify(g[k]) !== JSON.stringify(v)) { g[k] = v; changed = true; }
+        }
+        const my = num(get(r, "my")); if (my && !g.rating) { g.rating = Math.round(my); changed = true; }
+        if (txt(r, "notes") && !g.notes) { g.notes = txt(r, "notes"); changed = true; }
+        if (changed) updated++; else same++;
+      } else {
+        g = blank(Object.assign({}, fields, { next: !!fields.next, src: "list", added: Date.now() }));
+        if (!g.franchise) g.franchise = franchiseGuess(g.title);
+        if (!g.multiverse) g.multiverse = g.franchise;
+        setStatus(g, ST[txt(r, "status").toLowerCase()] || "backlog");
+        if (g.status === "done") g.plays = []; // finished, but the list doesn't say when: no made-up play date
+        const my = num(get(r, "my")); if (my) g.rating = Math.round(my);
+        if (txt(r, "notes")) g.notes = txt(r, "notes");
+        lib.games.push(g);
+        added++;
+      }
+      claimed.add(g);
+    }
+    lib._fi = null;
+    return { added, updated, same, skipped, rows: added + updated + same + skipped };
+  }
   // Video games from your IMDb ratings and lists (the Watch sync reads them): rated = finished, listed = wishlist.
   function fromImdb(lib, rows) {
     let added = 0, rated = 0, matched = 0, promoted = 0;
@@ -376,7 +479,7 @@
       games: lib.visible().map(g => ({ id: g.id, t: g.title, f: g.franchise, m: g.multiverse, done: g.status === "done", date: g.date })) };
   }
 
-  const API = { steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
+  const API = { readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
     steamSearch, linkSteam, steamPrices, storePrices, steamDates, importRows, fromImdb, storeLinks, indexFor, yearOf, NA };
   if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
   root.GamesCore = API;

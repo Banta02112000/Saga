@@ -44,7 +44,7 @@
     if (ui.res || ui.busy) return renderSearch();
     if (!L.games.length) {
       return `<div class="empty2"><div class="kicker">Games</div><h2>Your games, all in one place</h2>
-        <p>Search Steam to add a game, import your Steam library, HowLongToBeat, Grouvee or Backloggd, or let your IMDb ratings bring the games you've rated.</p>
+        <p>Search Steam to add a game, import your own games spreadsheet (.xlsx or .csv), your Steam library, HowLongToBeat, Grouvee or Backloggd, or let your IMDb ratings bring the games you've rated.</p>
         <div class="row wrap" style="justify-content:center"><button class="btn primary" data-action="gadd">${K.icon("plus")}Add a game</button>
         <button class="btn" data-action="go" data-sec="settings" data-scroll="importhub">${K.icon("upload")}Import</button></div></div>`;
     }
