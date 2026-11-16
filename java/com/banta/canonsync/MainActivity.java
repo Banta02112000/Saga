@@ -20,6 +20,7 @@ public class MainActivity extends Activity {
     static final int BG = 0xFF0E0B1A;
     static volatile String shared = null;     // text from Share to Saga, picked up by the page
     static volatile boolean foreground = false; // the background job skips while the app is open
+    static volatile String pendingOauth = null; // 0.6.6: …://oauth/itad?code=… waiting for the page
     WebView web;
     FrameLayout root; // holds the page (or the sign-in browser); padded for the system bars on Android 15+
     WebView inApp; // visible browser used for signing in to IMDb
@@ -39,6 +40,7 @@ public class MainActivity extends Activity {
         } catch (Throwable ignored) {
         }
         takeShare(getIntent());
+        takeOauth(getIntent());
         web = new WebView(this);
         web.setBackgroundColor(BG);
         WebSettings s = web.getSettings();
@@ -199,6 +201,15 @@ public class MainActivity extends Activity {
         return false;
     }
 
+    // 0.6.6: a sign-in redirect handed over by Switch (extra "oauth")
+    boolean takeOauth(Intent i) {
+        String u = i == null ? null : i.getStringExtra("oauth");
+        if (u == null || u.length() == 0) return false;
+        pendingOauth = u;
+        i.removeExtra("oauth");
+        return true;
+    }
+
     static String tabHash(Intent i) {
         String tab = i == null ? null : i.getStringExtra("tab");
         return tab == null ? "" : "#" + tab.replaceAll("[^a-z]", "");
@@ -228,6 +239,7 @@ public class MainActivity extends Activity {
         super.onNewIntent(i);
         setIntent(i);
         if (takeShare(i) && web != null) web.evaluateJavascript("window.__sharePoll && window.__sharePoll()", null);
+        if (takeOauth(i) && web != null) web.evaluateJavascript("window.__oauthPoll && window.__oauthPoll()", null);
         String h = tabHash(i);
         if (web != null && h.length() > 1) {
             web.evaluateJavascript("window.__openTab && window.__openTab('" + h.substring(1) + "')", null);

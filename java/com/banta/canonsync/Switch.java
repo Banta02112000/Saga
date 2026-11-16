@@ -30,6 +30,15 @@ public class Switch extends Activity {
         String app = "canon";
         try {
             Uri u = getIntent().getData();
+            // 0.6.6: …://oauth/itad?code=… from a sign-in in the browser goes to Saga's main screen
+            if (u != null && "oauth".equals(u.getHost())) {
+                Intent i = new Intent().setClassName(this, "com.banta.canonsync.MainActivity");
+                i.putExtra("oauth", u.toString());
+                i.addFlags(0x00020000 | 0x10000000); // REORDER_TO_FRONT | NEW_TASK
+                startActivity(i);
+                finish();
+                return;
+            }
             if (u != null && u.getLastPathSegment() != null) app = u.getLastPathSegment();
         } catch (Throwable ignored) {
         }

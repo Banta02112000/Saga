@@ -20,4 +20,5 @@ public class Intent {
     public Uri getData() { return null; }
     public static Intent createChooser(Intent target, CharSequence title) { return target; }
     public ClipData getClipData() { return null; }
+    public void removeExtra(String k) { }
 }

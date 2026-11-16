@@ -35,7 +35,7 @@ import java.util.zip.ZipInputStream;
 
 public class Bridge {
     static final int PICK = 4242;
-    static final String UA = "Saga/0.6.5 (Android)";
+    static final String UA = "Saga/0.6.6 (Android)";
     final Context ctx;
     final MainActivity act;       // null when running inside the background job
     final SyncJobService job;     // null in the app
@@ -1123,6 +1123,20 @@ public class Bridge {
         }
     }
 
+    // 0.6.6: the app's link scheme (bantaapps:// for the own build, canonsyncstarter:// for the Starter) for sign-in
+    // redirects, and a sign-in address that arrived while the page was loading
+    @JavascriptInterface
+    public String linkScheme() {
+        try { return ctx.getPackageName().contains("starter") ? "canonsyncstarter" : "bantaapps"; } catch (Throwable t) { return "bantaapps"; }
+    }
+
+    @JavascriptInterface
+    public String takeOauth() {
+        String u = MainActivity.pendingOauth;
+        MainActivity.pendingOauth = null;
+        return u == null ? "" : u;
+    }
+
     @JavascriptInterface
     public String randomUrl(int n) {
         byte[] b = new byte[n];
@@ -1132,7 +1146,7 @@ public class Bridge {
 
     @JavascriptInterface
     public String version() {
-        return "0.6.5";
+        return "0.6.6";
     }
 
     // ---------- background sync & notifications ----------

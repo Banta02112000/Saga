@@ -131,12 +131,36 @@
         franchises: [...x.franchises.entries()].map(([name, gs]) => ({ name, games: gs.sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999")) })) }))
         .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
     }
+    // 0.6.6: what you're playing, then the next game of each franchise you're going through (the first one, by release
+    // date, after the last you finished or are playing: released, not finished or dropped), the franchises you played
+    // most recently first, then games you marked Next, then a few short games you own.
     nextUp(limit = 10) {
-      const t = today();
-      return this.visible().filter(g => g.status === "playing" || (g.next && g.status !== "done"))
-        .concat(this.visible().filter(g => g.status === "backlog" && g.owned && !NA(g.owned) && (!g.date || g.date <= t) && !g.next).sort((a, b) => (a.hours || 99) - (b.hours || 99)).slice(0, 4))
+      const t = today(), vis = this.visible(), why = this._why = new Map();
+      const playing = vis.filter(g => g.status === "playing");
+      const byF = new Map();
+      for (const g of vis) { const f = norm(g.franchise); if (!f) continue; if (!byF.has(f)) byF.set(f, []); byF.get(f).push(g); }
+      const fnext = [];
+      for (const list of byF.values()) {
+        if (list.length < 2) continue;
+        list.sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999") || a.title.localeCompare(b.title));
+        let last = -1;
+        list.forEach((g, i) => { if (g.status === "done" || g.status === "playing") last = i; });
+        if (last < 0) continue;
+        const nx = list.slice(last + 1).find(g => g.status !== "done" && g.status !== "dropped" && g.status !== "playing" && g.date && g.date <= t);
+        if (!nx) continue;
+        const prev = list[last], act = Math.max(...list.map(g => +new Date(g.plays[g.plays.length - 1] || 0) || 0), ...list.filter(g => g.status === "playing").map(() => Date.now()));
+        why.set(nx.id, `After ${prev.title}`);
+        fnext.push([act, nx]);
+      }
+      fnext.sort((a, b) => b[0] - a[0]);
+      return playing
+        .concat(fnext.map(x => x[1]))
+        .concat(vis.filter(g => g.next && g.status !== "done" && g.status !== "playing"))
+        .concat(vis.filter(g => g.status === "backlog" && g.owned && !NA(g.owned) && (!g.date || g.date <= t) && !g.next).sort((a, b) => (a.hours || 99) - (b.hours || 99)).slice(0, 4))
         .filter((g, i, a) => a.indexOf(g) === i).slice(0, limit);
     }
+    // why a game is in nextUp() ("After Mega Man IV"), or ""
+    whyNext(g) { return (this._why && this._why.get(g.id)) || ""; }
     upcoming(t = today()) { return this.visible().filter(g => g.date && g.date > t && g.status !== "done").sort((a, b) => a.date.localeCompare(b.date)); }
     recent(limit = 20) {
       const out = [];
@@ -272,6 +296,120 @@
       }
     }
     return alerts;
+  }
+  // ---- 0.6.6: more of IsThereAnyDeal (api.isthereanydeal.com): the ITAD id of each game, its best price in any store
+  // with the all-time low (overview), subscriptions (Game Pass, PS Plus…), bundles, and your ITAD waitlist and collection.
+  const ITAD = "https://api.isthereanydeal.com";
+  const chunks = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
+  async function itadCall(http, method, pth, { key, token, body } = {}) {
+    const url = ITAD + pth + (key ? (pth.includes("?") ? "&" : "?") + "key=" + encodeURIComponent(key) : "");
+    const headers = { Accept: "application/json" };
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (token) headers.Authorization = "Bearer " + token;
+    const r = await http(method, url, { headers, body: body !== undefined ? JSON.stringify(body) : undefined });
+    if (r.status === 401 || r.status === 403) throw new Error(token ? "IsThereAnyDeal sign-in expired: sign in again" : "IsThereAnyDeal refused the API key");
+    if (r.status === 429) throw new Error("IsThereAnyDeal: too many requests, try again in a few minutes");
+    if (r.status < 200 || r.status > 299) throw new Error(`IsThereAnyDeal: HTTP ${r.status || r.error || "network error"}`);
+    if (!r.body) return null;
+    try { return JSON.parse(r.body); } catch (e) { return null; }
+  }
+  // the games worth watching prices for: not finished or dropped
+  const priceWatch = lib => lib.visible().filter(g => g.status !== "done" && g.status !== "dropped");
+  // ITAD ids: Steam games by app id, the rest by title. Not found is remembered for 30 days.
+  async function itadIds(lib, http, key, games = lib.visible(), now = Date.now()) {
+    const todo = games.filter(g => !g.itad && !(g.itadMiss && now - g.itadMiss < 30 * 864e5));
+    let found = 0;
+    for (const part of chunks(todo.filter(g => g.steam), 200)) {
+      const r = (await itadCall(http, "POST", "/lookup/id/shop/61/v1", { key, body: part.map(g => "app/" + g.steam) })) || {};
+      for (const g of part) { const id = r["app/" + g.steam]; if (id) { g.itad = id; found++; } }
+    }
+    for (const part of chunks(todo.filter(g => !g.itad), 200)) {
+      const r = (await itadCall(http, "POST", "/lookup/id/title/v1", { key, body: part.map(g => g.title) })) || {};
+      for (const g of part) { const id = r[g.title]; if (id) { g.itad = id; found++; } else g.itadMiss = now; }
+    }
+    return found;
+  }
+  // best price now in any store and the all-time low, for the games you'd still buy or play; active bundles too
+  async function itadOverview(lib, http, key, cc = "IT", now = Date.now()) {
+    const games = priceWatch(lib).filter(g => g.itad), byId = new Map(games.map(g => [g.itad, g]));
+    const bundles = new Map();
+    for (const part of chunks(games.map(g => g.itad), 200)) {
+      const r = (await itadCall(http, "POST", `/games/overview/v2?country=${cc}&vouchers=false`, { key, body: part })) || {};
+      for (const p of r.prices || []) {
+        const g = byId.get(p.id); if (!g) continue;
+        const c = p.current, lo = p.lowest;
+        g.deal = c ? { shop: (c.shop || {}).name || "?", price: (c.price || {}).amount, regular: (c.regular || {}).amount, cut: c.cut || 0, cur: (c.price || {}).currency || "EUR", url: c.url || "",
+          low: lo ? { price: (lo.price || {}).amount, shop: (lo.shop || {}).name || "", at: String(lo.timestamp || "").slice(0, 10) } : null, bundled: p.bundled || 0, at: now } : null;
+        if (g.deal) g.deal.atLow = !!(g.deal.low && g.deal.price != null && g.deal.price <= g.deal.low.price + 0.005);
+      }
+      for (const b of r.bundles || []) if (!bundles.has(b.id)) bundles.set(b.id, { id: b.id, title: b.title, url: b.url, expiry: b.expiry || null, shop: (b.page || {}).name || "",
+        games: [].concat(...(b.tiers || []).map(t => (t.games || []).map(x => x.id))).filter(id => byId.has(id)) });
+    }
+    lib.meta.bundles = [...bundles.values()].filter(b => b.games.length);
+    lib.meta.dealsAt = now;
+    return games.filter(g => g.deal && g.deal.cut > 0).length;
+  }
+  // which subscriptions have the game (Game Pass, PS Plus, EA Play, Ubisoft+…), and if it's leaving
+  async function itadSubs(lib, http, key, cc = "IT") {
+    const games = priceWatch(lib).filter(g => g.itad), byId = new Map(games.map(g => [g.itad, g]));
+    let n = 0;
+    for (const g of games) g.subs = [];
+    for (const part of chunks(games.map(g => g.itad), 200)) {
+      const r = (await itadCall(http, "POST", `/games/subs/v1?country=${cc}`, { key, body: part })) || [];
+      for (const x of r) { const g = byId.get(x.id); if (g && (x.subs || []).length) { g.subs = x.subs.map(s => ({ name: s.name, leaving: s.leaving ? String(s.leaving).slice(0, 10) : "" })); n++; } }
+    }
+    return n;
+  }
+  // every bundle (current, and past ones if asked) that had this game
+  async function itadBundles(http, key, id, cc = "IT", expired = false) {
+    const r = (await itadCall(http, "GET", `/games/bundles/v2?id=${encodeURIComponent(id)}&country=${cc}${expired ? "&expired=true" : ""}`, { key })) || [];
+    return r.map(b => { const tier = (b.tiers || []).find(t => (t.games || []).some(x => x.id === id)) || {};
+      return { title: b.title, shop: (b.page || {}).name || "", url: b.url, expiry: b.expiry ? String(b.expiry).slice(0, 10) : "", price: tier.price ? tier.price.amount : null, cur: tier.price ? tier.price.currency : "" }; });
+  }
+  // 0.6.6: your ITAD waitlist ↔ your Saga wishlist, and what you own → your ITAD collection. What was on both lists
+  // at the last sync (lib.meta.itadWait) tells a removal on one side from an addition on the other.
+  async function itadWaitSync(lib, http, token, opt = {}) {
+    const wait = (await itadCall(http, "GET", "/waitlist/games/v1", { token })) || [];
+    const there = new Map(wait.map(w => [w.id, w])), was = new Set(lib.meta.itadWait || []);
+    const out = { added: 0, pushed: 0, removedHere: 0, removedThere: 0, owned: 0 };
+    const byItad = new Map(lib.games.filter(g => g.itad).map(g => [g.itad, g]));
+    const wishHere = lib.visible().filter(g => g.status === "wishlist" && g.itad);
+    // removed on ITAD since last time: off the Saga wishlist (kept if you rated, played or wrote about it)
+    for (const g of wishHere) if (was.has(g.itad) && !there.has(g.itad)) {
+      if (!g.rating && !g.plays.length && !g.notes) { lib.remove(g.id); out.removedHere++; } else { g.status = "backlog"; }
+    }
+    // removed in Saga since last time (deleted or no longer on the wishlist): off the ITAD waitlist
+    const gone = [...was].filter(id => there.has(id) && (!byItad.has(id) || byItad.get(id).status !== "wishlist" || byItad.get(id).hidden));
+    if (gone.length) { await itadCall(http, "DELETE", "/waitlist/games/v1", { token, body: gone }); out.removedThere = gone.length; for (const id of gone) there.delete(id); }
+    // new on ITAD: onto the Saga wishlist
+    for (const [id, w] of there) if (!byItad.has(id) && !was.has(id)) {
+      if (lib.removed[norm(w.title)]) continue;
+      const r = lib.add({ title: w.title, src: "itad", itad: id }, "wishlist"); if (!r.existed) { r.game.itad = id; out.added++; } else if (!r.game.itad) r.game.itad = id;
+    }
+    // new on the Saga wishlist: onto the ITAD waitlist
+    const push = lib.visible().filter(g => g.status === "wishlist" && g.itad && !there.has(g.itad)).map(g => g.itad);
+    for (const part of chunks(push, 200)) await itadCall(http, "PUT", "/waitlist/games/v1", { token, body: part });
+    out.pushed = push.length;
+    // what you own or finished: into the ITAD collection (once each)
+    const sent = new Set(lib.meta.itadColl || []);
+    const own = lib.visible().filter(g => g.itad && !sent.has(g.itad) && (g.status === "done" || g.status === "playing" || (g.owned && !/^(no|n\/a)$/i.test(g.owned)))).map(g => g.itad);
+    for (const part of chunks(own, 200)) await itadCall(http, "PUT", "/collection/games/v1", { token, body: part });
+    out.owned = own.length;
+    lib.meta.itadColl = [...sent, ...own];
+    lib.meta.itadWait = lib.visible().filter(g => g.status === "wishlist" && g.itad).map(g => g.itad);
+    lib.meta.itadWaitAt = Date.now(); lib._fi = null;
+    return out;
+  }
+  // PKCE sign-in to IsThereAnyDeal (authorization code flow)
+  const ITAD_AUTH = "https://isthereanydeal.com/oauth/authorize/", ITAD_TOKEN = "https://isthereanydeal.com/oauth/token/";
+  const ITAD_SCOPES = "wait_read wait_write coll_read coll_write";
+  const itadAuthUrl = (clientId, redirect, challenge, state) => `${ITAD_AUTH}?${["response_type=code", "client_id=" + encodeURIComponent(clientId), "redirect_uri=" + encodeURIComponent(redirect),
+    "scope=" + encodeURIComponent(ITAD_SCOPES), "code_challenge=" + encodeURIComponent(challenge), "code_challenge_method=S256", "state=" + encodeURIComponent(state)].join("&")}`;
+  async function itadToken(http, form) {
+    const r = await http("POST", ITAD_TOKEN, { headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" }, body: Object.entries(form).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&") });
+    let j = null; try { j = JSON.parse(r.body || ""); } catch (e) { /* below */ }
+    if (r.status !== 200 || !j || !j.access_token) throw new Error(`IsThereAnyDeal sign-in failed: ${(j && (j.error_description || j.error)) || "HTTP " + (r.status || r.error)}`);
+    return { access: j.access_token, refresh: j.refresh_token || "", until: Date.now() + (j.expires_in || 3600) * 1000 };
   }
   // Prices across stores. IsThereAnyDeal (free key from isthereanydeal.com › Settings › API) gives euro prices from
   // Steam, GOG, Epic, Humble, Fanatical, GamesPlanet, GMG and many more, plus the all-time low. Without a key, CheapShark
@@ -481,7 +619,7 @@
       games: lib.visible().map(g => ({ id: g.id, t: g.title, f: g.franchise, m: g.multiverse, done: g.status === "done", date: g.date })) };
   }
 
-  const API = { readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
+  const API = { itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
     steamSearch, linkSteam, steamPrices, storePrices, steamDates, importRows, fromImdb, storeLinks, indexFor, yearOf, NA };
   if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
   root.GamesCore = API;

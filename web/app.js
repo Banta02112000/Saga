@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.6.5";
+  const VERSION = "0.6.6";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -154,6 +154,8 @@
         const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
         return btoa(String.fromCharCode(...d)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
       },
+      linkScheme: () => (A && A.linkScheme ? String(A.linkScheme() || "") : ""),
+      takeOauth: () => (A && A.takeOauth ? String(A.takeOauth() || "") : ""),
       randomUrl: n => {
         if (A) return A.randomUrl(n);
         const b = crypto.getRandomValues(new Uint8Array(n));
@@ -297,6 +299,10 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.6.6", ["IsThereAnyDeal, much more of it (with your free API key): the best price now in any store for every game you'd still buy or play, with its all-time low (and a notification when a game you want hits it); which subscriptions include it (Game Pass, PS Plus, Switch Online…, and when it leaves); current bundles and every bundle it was ever in.",
+      "Games: filters At its lowest and In a subscription, On sale now covers every store, a Best deal sort, and a Low badge on the cover.",
+      "Sign in to IsThereAnyDeal (Settings › Accounts): your ITAD waitlist and your Saga wishlist stay in step both ways, and what you finish or own goes to your ITAD collection.",
+      "Games › Up next follows each franchise: after the game you finished or are playing, the next one out in that franchise (“After …”), the franchises you played most recently first."]],
     ["0.6.5", ["Why is this here? at the bottom of every film and series: the lists and ratings it came from. Switch a list off and remove the titles only it brought (anything you rated, ticked or noted stays; Undo).",
       "A source that keeps failing gets a warning on Home and in Sync (how many days, what went wrong, what to do), and a notification on the third failure in a row.",
       "Updates: Home says when a newer Saga is out; Get it opens your Saga website's download page. Settings › About › Check for updates.",
@@ -1306,6 +1312,10 @@
       <section class="stack">
         <h2>Steam</h2>
         ${field("steam_profile", "Steam profile link or custom name", { placeholder: "https://steamcommunity.com/id/yourname", hint: "Your owned games and hours come in at every sync. In Steam › Edit profile › Privacy, My profile and Game details must be Public." })}
+        ${field("itad_client_id", "IsThereAnyDeal app client ID (for your waitlist)", { hint: `From isthereanydeal.com › Apps (the same app as the API key). Its redirect URI must be ${itadRedirect()}` })}
+        <div class="row wrap">${db.get("itad_auth") ? `<span class="small muted">Signed in to IsThereAnyDeal: your waitlist ↔ Saga wishlist, and what you own → your ITAD collection, after each sync.</span>
+          <button class="btn small" data-action="itadnow">Sync waitlist and prices now</button><button class="btn small quiet" data-action="itadout">Sign out</button>`
+          : `<button class="btn small" data-action="itadin" ${db.get("itad_client_id") ? "" : "disabled"}>Sign in to IsThereAnyDeal</button><button class="btn small quiet" data-action="itadpaste">Paste the address by hand</button>`}</div>
         ${field("itad_key", "IsThereAnyDeal API key (optional, for store prices)", { secret: true, hint: "Free at isthereanydeal.com › Settings › API keys. Game pages then compare euro prices across Steam, GOG, Epic, Humble, Fanatical, GamesPlanet and more. Without it, CheapShark's US prices are used." })}
         ${field("steam_key", "Steam Web API key (optional, recommended)", { secret: true, hint: "Free at steamcommunity.com/dev/apikey (any domain name will do). With it, your library comes from Steam’s official API, which is far more reliable than reading the profile page." })}
         ${db.get("steam_sync_at") ? `<p class="small muted" style="margin:0">Last read ${esc(new Date(+db.get("steam_sync_at")).toLocaleString(lang() === "it" ? "it-IT" : "en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }))}</p>` : ""}
@@ -2855,7 +2865,7 @@
       else out.push({ ord: x.last || "", html: Kit.tile({ title: x.show, img: x.poster ? IMG + "w342" + x.poster : "", kind: "show", badge: `S${x.s} E${x.e}`, badgeAcc: true, attrs: `data-action="sheet" data-sid="${sid(x, "up")}"` }, x.show, "On Trakt") });
     }
     if (secOn("books")) for (const b of books.books.filter(b => b.status === "reading")) out.push({ ord: BC.isoDay ? BC.isoDay(Math.max(b.started || 0, ...(b.log || []).map(l => l.t))) : "", html: Kit.tile({ title: b.title, img: (b.cover || "").replace(/^http:/, "https:"), kind: "book", badge: `${BC.percent(b)}%`, badgeAcc: true, progress: BC.percent(b) / 100, attrs: `data-action="bopen" data-id="${esc(b.id)}"` }, b.title, b.authors[0] || "") });
-    if (secOn("games")) for (const g of games.nextUp(6)) out.push({ ord: g.status === "playing" ? "~" : "", html: Kit.mods.games.tileOf(g) });
+    if (secOn("games")) for (const g of games.nextUp(6)) out.push({ ord: g.status === "playing" ? "~" : "", html: Kit.mods.games.tileOf(g, games.whyNext(g)) });
     if (secOn("timeline")) { const n = Kit.mods.timeline.next(); if (n) out.push({ ord: "", html: Kit.tile({ title: n.title, kind: "story", badge: n.era, attrs: `data-action="tlhome" data-k="${esc(n.k)}"` }, n.title, `Doctor Who · ${n.era}`) }); }
     return out.sort((a, b) => String(b.ord).localeCompare(String(a.ord))).map(x => x.html);
   }
@@ -3192,7 +3202,7 @@
     if (db.get("username")) sources.push("Trakt account");
     if (db.get("imdb_user")) sources.push("IMDb ratings");
     for (const k of Object.keys(state)) if (!sources.includes(k)) sources.push(k);
-    const STG = [["library", "Library from IMDb and Trakt"], ["push", "Send your changes to Trakt"], ["services", "AniList, MyAnimeList, Letterboxd, Goodreads"], ["games", "Games: IMDb, Steam covers, prices and dates"], ["episodes", "Episode lists of your series"], ["details", "Posters, release dates and streaming"]];
+    const STG = [["library", "Library from IMDb and Trakt"], ["push", "Send your changes to Trakt"], ["services", "AniList, MyAnimeList, Letterboxd, Goodreads"], ["games", "Games: IMDb, Steam covers, prices and dates"], ["itad", "IsThereAnyDeal: best prices, lows, subscriptions, waitlist"], ["episodes", "Episode lists of your series"], ["details", "Posters, release dates and streaming"]];
     return `<section class="card"><div class="row"><div class="grow"><div class="kicker">${ui.job ? esc(ui.job) + "…" : "Last sync"}</div>
         <b style="font:800 22px/1.2 var(--display)">${ui.job ? esc(ui.status || "Working") : last ? esc(new Date(last * 1000).toLocaleString(lang() === "it" ? "it-IT" : "en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })) : "Never"}</b></div>
         ${ui.job ? `<button class="btn" data-action="stopjob">Stop</button>` : `<button class="btn primary" data-action="sync">${icon("sync")}Sync now</button>`}</div>
@@ -3284,6 +3294,9 @@
       if (storeN) games.save();
       return `${steamTxt}${storeN ? `store prices for ${storeN} wishlist games, ` : ""}IMDb games: ${im.added} new, ${im.matched || 0} already in Games${im.promoted ? ` (${im.promoted} marked finished: rated on IMDb)` : ""}, ${linked} linked to Steam, ${alerts.length} price alerts, ${dates} dates updated`;
     }, 180000);
+    // 0.6.6: IsThereAnyDeal: ids, best price in any store with the all-time low, subscriptions (twice a day at most),
+    // and your ITAD waitlist and collection when you've signed in
+    if (secOn("games") && db.get("itad_key")) await step("itad", "IsThereAnyDeal", async () => itadRefresh(http, false), 180000);
     await step("episodes", "Episodes", async () => {
       const shows = L.stale(lib).slice(0, 20);
       let n = 0;
@@ -3402,6 +3415,61 @@
   }
   // 0.5.7: what follows a sync runs one thing after another, after the sync's own save, instead of all at once
   let afterRunning = false;
+  // ---- 0.6.6: IsThereAnyDeal
+  async function itadToken() {
+    let t = {}; try { t = JSON.parse(db.get("itad_auth", "{}")) || {}; } catch (e) { t = {}; }
+    if (!t.access) return "";
+    if (t.until && Date.now() < t.until - 60000) return t.access;
+    if (!t.refresh) return "";
+    const n = await GC.itadToken(Native.http, { grant_type: "refresh_token", refresh_token: t.refresh, client_id: db.get("itad_client_id") });
+    db.set("itad_auth", JSON.stringify(Object.assign(t, n, { refresh: n.refresh || t.refresh }))); db.flush();
+    return n.access;
+  }
+  async function itadRefresh(http, force) {
+    const key = db.get("itad_key"), cc = games.settings.region || "IT", out = [];
+    if (!key) throw new Error("add an IsThereAnyDeal API key in Settings");
+    const due = force || Date.now() - (games.meta.dealsAt || 0) > 11 * 3600e3;
+    const ids = await GC.itadIds(games, http, key, GC.priceWatch(games));
+    if (ids) out.push(`${fmt(ids)} games matched`);
+    if (due) {
+      const deals = await GC.itadOverview(games, http, key, cc); out.push(`${fmt(deals)} on sale`);
+      const subs = await GC.itadSubs(games, http, key, cc); out.push(`${fmt(subs)} in a subscription`);
+      // a game you want at its lowest price ever: a notification (once per price)
+      if (feat("priceAlerts")) for (const g of games.visible()) if (g.deal && g.deal.atLow && g.deal.cut > 0 && (g.status === "wishlist" || g.next))
+        Native.notify(C.hashId("glow|" + g.id + "|" + g.deal.price), `Lowest price ever: ${g.title}`, `${g.deal.cur === "EUR" ? "€" : g.deal.cur + " "}${(+g.deal.price).toFixed(2)} at ${g.deal.shop} (−${g.deal.cut}%)`, "games");
+    }
+    if (db.get("itad_auth")) {
+      try { const tok = await itadToken(); if (tok) { const w = await GC.itadWaitSync(games, http, tok); out.push(`waitlist: ${w.added} in, ${w.pushed} out${w.removedHere + w.removedThere ? `, ${w.removedHere + w.removedThere} removed` : ""}; ${w.owned} to your collection`); } }
+      catch (e) { out.push(`waitlist: ${e.message}`); }
+    }
+    games.save();
+    return out.join(", ") || "nothing new";
+  }
+  async function itadSignIn() {
+    const cid = String(db.get("itad_client_id", "")).trim();
+    if (!cid) { toast("Add your IsThereAnyDeal app's client ID first"); return; }
+    const verifier = Native.randomUrl(48), state = Native.randomUrl(16);
+    db.set("itad_pkce", JSON.stringify({ verifier, state, redirect: itadRedirect() })); db.flush();
+    Native.openUrl(GC.itadAuthUrl(cid, itadRedirect(), await Native.sha256url(verifier), state));
+    toast("Approve Saga on IsThereAnyDeal; you'll come back here by yourself");
+  }
+  const itadRedirect = () => `${(Native.linkScheme && Native.linkScheme()) || "bantaapps"}://oauth/itad`;
+  // the browser comes back with …://oauth/itad?code=…&state=… (or the address pasted by hand)
+  async function itadFinish(url) {
+    let st = {}; try { st = JSON.parse(db.get("itad_pkce", "{}")) || {}; } catch (e) { st = {}; }
+    const q = new URLSearchParams(String(url).replace(/^[^?]*\?/, "").replace(/#.*/, ""));
+    if (q.get("error")) { toast(`IsThereAnyDeal: ${q.get("error_description") || q.get("error")}`); return; }
+    if (!q.get("code") || !st.verifier) { toast("That isn't an IsThereAnyDeal sign-in address"); return; }
+    if (st.state && q.get("state") !== st.state) { toast("Sign-in didn't match: try again"); return; }
+    runJob("IsThereAnyDeal sign-in", async () => {
+      const t = await GC.itadToken(Native.http, { grant_type: "authorization_code", code: q.get("code"), redirect_uri: st.redirect || itadRedirect(), client_id: db.get("itad_client_id"), code_verifier: st.verifier });
+      db.set("itad_auth", JSON.stringify(t)); db.set("itad_pkce", ""); db.flush();
+      return "Signed in to IsThereAnyDeal. " + await itadRefresh(Native.http, true);
+    });
+  }
+  window.__oauth = url => { if (/oauth\/itad/.test(url)) itadFinish(url); };
+  window.__oauthPoll = () => { const u = Native.takeOauth(); if (u) window.__oauth(u); };
+  setTimeout(() => { try { window.__oauthPoll(); } catch (e) { logError("oauth", e.message); } }, 600);
   async function afterSync() {
     setTimeout(() => checkUpdate(false).catch(() => {}), 5000);
     setTimeout(() => recsRefresh(false).catch(() => {}), 9000);
@@ -4110,6 +4178,10 @@
       case "whatsnew": whatsNew(true); break;
       case "updcheck": checkUpdate(true); break;
       case "recsnow": recsRefresh(true); break;
+      case "itadin": itadSignIn(); break;
+      case "itadout": db.set("itad_auth", ""); db.flush(); toast("Signed out of IsThereAnyDeal"); render(); break;
+      case "itadnow": runJob("IsThereAnyDeal", async () => itadRefresh(Native.http, true)); break;
+      case "itadpaste": { const u = prompt("Paste the address the browser showed after approving (it starts with " + itadRedirect() + ")"); if (u) itadFinish(u); break; }
       case "webshare": { const on = el.checked; db.set("web_share", on ? "1" : "0"); webApi("POST", "api/share", { on }).then(() => { toast(on ? "Sharing with the other people on the website" : "Not sharing any more"); peopleRefresh(false); }, e => { toast(e.message); db.set("web_share", on ? "0" : "1"); render(); }); break; }
       case "peoplenow": peopleRefresh(true); break;
       case "friendadd": { const P = people().find(x => x.name === el.dataset.p), x = P && P.lib[+el.dataset.i]; if (x) { libAdd({ type: x.type, title: x.title, year: x.year, imdb: x.imdb, tmdb: x.tmdb, poster: x.poster }, "watchlist"); render(); } break; }

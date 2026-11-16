@@ -12,10 +12,11 @@
   function posterOf(g, opt = {}) {
     const t = today();
     const badge = g.status === "playing" ? "Playing" : g.next && g.status !== "done" ? "Next" : g.date && g.date > t ? K.when(g.date, Saga.lang()).replace(/^\d+ /, "") : "";
-    const badgeR = g.price && g.price.disc >= 10 && g.status !== "done" ? `−${g.price.disc}%` : g.plays.length > 1 ? `${g.plays.length}×` : "";
+    const cut = Math.max(g.price && g.price.disc || 0, g.deal && g.deal.cut || 0);
+    const badgeR = cut >= 10 && g.status !== "done" ? `${g.deal && g.deal.atLow && g.deal.cut === cut ? "Low " : ""}−${cut}%` : g.plays.length > 1 ? `${g.plays.length}×` : "";
     return K.poster({ key: "game:" + g.id, title: g.title, img: cover(g), kind: "game", badge, badgeAcc: g.status === "playing", badgeR, done: g.status === "done", attrs: `data-action="gopen" data-id="${esc(g.id)}"` });
   }
-  const tileOf = g => `<div class="tile">${posterOf(g)}<div class="cap">${esc(g.title)}</div><div class="cap2">${esc(ui.sort === "remake" && g.remake ? `Remake ${g.remake.date ? g.remake.date.slice(0, 4) : ""} · ${g.remake.platform || ""}` : [G.yearOf(g), g.platform].filter(Boolean).join(" · "))}</div></div>`;
+  const tileOf = (g, why) => `<div class="tile">${posterOf(g)}<div class="cap">${esc(g.title)}</div><div class="cap2">${why ? esc(why) + " · " : ""}${esc(ui.sort === "remake" && g.remake ? `Remake ${g.remake.date ? g.remake.date.slice(0, 4) : ""} · ${g.remake.platform || ""}` : [G.yearOf(g), g.platform].filter(Boolean).join(" · "))}</div></div>`;
 
   function listFor() {
     const t = today(), q = G.norm(ui.q);
@@ -25,12 +26,15 @@
       if (ui.f === "next") return g.next && g.status !== "done";
       if (ui.f === "upcoming") return g.date && g.date > t && g.status !== "done";
       if (ui.f === "owned") return g.owned && g.status !== "done";
-      if (ui.f === "sale") return g.price && g.price.disc > 0 && g.status !== "done";
+      if (ui.f === "sale") return ((g.price && g.price.disc > 0) || (g.deal && g.deal.cut > 0)) && g.status !== "done";
+      if (ui.f === "lowest") return g.deal && g.deal.atLow && g.deal.cut > 0 && g.status !== "done";
+      if (ui.f === "subs") return g.subs && g.subs.length > 0 && g.status !== "done";
       if (ui.f === "remakes") return !!g.remake;
       return g.status === ui.f;
     });
     const by = {
       release: (a, b) => (a.date || "9999").localeCompare(b.date || "9999") || a.title.localeCompare(b.title),
+      deal: (a, b) => ((b.deal && b.deal.atLow && b.deal.cut ? 1 : 0) - (a.deal && a.deal.atLow && a.deal.cut ? 1 : 0)) || (Math.max(b.deal ? b.deal.cut : 0, b.price ? b.price.disc || 0 : 0) - Math.max(a.deal ? a.deal.cut : 0, a.price ? a.price.disc || 0 : 0)) || a.title.localeCompare(b.title),
       recent: (a, b) => (b.plays[b.plays.length - 1] || "").localeCompare(a.plays[a.plays.length - 1] || "") || (b.added || 0) - (a.added || 0),
       title: (a, b) => a.title.localeCompare(b.title), rating: (a, b) => (b.rating || 0) - (a.rating || 0) || (b.imdbR || 0) - (a.imdbR || 0),
       remake: (a, b) => ((a.remake && a.remake.date) || a.date || "9999").localeCompare((b.remake && b.remake.date) || b.date || "9999") || a.title.localeCompare(b.title),
@@ -50,16 +54,16 @@
     }
     const playing = L.nextUp(12);
     const f = [["all", "All", c.all], ["playing", "Playing", c.playing], ["paused", "Paused", c.paused], ["next", "Next", c.next], ["backlog", "Backlog", c.backlog], ["done", "Finished", c.done],
-      ["wishlist", "Wishlist", c.wishlist], ["upcoming", "Upcoming", c.upcoming], ["owned", "Owned, to play", null], ["sale", "On sale", null], ["remakes", "Has a remake", null], ["dropped", "Dropped", c.dropped]];
+      ["wishlist", "Wishlist", c.wishlist], ["upcoming", "Upcoming", c.upcoming], ["owned", "Owned, to play", null], ["sale", "On sale", null], ["lowest", "At its lowest", null], ["subs", "In a subscription", null], ["remakes", "Has a remake", null], ["dropped", "Dropped", c.dropped]];
     const list = ui.view === "grid" ? listFor() : [];
-    return `${playing.length && ui.f === "all" && !ui.q ? `<section>${K.head("Playing and up next", "", playing.length)}${K.rail(playing.map(tileOf))}</section>` : ""}
+    return `${playing.length && ui.f === "all" && !ui.q ? `<section>${K.head("Playing and up next", "", playing.length)}${K.rail(playing.map(g => tileOf(g, L.whyNext(g))))}</section>` : ""}
       <div class="subnav">${[["grid", "Library"], ["mv", "Franchises"], ["stats", "Stats"]].map(([k, l]) => `<button data-action="gview" data-v="${k}" ${ui.view === k ? 'aria-current="page"' : ""}>${l}</button>`).join("")}</div>
       <div class="toolbar"><input type="search" data-gq="1" data-input="gq" value="${esc(ui.q)}" placeholder="Filter your games" autocomplete="off">
-        ${ui.view === "grid" ? `<select data-gsort="1" aria-label="Sort">${[["release", "Release (oldest)"], ["newest", "Release (newest)"], ["remake", "Remake release"], ["recent", "Recently played"], ["title", "Title"], ["rating", "Rating"], ["short", "Shortest"], ["price", "Price"]].map(([k, l]) => `<option value="${k}" ${ui.sort === k ? "selected" : ""}>${l}</option>`).join("")}</select>` : ""}
+        ${ui.view === "grid" ? `<select data-gsort="1" aria-label="Sort">${[["release", "Release (oldest)"], ["newest", "Release (newest)"], ["remake", "Remake release"], ["recent", "Recently played"], ["title", "Title"], ["rating", "Rating"], ["deal", "Best deal"], ["short", "Shortest"], ["price", "Price"]].map(([k, l]) => `<option value="${k}" ${ui.sort === k ? "selected" : ""}>${l}</option>`).join("")}</select>` : ""}
         <button class="iconbtn" data-action="gadd" aria-label="Add a game">${K.icon("plus")}</button></div>
       ${ui.view !== "stats" ? strip() : ""}
       ${ui.view === "stats" ? renderStats() : ui.view === "grid" ? `<div class="chips" style="margin-bottom:14px">${f.map(([k, l, n]) => `<button class="chip" data-action="gfilter" data-v="${k}" aria-pressed="${ui.f === k}">${l}${n != null ? ` <span class="muted">${n}</span>` : ""}</button>`).join("")}</div>
-        ${list.length ? K.grid(list.slice(0, ui.lim).map(tileOf)) : `<p class="muted">Nothing here.</p>`}
+        ${list.length ? K.grid(list.slice(0, ui.lim).map(g => tileOf(g))) : `<p class="muted">Nothing here.</p>`}
         ${list.length > ui.lim ? `<button class="btn block" style="margin-top:16px" data-action="gmore">Show more (${list.length - ui.lim})</button>` : ""}
         <p class="small muted" style="margin-top:16px">${c.all} games · ${c.done} finished · ${c.plays} playthroughs</p>` : renderMv()}`;
   }
@@ -93,7 +97,7 @@
     const mvs = lib().multiverses().filter(m => !q || G.norm(m.name).includes(q) || m.franchises.some(f => G.norm(f.name).includes(q)));
     return mvs.slice(0, 80).map(m => `<section>
       <div class="sechead"><h2>${esc(m.name)}</h2><span class="count">${m.done}/${m.total}</span></div>
-      ${m.franchises.map(fr => `${m.franchises.length > 1 || fr.name !== m.name ? `<div class="small muted" style="margin:0 0 8px">${esc(fr.name)}</div>` : ""}${K.rail(fr.games.map(tileOf))}`).join('<div style="height:12px"></div>')}</section>`).join("") || `<p class="muted">Nothing matches.</p>`;
+      ${m.franchises.map(fr => `${m.franchises.length > 1 || fr.name !== m.name ? `<div class="small muted" style="margin:0 0 8px">${esc(fr.name)}</div>` : ""}${K.rail(fr.games.map(g => tileOf(g)))}`).join('<div style="height:12px"></div>')}</section>`).join("") || `<p class="muted">Nothing matches.</p>`;
   }
   function renderSearch() {
     const lim = ui.res || [];
@@ -153,6 +157,7 @@
       <div class="row" style="margin:6px 0 12px"><input type="date" id="gDate" value="${t}" max="${t}" aria-label="Date"><button class="btn" data-action="gplay">${K.icon("plus")}${g.plays.length ? "Finished again" : "Finished"}</button></div>
       ${pr || g.steam ? `<h4>Price</h4><div class="nextbox"><div class="grow">${pr ? `<b>${esc(eur(pr.eur))}</b>${pr.disc ? ` <span class="pbadge">−${pr.disc}%</span> <s class="small muted">${esc(eur(pr.retail))}</s>` : ""}<div class="small muted">Steam Italy${pr.low != null && pr.low < pr.eur ? ` · lowest seen ${esc(eur(pr.low))}` : ""}</div>` : `<span class="small muted">No price yet: it's checked on the next sync.</span>`}</div></div>
         <label class="field"><span>Alert me at or below (€)</span><input type="number" inputmode="decimal" step="0.01" data-gtarget="1" value="${g.target != null ? g.target : ""}" placeholder="any big discount"></label>` : ""}
+      ${dealHtml(g)}
       <h4>Prices in other stores</h4>${storesHtml(g)}
       <h4>Details</h4><div class="listcard">${facts.map(([k, v]) => `<div class="row small" style="min-height:38px;border-bottom:1px solid var(--line)" ${k === "Franchise" || k === "Multiverse" ? `data-action="mvopen" data-mv="${esc(v)}" role="button"` : k === "Studio" ? `data-action="gstudio" data-dev="${esc(v)}" role="button"` : ""}><span class="muted" style="width:42%">${esc(k)}</span><span class="grow">${esc(v)}${k === "Franchise" || k === "Multiverse" || k === "Studio" ? ` <span class="muted">›</span>` : ""}</span></div>`).join("")}</div>
       <label class="field" style="margin-top:12px"><span>Notes</span><textarea rows="2" data-gnotes="1" placeholder="Difficulty, mods, who you played with…">${esc(g.notes)}</textarea></label>
@@ -218,6 +223,9 @@
         G.logSession(g, mins, (document.getElementById("gDate") || {}).value || today()); reopen(); K.toast(`Logged ${hm(mins)}`); return true; }
       case "gunsess": { g.sessions.splice(+el.dataset.i, 1); reopen(); return true; }
       case "grate": { const v = +el.dataset.v * 2; g.rating = g.rating === v ? v - 1 : g.rating === v - 1 ? 0 : v; reopen(); return true; }
+      case "gbundles": { const id = g.id; ui.bundles = { id, busy: true }; reopen();
+        G.itadBundles(Saga.http, Saga.db.get("itad_key"), g.itad, lib().settings.region || "IT", true).then(list => { ui.bundles = { id, list }; }, e => { ui.bundles = { id, err: e.message }; }).then(() => { if (ui.open === id) reopen(); });
+        return true; }
       case "gextras": { const id = g.id; ui.extras = { id, busy: true }; reopen();
         G.steamExtras(Saga.http, g.steam, lib().settings.region || "IT").then(x => { if (x.dev && !g.dev) { g.dev = x.dev; lib().save(); } ui.extras = Object.assign({ id }, x); }, e => { ui.extras = { id, err: e.message }; }).then(() => { if (ui.open === id) reopen(); });
         return true; }
@@ -242,6 +250,18 @@
     return false;
   }
   const money = (n, cur) => (n == null ? "" : n === 0 ? "Free" : cur === "USD" ? `$${(+n).toFixed(2)}` : eur(n));
+  // 0.6.6: the best price now in any store, the all-time low, subscriptions and bundles (IsThereAnyDeal)
+  function dealHtml(g) {
+    const d = g.deal, subs = g.subs || [], bs = (lib().meta.bundles || []).filter(b => g.itad && b.games.includes(g.itad)), bx = ui.bundles && ui.bundles.id === g.id ? ui.bundles : null;
+    if (!d && !subs.length && !bs.length && !g.itad) return "";
+    return `<h4>Best price</h4>
+      ${d ? `<button class="sheetbtn" data-action="open" data-url="${esc(d.url)}"><span class="grow">${esc(d.shop)}${d.atLow && d.cut ? ` <span class="pbadge">Lowest ever</span>` : ""}</span><b>${esc(money(d.price, d.cur))}</b>${d.cut ? ` <span class="pbadge">−${d.cut}%</span>` : ""}</button>
+        ${d.low ? `<p class="small muted" style="margin:4px 0 8px">Lowest ever: ${esc(money(d.low.price, d.cur))}${d.low.shop ? ` at ${esc(d.low.shop)}` : ""}${d.low.at ? `, ${esc(d.low.at)}` : ""}${d.regular ? ` · full price ${esc(money(d.regular, d.cur))}` : ""}</p>` : ""}` : ""}
+      ${subs.length ? `<p class="small" style="margin:4px 0">Included in ${subs.map(x => `<b>${esc(x.name)}</b>${x.leaving ? ` <span class="muted">(leaving ${esc(x.leaving)})</span>` : ""}`).join(", ")}</p>` : ""}
+      ${bs.length ? `<p class="small" style="margin:4px 0">In a bundle now: ${bs.map(b => `<a href="#" data-action="open" data-url="${esc(b.url)}">${esc(b.title)}</a>${b.expiry ? ` <span class="muted">(until ${esc(String(b.expiry).slice(0, 10))})</span>` : ""}`).join(", ")}</p>` : ""}
+      ${g.itad ? (bx ? (bx.busy ? `<p class="small muted">Asking IsThereAnyDeal…</p>` : bx.err ? `<p class="small muted">${esc(bx.err)}</p>` : bx.list.length ? `<div class="listcard">${bx.list.map(b => `<div class="item" data-action="open" data-url="${esc(b.url)}"><div class="grow" style="min-width:0"><b class="ell">${esc(b.title)}</b><div class="small muted">${esc([b.shop, b.price != null ? money(b.price, b.cur) : "", b.expiry ? (b.expiry < today() ? "ended " : "until ") + b.expiry : ""].filter(Boolean).join(" · "))}</div></div></div>`).join("")}</div>` : `<p class="small muted">Never in a bundle.</p>`)
+        : `<button class="btn small" data-action="gbundles">Every bundle it was in</button>`) : ""}`;
+  }
   function storesHtml(g) {
     const when = g.storesAt ? new Date(g.storesAt).toLocaleDateString(Saga.lang() === "it" ? "it-IT" : "en-GB", { day: "numeric", month: "short" }) : "";
     const rows = (g.stores || []).slice(0, 8).map(x => `<button class="sheetbtn" data-action="open" data-url="${esc(x.url)}"><span class="grow">${esc(x.shop)}</span><b>${esc(money(x.price, x.cur))}</b>${x.cut ? ` <span class="pbadge">−${x.cut}%</span>` : ""}</button>`).join("");
