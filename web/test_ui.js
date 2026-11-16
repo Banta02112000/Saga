@@ -233,8 +233,9 @@ const mock = () => {
   const saved = await page.evaluate(() => window.__app.db.get("imdb_lists"));
   if (!saved.includes("ls100000008")) throw new Error("setting not saved on tab change");
   await page.evaluate(() => __app.go("library")); await page.click('[data-action=tab][data-tab=stats]');
+  // 0.6.1: back walks back through the screens you visited, ends on Home, and only then lets the app close
   const handled = await page.evaluate(() => window.__back());
-  const tab = await page.evaluate(() => window.__app.ui.sec);
+  const tab = await page.evaluate(() => { for (let i = 0; i < 12 && window.__back(); i++); return window.__app.ui.sec; });
   const exitOnHome = await page.evaluate(() => window.__back());
   if (!handled || tab !== "home" || exitOnHome) throw new Error("back handling broken");
 

@@ -16,13 +16,18 @@ sudo tailscale serve --bg --https=8443 http://127.0.0.1:8787
 ```
 Open `https://<machine>.<tailnet>.ts.net:8443` on any device signed in to your tailnet.
 
-## Signing in
-The installer sets a password and prints it, with a **sync key** for the phone app. Change them any time:
-`SAGA_DATA=/opt/saga/data node /opt/saga/app/site/server.js --set-password`
-- Through Tailscale (port 8787, behind `tailscale serve`) people on your tailnet are let in without the password.
-  Set `SAGA_TRUST_TAILSCALE=0` in the service to ask for it there too.
-- The public entrance (port 8788) always asks for the password (browsers) or the sync key (the phone app),
-  allows 5 wrong passwords per 15 minutes per address, and keeps you signed in for 30 days.
+## Signing in, and more than one person
+Each person has a name, a password, a **sync key** for their phone app and their own files (the first account,
+the owner, keeps the files in `/opt/saga/data`; everyone else's are in `/opt/saga/data/users/<name>/`).
+Run these on the Pi (`cd /opt/saga/app/site` first, and put `SAGA_DATA=/opt/saga/data` in front of each):
+- `node server.js --set-password banta` — set or change a password (asks for it), prints that person's sync key
+- `node server.js --add-user marco` — a new account for a friend (asks for a password, prints their sync key)
+- `node server.js --users` — who has an account · `node server.js --remove-user marco` — remove one (files stay)
+- `node server.js --tailscale marco marco@gmail.com` — that Tailscale login opens Marco's Saga without a password
+Through Tailscale (port 8787) people on your tailnet are let in without the password (as the owner, unless linked
+with `--tailscale`); set `SAGA_TRUST_TAILSCALE=0` in the service to ask everyone. The public entrance (port 8788)
+always asks: name and password in a browser (30 days signed in, 5 wrong tries per 15 minutes per address), the
+sync key in the phone app. A password change is picked up without restarting.
 
 ## From anywhere, without Tailscale (optional)
 Point a tunnel or a reverse proxy at `http://127.0.0.1:8788` (never at 8787). With Cloudflare Tunnel:

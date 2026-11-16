@@ -130,5 +130,6 @@
     take: function () { return ""; }, post: noop, busy: noop, notify: noop, widget: noop, shareTo: function () { return false; },
     share: function (title, text) { try { if (navigator.share) { navigator.share({ title: title, text: text }).catch(noop); return true; } } catch (e) { /* no share sheet */ } return false; },
   };
-  window.__sagaWeb = { pending: function () { return unsent; }, files: function () { return Object.keys(files); } };
+  window.__sagaWeb = { pending: function () { return unsent; }, files: function () { return Object.keys(files); }, user: "" };
+  fetch(api("me")).then(function (r) { return r.json(); }).then(function (m) { window.__sagaWeb.user = m.user || ""; }).catch(function () {});
 })();

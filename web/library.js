@@ -349,6 +349,17 @@ const epKey = (s, e) => `${s}:${e}`;
     const j = await getJson(http, `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(String(q).trim())}&limit=24&sfw=true`);
     return ((j && j.data) || []).map(fromJikan);
   }
+  // 0.6.1: films, sequels, prequels, side stories of an anime (MyAnimeList relations; manga and adaptations left out)
+  async function animeRelations(http, mal) {
+    const j = await getJson(http, `https://api.jikan.moe/v4/anime/${mal}/relations`);
+    const out = [];
+    for (const r of (j && j.data) || []) {
+      if (/adaptation|character/i.test(r.relation)) continue;
+      for (const e of r.entry || []) if (e.type === "anime") out.push({ mal: e.mal_id, title: e.name, relation: r.relation });
+    }
+    return out;
+  }
+  async function animeOne(http, mal) { const d = await getJson(http, `https://api.jikan.moe/v4/anime/${mal}`); if (!d || !d.data) throw new Error("MyAnimeList has no details"); return fromJikan(d.data); }
   async function animeDetails(http, it, sleep = ms => new Promise(r => setTimeout(r, ms))) {
     let changed = false;
     const d = await getJson(http, `https://api.jikan.moe/v4/anime/${it.mal}`);
@@ -587,7 +598,7 @@ const epKey = (s, e) => `${s}:${e}`;
     return out.length ? out.join(", ") : "nothing Trakt needed";
   }
 
-  const API = { markBulk, pendingEps, adoptKey, settleShow, searchImdb, searchAnime, fromJikan, animeDetails, traktPush, Library, STATUSES, LABEL, search, details, stale, fromTmdb, fromTvmaze, fromItunes, norm, day, yearOf, epKey, blank, idFor };
+  const API = { animeRelations, animeOne, markBulk, pendingEps, adoptKey, settleShow, searchImdb, searchAnime, fromJikan, animeDetails, traktPush, Library, STATUSES, LABEL, search, details, stale, fromTmdb, fromTvmaze, fromItunes, norm, day, yearOf, epKey, blank, idFor };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   else root.Lib = API;
 })(typeof window !== "undefined" ? window : globalThis);

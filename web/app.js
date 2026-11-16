@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.6.0";
+  const VERSION = "0.6.1";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -196,9 +196,16 @@
   // 0.5.9: during a job the screen shows the last canon state and the new one is worked out in slices,
   // instead of redoing the whole canon check in one go each time the screen is drawn
   let lastMemo = null;
+  const bootStatus = { done: false, p: null };
+  let inRender = false; // only drawing the screen may use the empty first answer; anything that saves waits for the real one
   const status = () => {
     if (memo) return memo;
     if (ui.job && lastMemo) { if (typeof statusSoon === "function") setTimeout(() => statusSoon().catch(() => {}), 0); return lastMemo; }
+    // 0.6.1: opening the app: the first screen comes at once, the canon parts a moment later (worked out in slices)
+    if (inRender && !lastMemo && !bootStatus.done && typeof statusSoon === "function") {
+      if (!bootStatus.p) bootStatus.p = new Promise(r => setTimeout(r, 60)).then(() => statusSoon()).then(() => { bootStatus.done = true; if (!$("#overlay").innerHTML) render(); }, () => { bootStatus.done = true; });
+      return [];
+    }
     if (typeof mirrorNow === "function") mirrorNow();
     return (memo = lastMemo = C.canonStatus(db, threshold()));
   };
@@ -267,7 +274,7 @@
     if (undoFn) { const b = document.createElement("button"); b.className = "undo"; b.dataset.action = "undo"; b.textContent = "Undo"; t.appendChild(b); }
     t.classList.add("show");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { t.classList.remove("show"); undoFn = null; }, undoFn ? 7000 : 3200);
+    toastTimer = setTimeout(() => { t.classList.remove("show"); undoFn = null; }, undoFn ? 10000 : 3200); // 0.6.1: 10 s to undo
   }
   // ---- look: theme, accent, text size (kept in this browser's storage so they apply before the first paint)
   const THEMES = [["night", "Night", "#0B0A10", "#F5F1E8"], ["amoled", "Black", "#000", "#F5F1E8"], ["slate", "Slate", "#10151C", "#EEF3F8"], ["sepia", "Sepia", "#1E1913", "#F3E9DA"], ["light", "Light", "#F5F2EC", "#1B1720"]];
@@ -281,6 +288,15 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.6.1", ["Back while searching clears the search first, then goes to the previous screen (not straight to Home).",
+      "Home › Continue: tick a series' next episode as watched from its tile, without opening it.",
+      "Settings › Backup › Start over: clear IMDb, Trakt, your library, games, books, Doctor Who or lists one by one, for a clean base. A copy is kept and Undo puts everything back.",
+      "Doctor Who: hold the ⋮⋮ grip and drag to reorder; hold an entry to delete it. Undo for 10 seconds (all undo buttons now last 10 s).",
+      "Games: the Franchise row opens the whole series (films, series, games, books); same-series and same-studio games, and DLC from Steam with Add, at the bottom of a game.",
+      "Games search finds console games too (IMDb), not only Steam.",
+      "Anime: Related (films, sequels, side stories) at the bottom of a series, with Add.",
+      "Faster first screen: the sync summary is worked out just after the first paint.",
+      "Website: several people can sign in, each with their own data; centred layout on wide PC screens; Sign out in Settings."]],
     ["0.6.0", ["Saga website ↔ phone: Settings › Accounts and sync › Saga website (address and sync key). The phone sends what changed after each sync, when you open it and a little after you change something; the server merges entry by entry (where both changed the same thing, the phone's wins) and open website pages reload by themselves.",
       "The website can be reached without Tailscale: a password page and a sync key for the phone, a separate public entrance for a Cloudflare Tunnel or a reverse proxy (see site/README).",
       "Stats everywhere: a strip of numbers on top of Library, Anime, Games, Books and Manga; Watch › Stats adds your library (hours, rewatches, episodes), ratings by kind with a 1–10 chart, and canon progress (closest to complete, biggest gaps); Games gets a Stats view (status, backlog cleared, playtime, ratings by platform and franchise, decades, wishlist); Books splits books, manga and light novels.",
@@ -1209,6 +1225,7 @@
       ${listsHtml()}
       <section class="stack">
         <h2>Saga website</h2>
+        ${window.__sagaWeb ? `<p class="small" style="margin:0">You're on the website${window.__sagaWeb.user ? ` as <b>${esc(window.__sagaWeb.user)}</b>` : ""}. <a href="api/auth/logout">Sign out</a></p>` : ""}
         <p class="small muted" style="margin:0">Your Saga website (site/ folder, on your Pi): the phone and the website keep the same library, games, books, Doctor Who and sync data. Changes on both sides are merged, entry by entry.</p>
         ${field("web_sync_url", "Website address", { placeholder: "https://raspberrypi.your-tailnet.ts.net:8443", hint: "Through Tailscale (.ts.net) or your public address. Plain http:// works only for .ts.net addresses." })}
         ${field("web_sync_key", "Sync key", { secret: true, hint: "Printed by  node server.js --set-password  on the server (needed for a public address; through Tailscale it works without one)." })}
@@ -2233,6 +2250,16 @@
   function stars(rating) {
     return `<span class="stars">${[1, 2, 3, 4, 5].map(i => `<button data-action="librate" data-v="${i}" class="${rating >= i * 2 ? "on" : rating === i * 2 - 1 ? "half" : ""}" aria-label="${i} stars">★</button>`).join("")}</span>`;
   }
+  // 0.6.1: related anime (its films, sequels, side stories) at the bottom of an anime sheet, on request
+  function relHtml(it) {
+    const r = ui.rel && ui.rel.id === it.id ? ui.rel : null;
+    if (!r) return `<button class="sheetbtn" data-action="librel">${icon("list")}Related: films, sequels, side stories</button>`;
+    if (r.busy) return `<p class="small muted">Asking MyAnimeList…</p>`;
+    if (r.err) return `<p class="small muted">${esc(r.err)}</p>`;
+    if (!r.list.length) return `<p class="small muted">Nothing related on MyAnimeList.</p>`;
+    return `<h4>Related</h4><div class="listcard">${r.list.map((x, i) => { const have = lib.all().find(y => String(y.mal) === String(x.mal));
+      return `<div class="item"${have ? ` data-action="libopen" data-id="${esc(have.id)}"` : ""}><div class="grow" style="min-width:0"><b class="ell">${esc(x.title)}</b><div class="small muted">${esc(x.relation)}</div></div>${have ? `<span class="small muted">${esc(L.LABEL[have.status] || "In library")}</span>` : `<button class="btn quiet small" data-action="libreladd" data-i="${i}">${icon("plus")}Add</button>`}</div>`; }).join("")}</div>`;
+  }
   function openLib(id) {
     const it = lib.get(id);
     if (!it) return;
@@ -2280,6 +2307,7 @@
       <label class="field" style="margin-top:8px"><span>Notes</span><textarea data-libnotes="1" rows="2" placeholder="Where you watched it, with whom…">${esc(it.notes || "")}</textarea></label>
       <div style="margin-top:8px">
         ${(() => { const x = streamsFor(it); return x ? `<p class="small" style="margin:4px 0 8px">${x.mine ? `On ${esc(shortName(x.o.name))}${x.o.res ? ` in ${esc(x.o.res)}` : ""}, one of your services` : x.o ? `Streaming on ${esc(shortName(x.o.name))}` : `Not in Italy: ${esc(x.vpn.flag)} ${esc(shortName(x.vpn.name))} with a VPN`}</p>` : ""; })()}
+        ${it.anime && it.mal ? relHtml(it) : ""}
         <button class="sheetbtn" data-action="libwhere">${icon("eye")}Where to watch and details</button>
         <button class="sheetbtn" data-action="open" data-url="${esc(it.imdb ? `https://www.imdb.com/title/${it.imdb}/` : `https://www.imdb.com/find/?q=${encodeURIComponent(it.title + " " + (it.year || ""))}`)}">${icon("open")}Open on IMDb</button>
         <button class="sheetbtn" data-action="mlistadd" data-k="lib:${esc(it.id)}">${icon("plus")}Add to a list</button>
@@ -2332,6 +2360,12 @@
       case "libseason": lib.markSeason(it, +el.dataset.s, el.dataset.on === "1", TODAY()); ui.libSeason = +el.dataset.s; reopen(); return true;
       case "libseasonopen": ui.libSeason = +el.dataset.s; return false;
       case "librewatch": { const n = lib.rewatch(it, date()); toast(`Rewatch started (${n} run${n === 1 ? "" : "s"} logged)`); reopen(); return true; }
+      case "librel": { const id = it.id; ui.rel = { id, busy: true }; openLib(id);
+        L.animeRelations(Native.http, it.mal).then(list => { ui.rel = { id, list }; }, e => { ui.rel = { id, err: e.message }; }).then(() => { if (ui.libOpen === id) openLib(id); });
+        return true; }
+      case "libreladd": { const x = ui.rel && ui.rel.list[+el.dataset.i]; if (!x) return true; const back = it.id;
+        L.animeOne(Native.http, x.mal).then(r => { libAdd(r, "watchlist"); if (ui.libOpen === back) openLib(back); render(); }, e => toast(`MyAnimeList: ${e.message}`));
+        return true; }
       case "libanime": it.anime = !it.anime; libSave(); toast(it.anime ? "Moved to Anime" : "Moved to Library"); openLib(it.id); render(); return true;
       case "libtagadd": { const v = (($("#libTag") || {}).value || "").trim().slice(0, 30); if (!v) return true; it.tags = [...new Set([...(it.tags || []), v])]; it.updated = Date.now(); libSave(); openLib(it.id); return true; }
       case "libtagdel": it.tags = (it.tags || []).filter(t => t !== el.dataset.v); libSave(); openLib(it.id); return true;
@@ -2597,7 +2631,10 @@
     if (open && cls && open.dataset.cls === cls && open.dataset.id === String(id || "")) { const top = open.scrollTop; open.innerHTML = html; open.scrollTop = top; if (window.BantaI18n && BantaI18n.isOn()) BantaI18n.walk(open); return; }
     $("#overlay").innerHTML = `<div class="scrim bottom" data-action="dismiss"><div class="sheet ${esc(cls || "")}" data-cls="${esc(cls || "")}" data-id="${esc(id || "")}" role="dialog" aria-modal="true">${html}</div></div>`;
   }
-  function go(sec, tab) {
+  // 0.6.1: where you were, so Back returns there (not straight to Home)
+  const backStack = [];
+  function go(sec, tab, fromBack) {
+    if (!fromBack) { const cur = { sec: ui.sec, tab: ui.tab, y: window.scrollY }; const top = backStack[backStack.length - 1]; if (cur.sec && !(top && top.sec === cur.sec && top.tab === cur.tab)) { backStack.push(cur); if (backStack.length > 30) backStack.shift(); } }
     commitFields();
     if (Kit.mods.books && Kit.mods.books.stopScan) Kit.mods.books.stopScan();
     if (WATCH.some(w => w[0] === sec) || sec === "compare") { tab = sec; sec = "watch"; }
@@ -2610,7 +2647,8 @@
     window.scrollTo(0, 0);
   }
   function setTab(t) { go(t); }
-  function render() {
+  function render() { inRender = true; try { return render0(); } finally { inRender = false; } }
+  function render0() {
     const active = document.activeElement;
     const keepInput = active && active.dataset && active.dataset.input ? active.dataset.input : null;
     const caret = keepInput && active.selectionStart != null ? active.selectionStart : null;
@@ -2640,7 +2678,7 @@
   function homeContinue() {
     const out = [];
     for (const x of nextEpisodes().slice(0, 8)) {
-      if (x.lib) out.push({ ord: x.last || "", html: Kit.tile({ title: x.it.title, img: x.it.poster, kind: "show", badge: `S${x.s} E${x.e}`, badgeAcc: true, progress: progressOf(x.it), attrs: `data-action="libopen" data-id="${esc(x.it.id)}"` }, x.it.title, x.left > 1 ? `${x.left} to watch` : "Next episode") });
+      if (x.lib) out.push({ ord: x.last || "", html: tickable(Kit.tile({ title: x.it.title, img: x.it.poster, kind: "show", badge: `S${x.s} E${x.e}`, badgeAcc: true, progress: progressOf(x.it), attrs: `data-action="libopen" data-id="${esc(x.it.id)}"` }, x.it.title, x.left > 1 ? `${x.left} to watch` : "Next episode"), x) });
       else out.push({ ord: x.last || "", html: Kit.tile({ title: x.show, img: x.poster ? IMG + "w342" + x.poster : "", kind: "show", badge: `S${x.s} E${x.e}`, badgeAcc: true, attrs: `data-action="sheet" data-sid="${sid(x, "up")}"` }, x.show, "On Trakt") });
     }
     if (secOn("books")) for (const b of books.books.filter(b => b.status === "reading")) out.push({ ord: BC.isoDay ? BC.isoDay(Math.max(b.started || 0, ...(b.log || []).map(l => l.t))) : "", html: Kit.tile({ title: b.title, img: (b.cover || "").replace(/^http:/, "https:"), kind: "book", badge: `${BC.percent(b)}%`, badgeAcc: true, progress: BC.percent(b) / 100, attrs: `data-action="bopen" data-id="${esc(b.id)}"` }, b.title, b.authors[0] || "") });
@@ -2648,6 +2686,8 @@
     if (secOn("timeline")) { const n = Kit.mods.timeline.next(); if (n) out.push({ ord: "", html: Kit.tile({ title: n.title, kind: "story", badge: n.era, attrs: `data-action="tlhome" data-k="${esc(n.k)}"` }, n.title, `Doctor Who · ${n.era}`) }); }
     return out.sort((a, b) => String(b.ord).localeCompare(String(a.ord))).map(x => x.html);
   }
+  // 0.6.1: a Watched button on the poster, so the next episode is ticked without opening the series
+  const tickable = (html, x) => html.replace(/<\/div>$/, `<button class="tilecheck" data-action="libnext" data-id="${esc(x.it.id)}" data-s="${x.s}" data-e="${x.e}" aria-label="Mark S${x.s} E${x.e} of ${esc(x.it.title)} watched">${icon("check")}</button></div>`);
   const progressOf = it => { const a = lib.aired(it).length; return a ? Object.keys(it.eps).length / a : null; };
   function homeHero() {
     const ne = nextEpisodes().find(x => x.lib);
@@ -3469,7 +3509,39 @@
     }
     Native.saveAs(name, text).then(ok => toast(ok ? `${name} saved` : "Not saved"));
   }
-  function backupSection() {
+  // ---- 0.6.1: start over, part by part. A copy of everything is kept first, so it can be undone.
+  const WIPE = [["library", "Your library (films and series, ticks, viewings, ratings you gave in Saga)", "Also forgets which synced titles were already brought in, so the next sync brings in only what's on your lists and ratings now."],
+    ["imdb", "Everything synced or imported from IMDb", "Ratings, lists, watchlist, episode ratings."], ["imdblists", "Only your IMDb lists", "Keeps IMDb ratings and watchlist."],
+    ["trakt", "Everything synced or imported from Trakt", "Watched, ratings, watchlist, lists, progress."], ["imports", "Other imports", "MyAnimeList, AniList, Simkl, Letterboxd, Refract and other files."],
+    ["canon", "Canon lists (franchises and their entries)", ""], ["games", "Games", "Your games, playthroughs and sessions."], ["books", "Books and manga", ""],
+    ["dw", "Doctor Who progress", "Ticks, ratings, your own entries and order."], ["lists", "Your lists", ""], ["cache", "Look-up cache", "Posters, dates and details: fetched again when needed."]];
+  function startOverSection() {
+    return `<section class="stack" id="startover"><h2>Start over</h2>
+      <p class="small muted" style="margin:0">Clear the parts you choose and keep the rest (settings, keys and accounts always stay). A copy of everything is kept first: Undo appears for 10 seconds, and Settings › Imports › Undo the last import works afterwards too.</p>
+      <div class="card">${WIPE.map(([k, l, h]) => `<label class="switch"><input type="checkbox" data-wipe="${k}"><span>${esc(l)}${h ? `<small class="muted" style="display:block">${esc(h)}</small>` : ""}</span></label>`).join("")}
+        <button class="btn" style="margin-top:10px" data-action="wipe">Clear what's ticked</button></div></section>`;
+  }
+  function wipe(cats) {
+    keepBeforeImport("clearing");
+    const before = SH.read("before_import.json");
+    const dropRows = keep => { for (const [k, r] of db.itemsMap) if (!keep(r)) db.itemsMap.delete(k); };
+    const dropSettings = rx => { for (const k of Object.keys(db.settings)) if (rx.test(k)) delete db.settings[k]; };
+    if (cats.includes("imdb")) { dropRows(r => r.source !== "imdb"); dropSettings(/^(imdb_eps|imdb_tpl|imdb_ur|imdb_ur_for|imdb_counts)/); }
+    else if (cats.includes("imdblists")) dropRows(r => !(r.source === "imdb" && r.kind === "list"));
+    if (cats.includes("trakt")) { dropRows(r => r.source !== "trakt"); dropSettings(/^(trakt_progress|ep_ratings|trakt_lists|trakt_la|trakt_last_rated_at|trakt_last_all)$/); }
+    if (cats.includes("imports")) dropRows(r => r.source === "imdb" || r.source === "trakt" || r.source === "app");
+    if (cats.includes("canon")) { db.canonMap.clear(); db.franchiseMap.clear(); }
+    if (cats.includes("cache")) { db.tmdbCache.clear(); db._cacheFull = true; db._cacheDirty = true; }
+    if (cats.includes("library")) { lib.items = {}; lib.adopted = {}; lib.outbox = []; libWrite(true); mirrorDirty = true; }
+    if (cats.includes("games")) { games.games = []; games.removed = {}; games._fi = null; games.save(); gamesFile.now(); }
+    if (cats.includes("books")) { books.books = []; books.save(); booksFile.now(); }
+    if (cats.includes("dw")) { Native.save("dw.json", ""); try { Kit.mods.timeline.reset(); } catch (e) { /* not loaded */ } }
+    if (cats.includes("lists")) db.set("my_lists", "[]");
+    mirrorNow(); invalidate(); db.flush(true); render();
+    toast(`Cleared: ${cats.length} part${cats.length === 1 ? "" : "s"}`, () => { try { applyBackup(readBackup2(before)); db.flush(true); render(); toast("Put back"); } catch (e) { toast(e.message); } });
+  }
+  function backupSection() { return backupSection0() + startOverSection(); }
+  function backupSection0() {
     const autos = autoBackups(), uri = db.get("backup_uri"), at = parseFloat(db.get("backup_file_at", "0")) || 0;
     return `<section class="stack" id="backup">
         <h2>Backup</h2>
@@ -3571,7 +3643,21 @@
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     if ($("#overlay").innerHTML) { closeOverlay(); return true; }
     if (ui.sec === "settings" && (ui.setGroup || ui.setQ)) { ui.setGroup = ""; ui.setQ = ""; render(); return true; }
-    if (ui.sec !== "home") { go(ui.sec === "mv" || ui.sec === "year" || ui.sec === "sync" ? "home" : "home"); return true; }
+    // a search or filter in progress: Back clears it first
+    const gm = Kit.mods.games && Kit.mods.games.ui, bm = Kit.mods.books && Kit.mods.books.ui;
+    if (ui.sec === "watch" && (ui.libRes || ui.libBusy || ui.libQ || ui.libFilterQ)) { ui.libRes = null; ui.libBusy = false; ui.libQ = ""; ui.libFilterQ = ""; render(); return true; }
+    if (ui.sec === "games" && gm && (gm.res || gm.busy || gm.q)) { gm.res = null; gm.busy = false; gm.q = ""; gm.sq = ""; render(); return true; }
+    if (ui.sec === "books" && bm && (bm.res || bm.busy || bm.q)) { bm.res = null; bm.busy = false; bm.q = ""; bm.sq = ""; render(); return true; }
+    if (ui.sel) { ui.sel = null; render(); return true; }
+    // then back to the screen before
+    while (backStack.length) {
+      const b = backStack.pop();
+      if (b.sec === ui.sec && b.tab === ui.tab) continue;
+      if (b.sec === "watch") { ui.sec = "watch"; ui.tab = b.tab || "library"; render(); } else go(b.sec, undefined, true);
+      setTimeout(() => window.scrollTo(0, b.y || 0), 0);
+      return true;
+    }
+    if (ui.sec !== "home") { go("home", undefined, true); return true; }
     return false;
   };
 
@@ -3738,6 +3824,9 @@
       case "tlhome": closeOverlay(); go("timeline"); Kit.mods.timeline.openStory(el.dataset.k); break;
       case "yearstep": ui.year = (ui.year || new Date().getFullYear()) + (+el.dataset.v); render(); break;
       case "wrapped": openWrapped(); break;
+      case "wipe": { const cats = [...document.querySelectorAll("[data-wipe]")].filter(x => x.checked).map(x => x.dataset.wipe);
+        if (!cats.length) { toast("Tick what to clear"); break; }
+        confirmDialog("Clear these parts?", cats.map(c => "• " + WIPE.find(w => w[0] === c)[1]).join("\n") + "\n\nA copy is kept first: you can undo it.", "Clear", () => wipe(cats)); break; }
       case "websync": syncWithWebServer(true).then(() => render()); break;
       case "pickedit": ui.pickEdit = !ui.pickEdit; render(); break;
       // 0.5.8: select many titles in the library and change them together
@@ -4060,5 +4149,5 @@
   const last = parseFloat(db.get("last_sync", "0")) || 0;
   const hasSources = db.get("username") || db.get("imdb_user") || db.get("canon_urls") || db.get("imdb_lists");
   if (db.get("auto_sync") === "1" && hasSources && Date.now() / 1000 - last > AUTO_SYNC_HOURS * 3600) { db.set("sync_open", "0"); doSync(); db.set("sync_open", "1"); }
-  window.__app = { syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
+  window.__app = { wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
 })();

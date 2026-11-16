@@ -217,6 +217,25 @@
     const j = await getJson(http, `https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(q)}&cc=${cc}&l=${lang}`);
     return ((j && j.items) || []).map(x => ({ steam: x.id, title: x.name, platform: "PC", price: x.price && x.price.final != null ? { eur: x.price.final / 100, retail: (x.price.initial || x.price.final) / 100, disc: x.price.initial ? Math.round((1 - x.price.final / x.price.initial) * 100) : 0, at: Date.now() } : null }));
   }
+  // 0.6.1: a game's DLC and developer from Steam (names of up to 12 DLC, one request each)
+  async function steamExtras(http, appid, cc = "IT") {
+    const j = await getJson(http, `https://store.steampowered.com/api/appdetails?appids=${appid}&cc=${cc}&l=english`);
+    const d = j && j[appid] && j[appid].data;
+    if (!d) throw new Error("Steam has no details for this game");
+    const out = { dev: (d.developers || [])[0] || "", pub: (d.publishers || [])[0] || "", dlc: [] };
+    for (const id of (d.dlc || []).slice(0, 12)) {
+      try { const x = await getJson(http, `https://store.steampowered.com/api/appdetails?appids=${id}&cc=${cc}&l=english&filters=basic,release_date,price_overview`); const dd = x && x[id] && x[id].data;
+        if (dd) out.dlc.push({ steam: id, title: dd.name, date: dd.release_date ? isoOf(dd.release_date.date) || "" : "", price: dd.price_overview ? { eur: dd.price_overview.final / 100, retail: dd.price_overview.initial / 100, disc: dd.price_overview.discount_percent || 0 } : null }); } catch (e) { /* skip one */ }
+    }
+    return out;
+  }
+  // games on any platform, from IMDb's search (Steam only has PC games): title, year, IMDb id, cover
+  async function imdbGameSearch(http, q) {
+    const r = await http("GET", `https://v3.sg.media-imdb.com/suggestion/x/${encodeURIComponent(String(q).trim().toLowerCase())}.json?includeVideos=0`, { headers: { Accept: "application/json" } });
+    if (r.status !== 200) throw new Error(`IMDb search: HTTP ${r.status || r.error || "error"}`);
+    let j; try { j = JSON.parse(r.body); } catch (e) { throw new Error("IMDb search sent something unreadable"); }
+    return ((j && j.d) || []).filter(x => x.qid === "videoGame" && /^tt\d+$/.test(x.id)).map(x => ({ imdb: x.id, title: x.l, date: x.y ? x.y + "-12-31" : "", dateText: x.y ? String(x.y) : "", cover: x.i && x.i.imageUrl ? x.i.imageUrl.replace(/\._V1_.*\.jpg$/, "._V1_UX300.jpg") : "", platform: "", src: "imdb" }));
+  }
   // Finds the Steam app for games that have none yet (one search each, spaced out). Returns how many were linked.
   async function linkSteam(lib, http, budget = 12, gap = 1100, sleep = ms => new Promise(r => setTimeout(r, ms))) {
     const todo = lib.visible().filter(g => !g.steam && !(lib.meta.noSteam || {})[g.id] && (!g.platform || /pc|windows|steam|multi/i.test(g.platform + " " + g.owned) || g.status !== "done")).slice(0, budget);
@@ -357,7 +376,7 @@
       games: lib.visible().map(g => ({ id: g.id, t: g.title, f: g.franchise, m: g.multiverse, done: g.status === "done", date: g.date })) };
   }
 
-  const API = { STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
+  const API = { steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
     steamSearch, linkSteam, steamPrices, storePrices, steamDates, importRows, fromImdb, storeLinks, indexFor, yearOf, NA };
   if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
   root.GamesCore = API;

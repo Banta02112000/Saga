@@ -41,8 +41,8 @@ UNIT
 # a password for the website and a sync key for the phone app (kept in $DATA/auth.json, readable only by you)
 if [ ! -f "$DATA/auth.json" ]; then
   PW="$("$NODE" -e 'console.log(require("crypto").randomBytes(9).toString("base64url"))')"
-  SAGA_DATA="$DATA" "$NODE" "$HERE/server.js" --set-password "$PW" > /tmp/saga-key.txt
-  echo "Website password: $PW   (change it any time: SAGA_DATA=$DATA node $HERE/server.js --set-password)"
+  SAGA_DATA="$DATA" "$NODE" "$HERE/server.js" --set-password "$USER" "$PW" > /tmp/saga-key.txt
+  echo "Website sign-in: name $USER, password $PW   (change it: SAGA_DATA=$DATA node $HERE/server.js --set-password $USER)"
   cat /tmp/saga-key.txt; rm -f /tmp/saga-key.txt
 fi
 sudo systemctl daemon-reload

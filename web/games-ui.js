@@ -97,14 +97,28 @@
   }
   function renderSearch() {
     const lim = ui.res || [];
-    return `<div class="toolbar"><input type="search" data-gsq="1" data-input="gsq" value="${esc(ui.sq || "")}" placeholder="Search Steam" autocomplete="off" enterkeyhint="search">
+    return `<div class="toolbar"><input type="search" data-gsq="1" data-input="gsq" value="${esc(ui.sq || "")}" placeholder="Search games (Steam + IMDb)" autocomplete="off" enterkeyhint="search">
       <button class="btn primary" data-action="gsearch">${K.icon("missing")}</button></div>
-      <div class="sechead"><h2>${ui.busy ? "Searching…" : `${lim.length} on Steam`}</h2><button class="btn quiet small" data-action="gsearchclose">Back</button></div>
-      ${ui.busy ? "" : K.grid(lim.map((r, i) => { const have = lib().find(r); return `<div class="tile">${K.poster({ title: r.title, img: G.COVER(r.steam), kind: "game", badge: have ? "In your games" : "", attrs: `data-action="gpeek" data-i="${i}"` })}<div class="cap">${esc(r.title)}</div><div class="cap2">${r.price ? esc(eur(r.price.eur)) : ""}</div></div>`; }))}
-      <button class="btn block" style="margin-top:16px" data-action="gmanual">${K.icon("plus")}Not on Steam? Add it by hand</button>`;
+      <div class="sechead"><h2>${ui.busy ? "Searching…" : `${lim.length} found`}</h2><button class="btn quiet small" data-action="gsearchclose">Back</button></div>
+      ${ui.busy ? "" : K.grid(lim.map((r, i) => { const have = lib().find(r); return `<div class="tile">${K.poster({ title: r.title, img: r.steam ? G.COVER(r.steam) : r.cover, kind: "game", badge: have ? "In your games" : r.src === "imdb" ? "IMDb" : "", attrs: `data-action="gpeek" data-i="${i}"` })}<div class="cap">${esc(r.title)}</div><div class="cap2">${r.price ? esc(eur(r.price.eur)) : ""}</div></div>`; }))}
+      <button class="btn block" style="margin-top:16px" data-action="gmanual">${K.icon("plus")}Not found? Add it by hand</button>`;
   }
 
   const hm = m => (m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ""}` : `${m} min`);
+  // 0.6.1: at the bottom of a game: its DLC (from Steam, on request), and games of the same series or studio you have
+  function relatedHtml(g) {
+    const L = lib(), fr = G.norm(g.franchise || g.multiverse || "");
+    const same = fr ? L.visible().filter(x => x !== g && (G.norm(x.franchise) === fr || G.norm(x.multiverse) === fr)).sort((a, b) => String(a.date).localeCompare(String(b.date))) : [];
+    const studio = g.dev ? L.visible().filter(x => x !== g && x.dev === g.dev && !same.includes(x)) : [];
+    const ex = ui.extras && ui.extras.id === g.id ? ui.extras : null;
+    const row = x => `<div class="item" data-action="gopen" data-id="${esc(x.id)}"><b class="grow ell">${esc(x.title)}</b><span class="small muted">${esc([G.yearOf(x), G.LABEL[x.status]].filter(Boolean).join(" · "))}</span></div>`;
+    return `${same.length ? `<h4>Same series <span class="muted small">· ${esc(g.franchise || g.multiverse)}</span></h4><div class="listcard">${same.slice(0, 12).map(row).join("")}</div>
+        <button class="sheetbtn" data-action="mvopen" data-mv="${esc(g.franchise || g.multiverse)}">${K.icon("list")}The whole series: films, series, games and books</button>` : ""}
+      ${studio.length ? `<h4>More from ${esc(g.dev)}</h4><div class="listcard">${studio.slice(0, 8).map(row).join("")}</div>` : ""}
+      ${g.steam ? (ex ? (ex.busy ? `<p class="small muted">Asking Steam…</p>` : ex.err ? `<p class="small muted">${esc(ex.err)}</p>` : `<h4>DLC <span class="muted small">· ${ex.dlc.length}</span></h4>${ex.dlc.length ? `<div class="listcard">${ex.dlc.map((d, i) => { const have = L.find({ steam: d.steam, title: d.title });
+          return `<div class="item"><div class="grow" style="min-width:0"><b class="ell">${esc(d.title)}</b><div class="small muted">${esc([d.date ? d.date.slice(0, 4) : "", d.price ? eur(d.price.eur) + (d.price.disc ? ` −${d.price.disc}%` : "") : ""].filter(Boolean).join(" · "))}</div></div>${have ? `<span class="small muted">In your games</span>` : `<button class="btn quiet small" data-action="gdlcadd" data-i="${i}">${K.icon("plus")}Add</button>`}</div>`; }).join("")}</div>` : `<p class="small muted">No DLC on Steam.</p>`}`)
+        : `<button class="sheetbtn" data-action="gextras">${K.icon("plus")}DLC and studio (from Steam)</button>`) : ""}`;
+  }
   function sheetHtml(g) {
     const t = today(), L = Saga.lang();
     const plays = g.plays.map((d, i) => `<div class="logrow"><span class="grow">${i + 1}. ${esc(K.when(d, L))}</span><button class="btn quiet small" data-action="gunplay" data-i="${i}" aria-label="Remove this playthrough">✕</button></div>`).join("");
@@ -128,8 +142,9 @@
       ${pr || g.steam ? `<h4>Price</h4><div class="nextbox"><div class="grow">${pr ? `<b>${esc(eur(pr.eur))}</b>${pr.disc ? ` <span class="pbadge">−${pr.disc}%</span> <s class="small muted">${esc(eur(pr.retail))}</s>` : ""}<div class="small muted">Steam Italy${pr.low != null && pr.low < pr.eur ? ` · lowest seen ${esc(eur(pr.low))}` : ""}</div>` : `<span class="small muted">No price yet: it's checked on the next sync.</span>`}</div></div>
         <label class="field"><span>Alert me at or below (€)</span><input type="number" inputmode="decimal" step="0.01" data-gtarget="1" value="${g.target != null ? g.target : ""}" placeholder="any big discount"></label>` : ""}
       <h4>Prices in other stores</h4>${storesHtml(g)}
-      <h4>Details</h4><div class="listcard">${facts.map(([k, v]) => `<div class="row small" style="min-height:38px;border-bottom:1px solid var(--line)"><span class="muted" style="width:42%">${esc(k)}</span><span class="grow">${esc(v)}</span></div>`).join("")}</div>
+      <h4>Details</h4><div class="listcard">${facts.map(([k, v]) => `<div class="row small" style="min-height:38px;border-bottom:1px solid var(--line)" ${k === "Franchise" || k === "Multiverse" ? `data-action="mvopen" data-mv="${esc(v)}" role="button"` : ""}><span class="muted" style="width:42%">${esc(k)}</span><span class="grow">${esc(v)}${k === "Franchise" || k === "Multiverse" ? ` <span class="muted">›</span>` : ""}</span></div>`).join("")}</div>
       <label class="field" style="margin-top:12px"><span>Notes</span><textarea rows="2" data-gnotes="1" placeholder="Difficulty, mods, who you played with…">${esc(g.notes)}</textarea></label>
+      ${relatedHtml(g)}
       <h4>Where to get it</h4>${G.storeLinks(g).map(([n, u]) => `<button class="sheetbtn" data-action="open" data-url="${esc(u)}">${K.icon("open")}${esc(n)}</button>`).join("")}
       <div style="margin-top:8px"><button class="sheetbtn" data-action="mlistadd" data-k="game:${esc(g.id)}">${K.icon("plus")}Add to a list</button><button class="sheetbtn" data-action="gsync1">${K.icon("sync")}Sync this game (Steam details, date, store prices)</button>
       <button class="sheetbtn" data-action="gedit">${K.icon("edit")}Edit details</button>
@@ -147,8 +162,12 @@
     const q = String(ui.sq || "").trim();
     if (q.length < 2) return K.toast("Type at least two letters");
     ui.busy = true; ui.res = []; Saga.render();
-    try { ui.res = await G.steamSearch(Saga.http, q, lib().settings.region || "IT", Saga.lang() === "it" ? "italian" : "english"); }
-    catch (e) { ui.res = []; K.toast(`Steam search failed: ${e.message}`); }
+    // 0.6.1: Steam and IMDb together, so console-only games (Switch, PlayStation…) can be found too
+    const [st, im] = await Promise.all([
+      G.steamSearch(Saga.http, q, lib().settings.region || "IT", Saga.lang() === "it" ? "italian" : "english").catch(e => { K.toast(`Steam search failed: ${e.message}`); return []; }),
+      G.imdbGameSearch(Saga.http, q).catch(() => [])]);
+    const seen = new Set(st.map(r => G.norm(r.title)));
+    ui.res = st.concat(im.filter(r => !seen.has(G.norm(r.title))));
     ui.busy = false; Saga.render();
   }
 
@@ -165,10 +184,10 @@
       case "gsearchclose": ui.res = null; ui.busy = false; Saga.render(); return true;
       case "gmanual": Saga.sheet(editHtml(G.blank({ title: ui.sq || "" }), true)); return true;
       case "gpeek": { const r = ui.res[+el.dataset.i]; if (!r) return true; const have = L.find(r); if (have) { open(have.id); return true; }
-        Saga.sheet(`${K.sheetHero({ title: r.title, img: G.COVER(r.steam), kind: "game" }, `<div class="small muted">Steam${r.price ? " · " + esc(eur(r.price.eur)) : ""}</div>`)}
+        Saga.sheet(`${K.sheetHero({ title: r.title, img: r.steam ? G.COVER(r.steam) : r.cover, kind: "game" }, `<div class="small muted">${r.src === "imdb" ? "IMDb" + (r.dateText ? " · " + esc(r.dateText) : "") : "Steam"}${r.price ? " · " + esc(eur(r.price.eur)) : ""}</div>`)}
           <p class="small muted">Add to your games as</p>${["backlog", "playing", "done", "wishlist"].map(s => `<button class="sheetbtn" data-action="gaddas" data-i="${el.dataset.i}" data-v="${s}">${K.icon("plus")}${G.LABEL[s]}</button>`).join("")}`);
         return true; }
-      case "gaddas": { const r = ui.res[+el.dataset.i]; if (!r) return true; const { game } = L.add(Object.assign({}, r, { owned: el.dataset.v === "wishlist" ? "" : "PC (Steam)", src: "steam" }), el.dataset.v); save(); K.toast(`Added ${game.title}`); Saga.close(); open(game.id); Saga.render(); refreshDate(game); return true; }
+      case "gaddas": { const r = ui.res[+el.dataset.i]; if (!r) return true; const { game } = L.add(Object.assign({}, r, { owned: el.dataset.v === "wishlist" ? "" : r.src === "imdb" ? "Yes" : "PC (Steam)", src: r.src || "steam" }), el.dataset.v); save(); K.toast(`Added ${game.title}`); Saga.close(); open(game.id); Saga.render(); refreshDate(game); return true; }
       case "gsave": {
         const v = k => (document.getElementById("ge_" + k) || {}).value || "";
         if (!v("title").trim()) { K.toast("The title is needed"); return true; }
@@ -185,6 +204,12 @@
         G.logSession(g, mins, (document.getElementById("gDate") || {}).value || today()); reopen(); K.toast(`Logged ${hm(mins)}`); return true; }
       case "gunsess": { g.sessions.splice(+el.dataset.i, 1); reopen(); return true; }
       case "grate": { const v = +el.dataset.v * 2; g.rating = g.rating === v ? v - 1 : g.rating === v - 1 ? 0 : v; reopen(); return true; }
+      case "gextras": { const id = g.id; ui.extras = { id, busy: true }; reopen();
+        G.steamExtras(Saga.http, g.steam, lib().settings.region || "IT").then(x => { if (x.dev && !g.dev) { g.dev = x.dev; lib().save(); } ui.extras = Object.assign({ id }, x); }, e => { ui.extras = { id, err: e.message }; }).then(() => { if (ui.open === id) reopen(); });
+        return true; }
+      case "gdlcadd": { const d = ui.extras && ui.extras.dlc[+el.dataset.i]; if (!d) return true;
+        const r = lib().add({ title: d.title, steam: d.steam, date: d.date, platform: "PC", franchise: g.franchise, multiverse: g.multiverse, dev: g.dev, price: d.price, src: "steam" }, "wishlist");
+        lib().save(); K.toast(r.existed ? "Already in your games" : `Added ${d.title} to your wishlist`); reopen(); return true; }
       case "gsync1": (async () => {
         K.toast(`Syncing ${g.title}…`); const said = [];
         try { if (!g.steam) { delete (L.meta.noSteam || {})[g.id]; const n = await G.linkSteam({ visible: () => [g], meta: L.meta, settings: L.settings }, Saga.http, 1, 0); said.push(n ? "linked to Steam" : "not found on Steam"); } } catch (e) { said.push("Steam: " + e.message); }

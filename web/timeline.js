@@ -39,7 +39,85 @@
       const it = { k: c.k, raw: c.title, sub: c.sub };
       if (i >= 0) out.splice(i + 1, 0, it); else out.push(it);
     }
-    return withHidden ? out : out.filter(it => !((load().edits || {})[it.k] || {}).hidden);
+    // 0.6.1: your own order for this section (dragged by hand); entries not in it keep their place after their neighbour
+    const ord = (load().order || {})[tab.id];
+    let res = out;
+    if (ord && ord.length) {
+      const pos = new Map(ord.map((k, i) => [k, i])), placed = out.filter(x => pos.has(x.k)).sort((a, b) => pos.get(a.k) - pos.get(b.k));
+      res = placed.slice();
+      out.forEach((x, i) => { if (pos.has(x.k)) return; let j = -1; for (let p = i - 1; p >= 0 && j < 0; p--) j = res.indexOf(out[p]); res.splice(j + 1, 0, x); });
+    }
+    return withHidden ? res : res.filter(it => !((load().edits || {})[it.k] || {}).hidden);
+  }
+  // ---- 0.6.1: hold the grip and drag to reorder; hold an entry to delete it (hide it, or remove one you added). Undo for 10 s.
+  const snapshot = () => JSON.stringify(load());
+  const restoreFrom = text => { st = JSON.parse(text); save(); Saga.render(); };
+  function deleteEntry(k) {
+    const s = load(), before = snapshot(), w = workOf({ k });
+    const ci = (s.custom || []).findIndex(c => c.k === k);
+    if (ci >= 0) s.custom.splice(ci, 1); else { s.edits = s.edits || {}; (s.edits[k] = s.edits[k] || {}).hidden = true; }
+    save(); Saga.render();
+    K.toast(`Deleted ${w.title || "entry"}`, () => restoreFrom(before));
+  }
+  function moveEntry(g, tab, k, toIndex) {
+    const s = load(), before = snapshot();
+    const keys = itemsOf(g, tab, true).map(x => x.k), vis = itemsOf(g, tab).map(x => x.k);
+    const from = keys.indexOf(k);
+    if (from < 0) return;
+    // the visible position maps to a place among all entries (hidden ones included)
+    const target = vis.filter(x => x !== k)[toIndex];
+    keys.splice(from, 1);
+    const at = target ? keys.indexOf(target) : keys.length;
+    keys.splice(at < 0 ? keys.length : at, 0, k);
+    s.order = s.order || {}; s.order[tab.id] = keys;
+    save(); Saga.render();
+    K.toast("Moved", () => restoreFrom(before));
+  }
+  let drag = null, hold = null, swallowClick = false;
+  function gestures() {
+    if (gestures.on) return;
+    gestures.on = true;
+    const view = () => document.querySelector("#view");
+    document.addEventListener("pointerdown", e => {
+      const row = e.target.closest && e.target.closest(".tl .tli[data-k]");
+      if (!row || !view().contains(row)) return;
+      const d = D(), g = d.groups[ui.g] || d.groups[0], tab = g.tabs[ui.t] || g.tabs[0];
+      if (e.target.closest(".tlgrip")) {
+        // hold the grip: the entry lifts and follows the finger
+        e.preventDefault();
+        const rows = [...row.parentNode.querySelectorAll(".tli[data-k]")], r0 = row.getBoundingClientRect();
+        drag = { row, g, tab, k: row.dataset.k, y0: e.clientY, rows, mids: rows.map(x => { const b = x.getBoundingClientRect(); return b.top + b.height / 2; }), from: rows.indexOf(row), to: rows.indexOf(row), h: r0.height };
+        row.classList.add("dragging"); row.setPointerCapture && row.setPointerCapture(e.pointerId);
+        return;
+      }
+      const x0 = e.clientX, y0 = e.clientY;
+      hold = { row, k: row.dataset.k, x0, y0, t: setTimeout(() => { hold = null; swallowClick = true; if (navigator.vibrate) navigator.vibrate(20); deleteEntry(row.dataset.k); }, 650) };
+      row.classList.add("holding");
+    }, { passive: false });
+    document.addEventListener("pointermove", e => {
+      if (hold && (Math.abs(e.clientX - hold.x0) > 8 || Math.abs(e.clientY - hold.y0) > 8)) { clearTimeout(hold.t); hold.row.classList.remove("holding"); hold = null; }
+      if (!drag) return;
+      e.preventDefault();
+      const dy = e.clientY - drag.y0, y = drag.mids[drag.from] + dy;
+      let to = drag.mids.findIndex(m => y < m); if (to < 0) to = drag.rows.length - 1; else if (to > drag.from) to -= 1;
+      drag.to = Math.max(0, to);
+      drag.row.style.transform = `translateY(${dy}px)`;
+      drag.rows.forEach((r, i) => { if (r === drag.row) return; const sh = drag.from < drag.to ? (i > drag.from && i <= drag.to ? -drag.h : 0) : (i >= drag.to && i < drag.from ? drag.h : 0); r.style.transform = sh ? `translateY(${sh}px)` : ""; });
+      // near the screen's edges, the page scrolls
+      if (e.clientY < 80) window.scrollBy(0, -12); else if (e.clientY > window.innerHeight - 100) window.scrollBy(0, 12);
+    }, { passive: false });
+    const end = () => {
+      if (hold) { clearTimeout(hold.t); hold.row.classList.remove("holding"); hold = null; }
+      if (!drag) return;
+      const d0 = drag; drag = null; swallowClick = true;
+      d0.rows.forEach(r => { r.style.transform = ""; }); d0.row.classList.remove("dragging");
+      if (d0.to !== d0.from) moveEntry(d0.g, d0.tab, d0.k, d0.to);
+      setTimeout(() => { swallowClick = false; }, 300);
+    };
+    document.addEventListener("pointerup", end); document.addEventListener("pointercancel", end);
+    // the tap that ends a hold or a drag doesn't also open the entry
+    document.addEventListener("click", e => { if (swallowClick && e.target.closest && e.target.closest(".tl .tli")) { e.stopPropagation(); e.preventDefault(); swallowClick = false; } }, true);
+    document.addEventListener("contextmenu", e => { if (e.target.closest && e.target.closest(".tl .tli")) e.preventDefault(); });
   }
   function tabStats(tab, g) { let n = 0, d = 0; for (const it of g ? itemsOf(g, tab) : tab.items.filter(x => !x.ref)) { n++; if ((load().works[it.k] || {}).done) d++; } return { n, d }; }
   // ---- 0.5.9: statistics. A set of entries → done/total, ratings overall and per media type (each with its colour).
@@ -117,6 +195,7 @@
   }
   const where = k => { for (const g of D().groups) for (const t of g.tabs) if (itemsOf(g, t, true).some(x => x.k === k)) return { g, t }; return null; };
   function render() {
+    gestures();
     const d = D();
     if (!d.groups.length) return `<p class="muted">The timeline data isn't in this build.</p>`;
     if (ui.g === -1) return `<div class="chips" style="margin:12px 0"><button class="chip" data-action="tlg" data-v="-1" aria-pressed="true">Overview</button>${d.groups.map((gg, i) => `<button class="chip" data-action="tlg" data-v="${i}">${esc(gg.name)}</button>`).join("")}</div>` + overview();
@@ -140,7 +219,7 @@
         <div class="tl">${items.map(({ it, w }) => { const isNext = !nextSeen && !w.me.done && (nextSeen = true); const ty = typeOf(w.type);
           return `<div class="tli${w.me.done ? " on" : ""}" style="--tc:${esc(ty.color)}" data-action="tlopen" data-k="${esc(it.k)}">
             <div class="grow"><div class="tc">${esc(ty.label)}${isNext ? ' · <span style="color:var(--accent)">next</span>' : ""}</div><b>${esc(w.title)}</b>${w.mine ? ' <span class="small muted">· added by you</span>' : ""}${w.hidden ? ' <span class="small muted">· hidden</span>' : ""}${w.sub ? `<div class="small muted">${esc(w.sub)}</div>` : ""}</div>
-            ${w.me.rating ? `<span class="pct">★ ${w.me.rating}</span>` : ""}</div>`; }).join("") || `<p class="muted">Nothing here.</p>`}</div></section>`;
+            ${w.me.rating ? `<span class="pct">★ ${w.me.rating}</span>` : ""}<span class="tlgrip" aria-label="Hold and drag to move" role="button">⋮⋮</span></div>`; }).join("") || `<p class="muted">Nothing here.</p>`}</div></section>`;
   }
   const typeSelect = (id, cur) => `<select id="${id}">${(D().types || []).map(t => `<option value="${t.id}" ${t.id === cur ? "selected" : ""}>${esc(t.label)}</option>`).join("")}</select>`;
   // a form to add an entry (after another one, or at the end of the open tab)
@@ -221,5 +300,5 @@
   }
   function recent(limit = 10) { return Object.entries(load().works).filter(([, v]) => v.done && v.at).map(([k, v]) => ({ k, t: workOf({ k }).title, date: v.at })).sort((a, b) => b.date.localeCompare(a.date)).slice(0, limit); }
   const statesFor = () => load();
-  K.mods.timeline = { title: "Doctor Who", statsOf, canonEntries, render, act, change, input, migrate, next, recent, openStory, state: statesFor, reset: () => { st = null; } };
+  K.mods.timeline = { title: "Doctor Who", statsOf, canonEntries, render, act, change, input, migrate, next, recent, openStory, state: statesFor, reset: () => { st = null; }, deleteEntry, moveEntry, itemsOf, data: () => D() };
 })();

@@ -279,6 +279,9 @@ html[data-theme="light"] .hero2 .btn:not(.primary) { background: rgba(255,255,25
   nav#tabs button { flex-direction: row; justify-content: flex-start; gap: 12px; height: 48px; padding: 0 14px; }
   nav#tabs button span { font-size: 14px; }
   main#view { max-width: 1440px; }
+  /* 0.6.1: on wide PC screens the page sits in the middle of the space right of the rail, top bar included
+     (it used to stick to the rail and leave an empty strip on the right, with the top-bar buttons far from the content) */
+  .topbar, main#view, .jobbar { box-sizing: border-box; max-width: 1440px; margin-left: calc(var(--rail-w) + 20px + max(0px, (100vw - var(--rail-w) - 20px - 1440px) / 2)); margin-right: auto; }
   .scrim.bottom .sheet { width: min(600px, 44vw); }
   .statgrid, .ustats { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
   .listcard:has(> .item:nth-child(8)) { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); column-gap: 16px; }
@@ -297,3 +300,15 @@ html[data-theme="light"] .hero2 .btn:not(.primary) { background: rgba(255,255,25
 .tchip[aria-pressed="true"] { border-color: var(--tc, var(--ink)); background: color-mix(in srgb, var(--tc, var(--ink)) 14%, transparent); }
 .minibar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
 .minibar > i { display: block; height: 100%; background: var(--accent); }
+/* 0.6.1: the Watched button on Continue posters */
+.tile { position: relative; }
+.tilecheck { position: absolute; right: 8px; top: 8px; width: 40px; height: 40px; border-radius: 50%; border: 0; display: grid; place-items: center; z-index: 2;
+  background: color-mix(in srgb, var(--night) 70%, transparent); color: var(--ink); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); box-shadow: 0 2px 10px rgb(0 0 0 / .35); }
+.tilecheck svg { width: 20px; height: 20px; }
+.tilecheck:active { transform: scale(.92); background: var(--accent); color: var(--night); }
+/* 0.6.1: Doctor Who: hold the grip to drag, hold the entry to delete */
+.tl .tli { position: relative; transition: transform .15s ease; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.tl .tli.dragging { transition: none; z-index: 5; box-shadow: 0 10px 30px rgb(0 0 0 / .45); background: var(--card, var(--shelf)); }
+.tl .tli.holding { animation: tlhold .65s linear; }
+@keyframes tlhold { from { background: transparent; } to { background: color-mix(in srgb, #e5484d 22%, transparent); } }
+.tlgrip { flex: none; padding: 10px 6px 10px 12px; margin-left: 4px; color: var(--faint); font-size: 18px; letter-spacing: -3px; touch-action: none; cursor: grab; }
