@@ -70,13 +70,25 @@ const ok = (c, m) => { if (!c) { console.error("FAIL: " + m); process.exit(1); }
     ok((await fetch(`http://127.0.0.1:${pub}/api/all`, { headers: { "Tailscale-User-Login": "x@y" } })).status === 401, "the public entrance never trusts a Tailscale header");
     ok((await api("/api/all", { headers: { "Tailscale-User-Login": "banta@tailnet" } })).status === 200 && (await api("/api/all")).status === 401, "tailnet port: Tailscale users in, others asked");
     const login = pw => fetch(`http://127.0.0.1:${pub}/api/auth/login`, { method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Forwarded-For": "9.9.9.9" }, body: "user=banta&password=" + encodeURIComponent(pw) });
-    ok((await login("wrong")).status === 401, "wrong password refused");
+    const badPw = await login("wrong");
+    ok(badPw.headers.get("x-saga-login") === "wrong" && new URL(badPw.headers.get("location"), `http://h/api/auth/login`).pathname === "/login" && !badPw.headers.get("set-cookie"), "wrong password refused, back on the sign-in page");
+    ok(/Wrong name or password/.test(await (await fetch(`http://127.0.0.1:${pub}/login?e=wrong`)).text()), "…which says so");
     const good = await login("correct horse"); const cookie = (good.headers.get("set-cookie") || "").split(";")[0];
-    ok(good.status === 303 && /^saga_session=banta\.\d+\./.test(cookie) && /HttpOnly; Secure; SameSite=Strict/.test(good.headers.get("set-cookie")), "right password: a 30-day session cookie");
+    // 0.6.5: the right password lands on the app itself (it used to land on /api/auth/ → {"error":"not found"})
+    ok(good.status === 303 && new URL(good.headers.get("location"), `http://h/api/auth/login`).pathname === "/" && /^saga_session=banta\.\d+\./.test(cookie), "right password: back to the app");
+    ok(/HttpOnly; SameSite=Lax/.test(good.headers.get("set-cookie")) && !/Secure/.test(good.headers.get("set-cookie")), "on plain http the cookie isn't https-only (browsers would drop it)");
+    const viaHttps = await fetch(`http://127.0.0.1:${pub}/api/auth/login`, { method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Forwarded-For": "6.6.6.6", "X-Forwarded-Proto": "https" }, body: "user=banta&password=" + encodeURIComponent("correct horse") });
+    ok(/HttpOnly; Secure; SameSite=Lax/.test(viaHttps.headers.get("set-cookie") || ""), "behind https (Funnel, Cloudflare) it is");
+    const landed = await fetch(new URL(good.headers.get("location"), `http://127.0.0.1:${pub}/api/auth/login`), { headers: { Cookie: cookie } });
+    ok(landed.status === 200 && /web-shim\.js/.test(await landed.text()), "following the redirect opens the app");
+    const reload = await fetch(`http://127.0.0.1:${pub}/api/auth/login`, { redirect: "manual", headers: { Cookie: cookie } });
+    ok(reload.status === 303 && new URL(reload.headers.get("location"), `http://h/api/auth/login`).pathname === "/login", "reloading the sign-in address doesn't show an error");
+    const out1 = await fetch(`http://127.0.0.1:${pub}/api/auth/logout`, { redirect: "manual", headers: { Cookie: cookie } });
+    ok(new URL(out1.headers.get("location"), `http://h/api/auth/logout`).pathname === "/login", "sign out goes to the sign-in page");
     ok((await fetch(`http://127.0.0.1:${pub}/api/all`, { headers: { Cookie: cookie } })).status === 200, "signed-in browser gets in");
     ok((await fetch(`http://127.0.0.1:${pub}/api/all`, { headers: { Cookie: cookie.replace(/.$/, c => (c === "a" ? "b" : "a")) } })).status === 401, "a tampered cookie doesn't");
     for (let i = 0; i < 5; i++) await login("wrong");
-    ok((await login("correct horse")).status === 429, "after 5 wrong passwords: wait");
+    ok((await login("correct horse")).headers.get("x-saga-login") === "wait" && (await fetch(`http://127.0.0.1:${pub}/login?e=wait`)).status === 429, "after 5 wrong passwords: wait");
     // ---- 0.6.1: a second person with their own password, sync key and files
     const out2 = execFileSync(process.execPath, [path.join(__dirname, "../site/server.js"), "--add-user", "marco", "another secret"], { env: Object.assign({}, process.env, { SAGA_DATA: data }) }).toString();
     const tok2 = out2.trim().split(/\s+/).pop();
@@ -92,7 +104,12 @@ const ok = (c, m) => { if (!c) { console.error("FAIL: " + m); process.exit(1); }
     const me2 = await (await fetch(`http://127.0.0.1:${pub}/api/me`, { headers: { Cookie: c2 } })).json();
     ok(login2.status === 303 && me2.user === "marco", "he signs in with his name: " + JSON.stringify(me2));
     const wrongName = await fetch(`http://127.0.0.1:${pub}/api/auth/login`, { method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Forwarded-For": "7.7.7.7" }, body: "user=banta&password=" + encodeURIComponent("another secret") });
-    ok(wrongName.status === 401, "his password doesn't open your account");
+    ok(wrongName.headers.get("x-saga-login") === "wrong", "his password doesn't open your account");
+    // 0.6.5: rename an account (an old single-password setup's "me" → your name)
+    const rn = execFileSync(process.execPath, [path.join(__dirname, "../site/server.js"), "--rename-user", "marco", "marc"], { env: Object.assign({}, process.env, { SAGA_DATA: data }) }).toString();
+    ok(/marco is now marc/.test(rn) && fs.existsSync(path.join(data, "users", "marc", "games.json")), "rename keeps his files");
+    const login3 = await fetch(`http://127.0.0.1:${pub}/api/auth/login`, { method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Forwarded-For": "5.5.5.5" }, body: "user=marc&password=" + encodeURIComponent("another secret") });
+    ok(login3.headers.get("x-saga-login") === "ok", "and he signs in with the new name");
     ok(!errs.length, "no page errors: " + errs.join(" | "));
     console.log("WEBSITE TESTS PASSED");
   } finally { await b.close(); srv.kill(); target.close(); }

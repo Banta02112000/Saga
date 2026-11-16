@@ -179,19 +179,25 @@ const handler = isPublic => async (req, res) => {
     freshAuth();
     const url = new URL(req.url, "http://x"), p = decodeURIComponent(url.pathname);
     // ---- signing in (the only pages open without it)
-    if (p === "/login" && req.method === "GET") return send(res, 200, LOGIN(AUTH ? "" : "No password is set yet: on the server run  node server.js --set-password"), "text/html; charset=utf-8");
+    // 0.6.5: every answer of the sign-in sends the browser back to a real page (it used to land on /api/auth/, which
+    // showed {"error":"not found"} even with the right password), and the cookie is https-only only on https
+    // (on plain http, like http://100.x.x.x:8787, browsers dropped it, so you were asked to sign in again)
+    const MSG = { wrong: "Wrong name or password.", wait: "Too many tries. Wait 15 minutes." };
+    const secure = req.socket.encrypted || /^https$/i.test(String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim()) ? "; Secure" : "";
+    if (p === "/login" && req.method === "GET") return send(res, (MSG[url.searchParams.get("e")] && url.searchParams.get("e") === "wait") ? 429 : 200, LOGIN(!AUTH ? "No password is set yet: on the server run  node server.js --set-password" : MSG[url.searchParams.get("e")] || ""), "text/html; charset=utf-8");
+    if (p === "/api/auth/login" && req.method !== "POST") { res.writeHead(303, { Location: "../../login" }); return res.end(); }
     if (p === "/api/auth/login" && req.method === "POST") {
       const ip = clientIp(req);
-      if (limited(ip)) return send(res, 429, LOGIN("Too many tries. Wait 15 minutes."), "text/html; charset=utf-8");
+      if (limited(ip)) { res.writeHead(303, { Location: "../../login?e=wait", "X-Saga-Login": "wait" }); return res.end(); }
       const body = (await readBody(req, 8192)).toString("utf8");
       const form = /^\s*\{/.test(body) ? JSON.parse(body) : Object.fromEntries(new URLSearchParams(body));
       const name = String(form.user || (AUTH && Object.keys(AUTH.users).length === 1 ? Object.keys(AUTH.users)[0] : "")).trim().toLowerCase();
-      if (!checkPassword(name, form.password || "")) { failed(ip); return send(res, 401, LOGIN("Wrong name or password."), "text/html; charset=utf-8"); }
+      if (!checkPassword(name, form.password || "")) { failed(ip); res.writeHead(303, { Location: "../../login?e=wrong", "X-Saga-Login": "wrong" }); return res.end(); }
       tries.delete(ip);
-      res.writeHead(303, { Location: "./", "Set-Cookie": `saga_session=${newSession(name)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_DAYS * 86400}`, "Cache-Control": "no-store" });
+      res.writeHead(303, { Location: "../../", "X-Saga-Login": "ok", "Set-Cookie": `saga_session=${newSession(name)}; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}`, "Cache-Control": "no-store" });
       return res.end();
     }
-    if (p === "/api/auth/logout") { res.writeHead(303, { Location: "login", "Set-Cookie": "saga_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0" }); return res.end(); }
+    if (p === "/api/auth/logout") { res.writeHead(303, { Location: "../../login", "Set-Cookie": `saga_session=; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=0` }); return res.end(); }
     if (p === "/api/health") return send(res, 200, JSON.stringify({ ok: true, auth: !!AUTH }));
     if (p === "/manifest.json") return send(res, 200, MANIFEST, "application/manifest+json");
     if (p === "/sw.js") { res.writeHead(200, { "Content-Type": TYPES[".js"], "Cache-Control": "no-cache", "Service-Worker-Allowed": "/" }); return res.end(SW); }
@@ -302,6 +308,7 @@ const handler = isPublic => async (req, res) => {
 //   node server.js --add-user name [password]         (the same, for someone new)
 //   node server.js --remove-user name                  (their files stay in data/users/<name>)
 //   node server.js --users                             (who has an account)
+//   node server.js --rename-user old new               (e.g. me → banta)
 //   node server.js --key [name]                         (that person's sync key, for the phone app and Jellyfin / Plex)
 //   node server.js --tailscale name login@example.com  (that Tailscale login opens that person's Saga on the tailnet port)
 const argv = process.argv.slice(2), cmd = argv[0] || "";
@@ -316,6 +323,15 @@ if (cmd === "--set-password" || cmd === "--add-user") {
   const done = p2 => { if (!p2 || p2.length < 8) { console.error("At least 8 characters."); process.exit(1); } const u = setPassword(name, p2);
     console.log(`Password set for ${name}${(loadAuth() || {}).owner === name ? " (owner)" : ""}. Sync key for ${name}'s phone app (Settings › Accounts and sync › Saga website):\n  ${u.token}`); process.exit(0); };
   if (pw) done(pw); else ask(`New password for ${name}: `, done);
+} else if (cmd === "--rename-user") {
+  // 0.6.5: e.g. the "me" that an old single-password setup became → your own name
+  const a = loadAuth(), from = String(argv[1] || "").toLowerCase(), to = String(argv[2] || "").trim().toLowerCase();
+  if (!a || !a.users[from]) { console.error("No such account (see --users)."); process.exit(1); }
+  if (!/^[a-z0-9._-]{1,32}$/.test(to) || a.users[to]) { console.error("Give a new, unused name (letters, digits, . _ -)."); process.exit(1); }
+  a.users[to] = a.users[from]; delete a.users[from];
+  if (a.owner === from) a.owner = to;
+  else if (fs.existsSync(path.join(DATA, "users", from))) fs.renameSync(path.join(DATA, "users", from), path.join(DATA, "users", to));
+  saveAuth(a); console.log(`${from} is now ${to}. Sign in with the name ${to}.`); process.exit(0);
 } else if (cmd === "--remove-user") {
   const a = loadAuth(), n = String(argv[1] || "").toLowerCase();
   if (!a || !a.users[n]) { console.error("No such account."); process.exit(1); }
