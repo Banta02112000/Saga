@@ -287,7 +287,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.6.7", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.6.8", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();
@@ -756,6 +756,19 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   ok(n66.ran && n66.deal, "IsThereAnyDeal: best price in any store and lowest ever: " + JSON.stringify(n66));
   ok(n66.filter && n66.sheet, "Games: At its lowest filter, Low badge, Best price block with the subscription: " + JSON.stringify(n66) + " " + n66.dbg);
   ok(n66.pkce && n66.signed, "IsThereAnyDeal sign-in comes back to the app and is finished there");
+  // ---- 0.6.8: the title under a cover opens it; a suggestion opens a page with Add
+  const n68 = await A(async () => {
+    const out = {}; __app.go("watch", "library"); await new Promise(r => setTimeout(r, 100));
+    const cap = document.querySelector("#view .tile .cap"); if (cap) cap.click(); out.cap = !!document.querySelector("#overlay .sheet"); document.querySelector("#overlay").innerHTML = "";
+    __app.db.cacheSet("recs:now", { at: Date.now(), items: [{ tmdb: 4242, type: "movie", title: "Page Film", year: 2011, poster: "", genres: ["Drama"], vote: 7, votes: 500, because: ["Heat"], overview: "" }] });
+    __app.go("home"); const row = document.querySelector('#view [data-action="recopen"] b'); if (row) row.click();
+    out.page = /Page Film/.test((document.querySelector("#overlay .sheet") || {}).textContent || "") && !!document.querySelector('#overlay [data-action="findadd"]');
+    const add = document.querySelector('#overlay [data-action="findadd"][data-st="watchlist"]'); if (add) add.click();
+    out.added = !!__app.lib.find({ type: "movie", title: "Page Film", year: 2011 });
+    document.querySelector("#overlay").innerHTML = "";
+    return out;
+  });
+  ok(n68.cap && n68.page && n68.added, "a cover's title opens it; a suggestion's page has Add: " + JSON.stringify(n68));
   ok(n65.why && n65.why2, "Why is this here? names the list and the rating: " + JSON.stringify(n65));
   ok(n65.dlg && n65.purged && n65.undone, "switching a list off removes only titles it alone brought and you haven't touched; Undo");
   ok(n65.upd && n65.updHidden, "a newer Saga is announced on Home, with Get it, and can be hidden");

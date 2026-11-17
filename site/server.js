@@ -17,6 +17,8 @@ const PUBLIC_PORT = +(process.env.SAGA_PUBLIC_PORT || 8788), TRUST_TS = process.
 const DATA = path.resolve(process.env.SAGA_DATA || path.join(__dirname, "data"));
 const WEB = path.resolve(process.env.SAGA_WEB || path.join(__dirname, "web"));
 const SHIM = fs.readFileSync(path.join(__dirname, "web-shim.js"));
+// 0.6.8: the version this server runs (the app's own number), so the website can say when the Pi is behind
+const APP_VERSION = (() => { try { return (/const VERSION = "([\d.]+)"/.exec(fs.readFileSync(path.join(WEB, "app.js"), "utf8")) || [])[1] || ""; } catch (e) { return ""; } })();
 // 0.6.2: installable app (manifest) and the offline copy of the app and its pictures (service worker)
 const SW = fs.readFileSync(path.join(__dirname, "sw.js"));
 const MANIFEST = JSON.stringify({ name: "Saga", short_name: "Saga", start_url: "./", scope: "./", display: "standalone", background_color: "#14121B", theme_color: "#14121B",
@@ -238,7 +240,7 @@ const handler = isPublic => async (req, res) => {
       return res.end();
     }
     if (p === "/api/auth/logout") { res.writeHead(303, { Location: "../../login", "Set-Cookie": `saga_session=; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=0` }); return res.end(); }
-    if (p === "/api/health") return send(res, 200, JSON.stringify({ ok: true, auth: !!AUTH }));
+    if (p === "/api/health") return send(res, 200, JSON.stringify({ ok: true, auth: !!AUTH, version: APP_VERSION }));
     if (p === "/manifest.json") return send(res, 200, MANIFEST, "application/manifest+json");
     if (p === "/sw.js") { res.writeHead(200, { "Content-Type": TYPES[".js"], "Cache-Control": "no-cache", "Service-Worker-Allowed": "/" }); return res.end(SW); }
     if (ICONS[p.slice(1)]) { res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "max-age=604800" }); return res.end(ICONS[p.slice(1)]); }

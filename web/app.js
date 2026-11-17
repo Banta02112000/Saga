@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.6.7";
+  const VERSION = "0.6.8";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -299,6 +299,10 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.6.8", ["Fixed: film, series and game pages could slide sideways (the picture at the top was 2 px too wide); nothing on a screen or a page can scroll sideways any more.",
+      "Tapping the title or year under a cover opens it, not only the picture.",
+      "Suggestions (For you), what a friend loved and a person's other work open a page with the details, Add to my watchlist and Mark as watched; DLC rows open their Steam page; related anime their MyAnimeList page.",
+      "Website: Home says when the Pi runs an older Saga and how to update it; it can update itself every night (auto-update.sh on)."]],
     ["0.6.7", ["Doctor Who: a story told after another timeline waits for it. Falling and The Forbidden Time sit in season 4, but they're told after Ben & Polly's travels end, so they aren't Next up until the Ben & Polly timeline before them is done (the list says “after Ben & Polly: N to go”, the story shows what's left). You can still mark them done whenever you like. When everything left in a timeline is waiting like that, its Next up offers what the other timeline can play next.",
       "A story listed twice in one timeline (During and After) is Next up at its later place."]],
     ["0.6.6", ["IsThereAnyDeal, much more of it (with your free API key): the best price now in any store for every game you'd still buy or play, with its all-time low (and a notification when a game you want hits it); which subscriptions include it (Game Pass, PS Plus, Switch Online…, and when it leaves); current bundles and every bundle it was ever in.",
@@ -633,6 +637,15 @@
   const cwRow = x => row(x, "up", { title: x.show, tag: x.fresh ? "New" : "",
     sub: `Next: S${x.s} E${x.e} · ${x.left} episode${x.left === 1 ? "" : "s"} to watch`, trail: hideBtn(x) });
 
+  // 0.6.8: the page of a film or series you don't have (a suggestion, a friend's, a person's work, a related anime):
+  // its details, and Add to watchlist / Mark as watched. One you have opens its own page instead.
+  function openTitle(x) {
+    const have = lib.find({ type: x.type, tmdb: x.tmdb, imdb: x.imdb, title: x.title, year: x.year });
+    if (have) { openLib(have.id); return; }
+    const c = { title: x.title, year: x.year || null, medium: x.type === "show" ? "TV Series" : "Movie", tmdb: x.tmdb || null, imdb: x.imdb || null, poster: x.poster || "", franchise: "",
+      why: x.why || "", src: x };
+    openSheet(sid(c, "find"));
+  }
   function openSheet(id) {
     const c = sheetItems.get(id);
     if (!c) return;
@@ -650,10 +663,14 @@
       acts.splice(1, 0, `<button class="sheetbtn" data-action="trakt" data-k="history">${icon("check")}Mark watched on Trakt</button>`,
                         `<button class="sheetbtn" data-action="trakt" data-k="watchlist">${icon("list")}Add to Trakt watchlist</button>`);
     }
+    if (c.sheetKind === "find") {
+      acts.unshift(`<button class="btn primary block" data-action="findadd" data-id="${esc(id)}" data-st="watchlist">${icon("plus")}Add to my watchlist</button>`,
+        `<button class="sheetbtn" data-action="findadd" data-id="${esc(id)}" data-st="watched">${icon("check")}Mark as watched</button>`);
+    }
     if (c.sheetKind === "up") {
       acts.push(`<button class="sheetbtn" data-action="uphide" data-key="${esc(c.hideKey)}" data-label="${esc(c.kind === "canon" ? c.title : (c.show || c.franchise))}">${icon("eyeoff")}${c.kind === "canon" ? "Hide from Upcoming" : c.kind === "next" ? `Stop suggesting ${esc(c.show)}` : `Hide ${esc(c.show || c.franchise)} from Upcoming`}</button>`);
     }
-    const detail = c.kind === "next" ? `Next to watch: S${c.s} E${c.e} · ${c.left} aired episode${c.left === 1 ? "" : "s"} you haven't seen` : c.kind === "episode" ? `S${c.s} E${c.e}${c.name && !/^episode \d+$/i.test(c.name) ? `, ${esc(c.name)}` : ""} · ${esc(C.fmtWhen(c))}`
+    const detail = c.sheetKind === "find" ? esc([c.year, c.medium === "TV Series" ? "Series" : "Film", c.why].filter(Boolean).join(" · ")) : c.kind === "next" ? `Next to watch: S${c.s} E${c.e} · ${c.left} aired episode${c.left === 1 ? "" : "s"} you haven't seen` : c.kind === "episode" ? `S${c.s} E${c.e}${c.name && !/^episode \d+$/i.test(c.name) ? `, ${esc(c.name)}` : ""} · ${esc(C.fmtWhen(c))}`
       : [c.franchise + (c.sub ? ` · ${c.sub}` : ""), c.date || c.year ? when(c) : "", c.origin ? `from ${c.origin.split("+").map(o => ({ url: "your canon list", tmdb: "TMDB", gemini: "Gemini", claude: "Claude", ai: (C.AI_PRESETS[db.get("ai_preset", "openai")] || {}).label || "AI" })[o] || o).join(", ")}` : ""].filter(Boolean).map(esc).join(" · ");
     $("#overlay").innerHTML = `<div class="scrim bottom" data-action="dismiss"><div class="sheet" role="dialog" aria-modal="true">
       ${Kit.sheetHero({ title: c.kind === "episode" ? c.show : c.title, key: "canon:" + canonKey(c), img: cImg(c), kind: c.medium === "TV Series" ? "show" : c.medium === "Video Game" ? "game" : "movie" }, `<div class="small muted">${detail}</div>`)}
@@ -702,7 +719,7 @@
       const rows = P.works.map((w, i) => ({ w, i, have: lib.find({ tmdb: w.tmdb, type: w.type, title: w.title, year: w.year }) }));
       const mine = rows.filter(x => x.have), rated = mine.filter(x => x.have.rating), seen = mine.filter(x => x.have.status === "watched");
       const avg = rated.length ? Math.round(rated.reduce((a, x) => a + x.have.rating, 0) / rated.length * 10) / 10 : null;
-      const line = x => `<div class="item"${x.have ? ` data-action="libopen" data-id="${esc(x.have.id)}"` : ""}><div class="grow" style="min-width:0"><b class="ell">${esc(x.w.title)}</b>
+      const line = x => `<div class="item" ${x.have ? `data-action="libopen" data-id="${esc(x.have.id)}"` : `data-action="personopen" data-i="${x.i}"`} role="button"><div class="grow" style="min-width:0"><b class="ell">${esc(x.w.title)}</b>
         <div class="small muted ell">${esc([x.w.year, x.w.type === "show" ? "Series" : "Film", x.w.roles.slice(0, 2).join(", ")].filter(Boolean).join(" · "))}</div></div>
         ${x.have ? `<span class="small muted">${esc(LST[x.have.status])}${x.have.rating ? ` · ★ ${x.have.rating}` : ""}</span>` : `<button class="btn quiet small" data-action="personadd" data-i="${x.i}">${icon("plus")}Add</button>`}</div>`;
       body = `<div class="sstrip"><div><b>${mine.length}</b><span>in your library</span></div><div><b>${seen.length}</b><span>watched</span></div><div><b>${avg === null ? "–" : avg}</b><span>your average</span></div><div><b>${P.works.length}</b><span>on TMDB</span></div></div>
@@ -2440,7 +2457,7 @@
     if (r.err) return `<p class="small muted">${esc(r.err)}</p>`;
     if (!r.list.length) return `<p class="small muted">Nothing related on MyAnimeList.</p>`;
     return `<h4>Related</h4><div class="listcard">${r.list.map((x, i) => { const have = lib.all().find(y => String(y.mal) === String(x.mal));
-      return `<div class="item"${have ? ` data-action="libopen" data-id="${esc(have.id)}"` : ""}><div class="grow" style="min-width:0"><b class="ell">${esc(x.title)}</b><div class="small muted">${esc(x.relation)}</div></div>${have ? `<span class="small muted">${esc(L.LABEL[have.status] || "In library")}</span>` : `<button class="btn quiet small" data-action="libreladd" data-i="${i}">${icon("plus")}Add</button>`}</div>`; }).join("")}</div>`;
+      return `<div class="item" ${have ? `data-action="libopen" data-id="${esc(have.id)}"` : `data-action="open" data-url="https://myanimelist.net/anime/${esc(x.mal)}"`} role="button"><div class="grow" style="min-width:0"><b class="ell">${esc(x.title)}</b><div class="small muted">${esc(x.relation)}</div></div>${have ? `<span class="small muted">${esc(L.LABEL[have.status] || "In library")}</span>` : `<button class="btn quiet small" data-action="libreladd" data-i="${i}">${icon("plus")}Add</button>`}</div>`; }).join("")}</div>`;
   }
   function openLib(id) {
     const it = lib.get(id);
@@ -2912,7 +2929,7 @@
     const chip = (k, l) => `<button class="chip ${f === k ? "on" : ""}" data-action="recf" data-v="${esc(k)}">${esc(l)}</button>`;
     return `<section>${Kit.head("For you", `<button class="btn quiet small" data-action="recsnow">Refresh</button>`)}
       <div class="chips" style="margin-bottom:8px">${chip("all", "All")}${chip("movie", "Films")}${chip("show", "Series")}${genres.map(g => chip(g, g)).join("")}</div>
-      <div class="listcard">${items.map(x => `<div class="item"><img class="thumb" loading="lazy" src="${esc(x.poster)}" alt="" data-fb="ph" data-fbc="thumb ph ${x.type === "show" ? "series" : "movie"}" data-fbt="${esc(initials(x.title))}">
+      <div class="listcard">${items.map(x => `<div class="item" data-action="recopen" data-k="${esc(x.type + x.tmdb)}" role="button"><img class="thumb" loading="lazy" src="${esc(x.poster)}" alt="" data-fb="ph" data-fbc="thumb ph ${x.type === "show" ? "series" : "movie"}" data-fbt="${esc(initials(x.title))}">
         <div class="grow" style="min-width:0"><b class="ell">${esc(x.title)}</b><div class="small muted ell">${esc([x.year, x.type === "show" ? "Series" : "Film", x.genres.slice(0, 2).join(", "), x.vote ? "★ " + x.vote.toFixed(1) : ""].filter(Boolean).join(" · "))}</div>
         <div class="small muted ell">Because you rated ${esc(x.because.join(", "))}</div></div>
         <button class="btn quiet small" data-action="recadd" data-k="${esc(x.type + x.tmdb)}">${icon("plus")}Add</button><button class="iconbtn" data-action="rechide" data-k="${esc(x.type + x.tmdb)}" aria-label="Not interested">${icon("x")}</button></div>`).join("") || `<p class="small muted" style="padding:8px">Nothing in this group.</p>`}</div></section>`;
@@ -2933,7 +2950,8 @@
   function renderHome() {
     const st = status(), parts = [];
     // 0.5.8: a line when the last sync failed in part or is old, with the way to it
-    { const nv = db.get("upd_ver", ""); if (nv && verNum(nv) > verNum(VERSION) && db.get("upd_hide") !== nv) parts.push(`<div class="nextbox" style="margin-bottom:12px"><div class="grow small"><b>Saga ${esc(nv)} is out</b> (you have ${VERSION}). ${updateUrl() ? "Get it from your Saga website; your data stays." : "Ask whoever gave you Saga for the new version; your data stays."}</div>${updateUrl() ? `<button class="btn small" data-action="updget">Get it</button>` : ""}<button class="iconbtn" data-action="updhide" aria-label="Hide">${icon("x")}</button></div>`); }
+    { const nv = db.get("upd_ver", ""); if (nv && verNum(nv) > verNum(VERSION) && db.get("upd_hide") !== nv) parts.push(`<div class="nextbox" style="margin-bottom:12px"><div class="grow small"><b>Saga ${esc(nv)} is out</b> (this ${window.__sagaWeb ? "website" : "app"} has ${VERSION}). ${window.__sagaWeb ? "To update the website, on the Pi run <code>bash /opt/saga/app/site/update.sh</code>, or let it update itself every night: <code>bash /opt/saga/app/site/auto-update.sh on</code>."
+        : updateUrl() ? "Get it from your Saga website; your data stays." : "Ask whoever gave you Saga for the new version; your data stays."}</div>${!window.__sagaWeb && updateUrl() ? `<button class="btn small" data-action="updget">Get it</button>` : ""}<button class="iconbtn" data-action="updhide" aria-label="Hide">${icon("x")}</button></div>`); }
     { const sick = C.sourceHealth(db);
       if (!ui.job && sick.length) parts.push(`<div class="nextbox warnbox" style="margin-bottom:12px" data-action="go" data-sec="sync" role="button"><div class="grow small"><b>${esc(healthText(sick[0]))}</b>${sick.length > 1 ? ` · and ${sick.length - 1} more` : ""}<div class="muted ell">${esc(sick[0].msg)}</div></div><span class="small">Fix ›</span></div>`); }
     { const last = parseFloat(db.get("last_sync", "0")) || 0, fails = failedLabels(), h = last ? (Date.now() / 1000 - last) / 3600 : null;
@@ -3363,7 +3381,7 @@
       return `<section>${Kit.head(`You and ${esc(P.name)}`)}
         <div class="sstrip"><div><b>${c.match == null ? "–" : c.match + "%"}</b><span>taste match${c.rated ? ` (${c.rated} both rated)` : ""}</span></div><div><b>${fmt(c.seen)}</b><span>both watched</span></div><div><b>${fmt(c.bothWant.length)}</b><span>both want to watch</span></div><div><b>${fmt(P.games.filter(g => g.status === "done").length)}</b><span>games ${esc(P.name)} finished</span></div></div>
         ${c.bothWant.length ? `<h4>You both want to watch</h4><div class="listcard">${c.bothWant.slice(0, 8).map(it => `<div class="item" data-action="libopen" data-id="${esc(it.id)}">${libThumb(it)}<b class="grow ell">${esc(it.title)}</b><span class="small muted">${esc(it.year || "")}</span></div>`).join("")}</div>` : ""}
-        ${c.loved.length ? `<h4>${esc(P.name)} loved, you haven't seen</h4><div class="listcard">${c.loved.slice(0, 8).map((x, i) => `<div class="item"><div class="grow" style="min-width:0"><b class="ell">${esc(x.title)}</b><div class="small muted">${esc([x.year, x.type === "show" ? "Series" : "Film", "★ " + x.rating].filter(Boolean).join(" · "))}</div></div><button class="btn quiet small" data-action="friendadd" data-p="${esc(P.name)}" data-i="${P.lib.indexOf(x)}">${icon("plus")}Add</button></div>`).join("")}</div>` : ""}</section>`; }).join("");
+        ${c.loved.length ? `<h4>${esc(P.name)} loved, you haven't seen</h4><div class="listcard">${c.loved.slice(0, 8).map((x, i) => `<div class="item" data-action="friendopen" data-p="${esc(P.name)}" data-i="${P.lib.indexOf(x)}" role="button"><div class="grow" style="min-width:0"><b class="ell">${esc(x.title)}</b><div class="small muted">${esc([x.year, x.type === "show" ? "Series" : "Film", "★ " + x.rating].filter(Boolean).join(" · "))}</div></div><button class="btn quiet small" data-action="friendadd" data-p="${esc(P.name)}" data-i="${P.lib.indexOf(x)}">${icon("plus")}Add</button></div>`).join("")}</div>` : ""}</section>`; }).join("");
   }
   async function syncWithWebServer(loud) {
     const base = String(db.get("web_sync_url", "")).trim().replace(/\/+$/, "");
@@ -3542,7 +3560,7 @@
   // ---- artwork: TMDB where there's a key, otherwise IMDb's own poster (keyless), for films, series, games and canon
   const imdbImg = u => (u ? String(u).replace(/\._V1_.*\.(jpg|png)$/i, "._V1_UX300_.$1") : "");
   const imgOf = tt => (tt ? db.cacheGet("img:" + tt) || "" : "");
-  function cImg(c) { if (c.poster) return IMG + "w342" + c.poster; return imgOf(canonKey(c)) || ""; }
+  function cImg(c) { if (c.poster) return /^https?:/.test(c.poster) ? c.poster : IMG + "w342" + c.poster; return imgOf(canonKey(c)) || ""; }
   // Pictures for everything that has none, trying several sources per kind (images.js). A picture that fails to
   // load moves that title on to its next source. Titles nothing was found for are tried again after three days.
   let imgRunning = false, imgAgain = false;
@@ -4134,7 +4152,9 @@
   document.addEventListener("input", e => { const el = e.target; if (el && el.dataset && el.dataset.setting === "widget_alpha") { const v = document.getElementById("walphaV"); if (v) v.textContent = el.value + "%"; } });
 
   document.addEventListener("click", e => {
-    const el = e.target.closest("[data-action]");
+    let el = e.target.closest("[data-action]");
+    // 0.6.8: the title and year under a cover open it too (only the picture used to)
+    if (!el) { const tile = e.target.closest(".tile"); const p = tile && tile.querySelector("[data-action]"); if (p) { p.click(); return; } }
     if (!el) return;
     lastTap = Date.now();
     const a = el.dataset.action;
@@ -4146,6 +4166,12 @@
     switch (a) {
       case "search": openSearch(); break;
       case "person": openPerson(el.dataset.name); break;
+      case "findadd": { const c = sheetItems.get(el.dataset.id); if (!c) break; const x = c.src || {};
+        const r = libAdd({ type: c.medium === "TV Series" ? "show" : "movie", title: c.title, year: c.year, tmdb: c.tmdb, imdb: c.imdb, poster: x.poster || "", overview: x.overview || "" }, el.dataset.st);
+        closeOverlay(); render(); const it = r && (r.item || r); if (it && it.id) openLib(it.id); break; }
+      case "recopen": { const x = (recsNow() || { items: [] }).items.find(y => y.type + y.tmdb === el.dataset.k); if (x) openTitle(Object.assign({ why: "because you rated " + x.because.join(", ") }, x)); break; }
+      case "friendopen": { const P = people().find(p => p.name === el.dataset.p), x = P && P.lib[+el.dataset.i]; if (x) openTitle(Object.assign({ why: `${P.name}: ★ ${x.rating || "–"}` }, x)); break; }
+      case "personopen": { const w = ui.person && ui.person.works && ui.person.works[+el.dataset.i]; if (w) openTitle(Object.assign({ why: w.roles.slice(0, 2).join(", ") }, w)); break; }
       case "sqwatch": { const x = lib.get(el.dataset.id); if (x) { const u = libUndo(x); lib.setStatus(x, "watched"); libSave(); toast(`Watched ${x.title}`, u); if ($("#allRes")) $("#allRes").innerHTML = searchResults(); } break; }
       case "personadd": { const w = ui.person && ui.person.works && ui.person.works[+el.dataset.i]; if (w) { libAdd({ type: w.type, title: w.title, year: w.year, tmdb: w.tmdb, poster: w.poster }, "watchlist"); drawPerson(); } break; }
       case "libcast": { const it = lib.get(ui.libOpen); if (!it) break; ui.libCast = { id: it.id, busy: true }; openLib(it.id);

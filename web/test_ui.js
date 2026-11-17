@@ -530,6 +530,26 @@ const mock = () => {
       await page.screenshot({ path: `${OUT}/fold-${name}-${tab}.png` });
     }
   }
+  // 0.6.8: nothing scrolls sideways: every screen and the main sheets on the Fold's cover screen (344 px) and a desktop
+  for (const w of [344, 1280]) {
+    await page.setViewportSize({ width: w, height: 800 });
+    const wide = await page.evaluate(async () => {
+      const bad = [], A = window.__app, wait = () => new Promise(r => setTimeout(r, 120));
+      const check = where => { const W = document.documentElement.clientWidth; if (document.scrollingElement.scrollWidth > W + 1) bad.push(`${where}: page ${document.scrollingElement.scrollWidth}>${W}`);
+        const sh = document.querySelector("#overlay .sheet"); if (sh && sh.scrollWidth > sh.clientWidth + 1) bad.push(`${where}: sheet ${sh.scrollWidth}>${sh.clientWidth}`); };
+      for (const [s, t] of [["home"], ["watch", "library"], ["watch", "canon"], ["watch", "stats"], ["games"], ["books"], ["timeline"], ["more"], ["settings"], ["sync"]]) {
+        document.querySelector("#overlay").innerHTML = ""; try { A.go(s, t); } catch (e) { /* tab off */ } await wait(); check(s + (t ? "/" + t : ""));
+      }
+      const it = A.lib.all()[0]; if (it) { A.openLib(it.id); await wait(); check("film sheet"); }
+      const g = A.games.games[0]; if (g) { Kit.mods.games.open(g.id); await wait(); check("game sheet"); }
+      const T = Kit.mods.timeline, k = T.data().groups[0].tabs[0].items[0].k; T.openStory(k); await wait(); check("story sheet");
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true })); await wait(); check("search");
+      document.querySelector("#overlay").innerHTML = "";
+      return bad;
+    });
+    if (wide.length) throw new Error(`scrolls sideways at ${w}px: ${wide.join("; ")}`);
+  }
+  console.log("nothing scrolls sideways (344 px, 1280 px)");
   await page.setViewportSize({ width: 412, height: 915 });
   console.log("adaptive layouts ok");
 

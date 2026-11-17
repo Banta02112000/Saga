@@ -76,6 +76,13 @@ on plain `http://100.x.x.x:8787` it works as a normal page.
 ## Update
 `bash /opt/saga/app/site/update.sh`
 
+Or let it update itself every night around 04:40 (your files are never touched; the log is `journalctl -u saga-update`):
+`bash /opt/saga/app/site/auto-update.sh on` (`off` to stop, `status` to check). When the website is behind,
+its Home screen says so.
+
+App updates for the phones: copy the APKs into `/opt/saga/data/apk/`. The phone app announces a new version and
+"Get it" opens `https://<your Saga address>/download`; other people only see the Starter builds there.
+
 ## Where things are
 - Your files: `/opt/saga/data` (a copy of each file as it was at the start of each day, for a week: `/opt/saga/data/.daily`).
 - Logs: `journalctl -u saga -n 100`

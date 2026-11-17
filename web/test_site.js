@@ -75,6 +75,7 @@ const ok = (c, m) => { if (!c) { console.error("FAIL: " + m); process.exit(1); }
     ok(/Wrong name or password/.test(await (await fetch(`http://127.0.0.1:${pub}/login?e=wrong`)).text()), "…which says so");
     const good = await login("correct horse"); const cookie = (good.headers.get("set-cookie") || "").split(";")[0];
     // 0.6.5: the right password lands on the app itself (it used to land on /api/auth/ → {"error":"not found"})
+    { const hj = await (await fetch(`http://127.0.0.1:${pub}/api/health`)).json(); ok(/^\d+\.\d+\.\d+$/.test(hj.version || ""), "health says which Saga the server runs: " + JSON.stringify(hj)); }
     ok(good.status === 303 && new URL(good.headers.get("location"), `http://h/api/auth/login`).pathname === "/" && /^saga_session=banta\.\d+\./.test(cookie), "right password: back to the app");
     ok(/HttpOnly; SameSite=Lax/.test(good.headers.get("set-cookie")) && !/Secure/.test(good.headers.get("set-cookie")), "on plain http the cookie isn't https-only (browsers would drop it)");
     const viaHttps = await fetch(`http://127.0.0.1:${pub}/api/auth/login`, { method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Forwarded-For": "6.6.6.6", "X-Forwarded-Proto": "https" }, body: "user=banta&password=" + encodeURIComponent("correct horse") });
