@@ -149,7 +149,10 @@
       const title = r.Title || r["Game"] || r.Name; if (!title) return null;
       const yes = k => r[k] && r[k] !== "0" && !/^(no|false)$/i.test(r[k]);
       const status = yes("Completed") ? "done" : yes("Playing") ? "playing" : yes("Retired") ? "dropped" : yes("Backlog") ? "backlog" : yes("Replay") ? "done" : "backlog";
-      return { title, platform: r.Platform || "", status, date: day(r["Completion Date"] || r["Completed Date"] || r.Finished || ""), rating: (+r.Review || +r.Rating || 0) / 10, hours: parseFloat(r["Main Story"] || r.Progress || "") || null, src: "HowLongToBeat" };
+      // 0.6.9.8: these are YOUR times on HowLongToBeat (Progress, Main Story… as hh:mm:ss): time played, not time to beat
+      const mins = v => { const t = String(v || "").trim(); if (!t) return 0; const p = t.split(":").map(Number); return p.some(isNaN) ? (parseFloat(t) || 0) * 60 : p.length === 3 ? p[0] * 60 + p[1] + p[2] / 60 : p.length === 2 ? p[0] * 60 + p[1] : p[0] * 60; };
+      const played = Math.round(Math.max(mins(r.Progress), mins(r["Main Story"]), mins(r["Main + Extras"]), mins(r.Completionist), mins(r.Playtime)));
+      return { title, platform: r.Platform || "", status, date: day(r["Completion Date"] || r["Completed Date"] || r.Finished || ""), rating: (+r.Review || +r.Rating || 0) / 10, hours: null, played: played || 0, src: "HowLongToBeat" };
     }).filter(Boolean);
   }
   function grouvee(rows) {
@@ -179,7 +182,7 @@
   }
   // steamcommunity.com/id/NAME/games?tab=all&xml=1 (public profile)
   function steamXml(text) {
-    return xmlEntries(text, "game").map(g => ({ title: g.name, platform: "PC", status: "backlog", owned: "PC (Steam)", steam: +g.appID || null, hours: parseFloat(String(g.hoursOnRecord || "").replace(",", "")) || 0, src: "Steam" }))
+    return xmlEntries(text, "game").map(g => ({ title: g.name, platform: "PC", status: "backlog", owned: "PC (Steam)", steam: +g.appID || null, hours: null, mins: Math.round((parseFloat(String(g.hoursOnRecord || "").replace(",", "")) || 0) * 60), src: "Steam" }))
       .filter(x => x.title);
   }
   // The games page itself (the XML version is gone on some profiles): JSON in data-profile-gameslist, or the older rgGames.
@@ -191,7 +194,7 @@
     if (!games) { const b = String(html).match(/var\s+rgGames\s*=\s*(\[[\s\S]*?\]);\s*\n/); if (b) { try { games = JSON.parse(b[1]); } catch (e) { games = null; } } }
     if (!games) return null;
     return games.map(g => ({ title: unent(g.name || ""), platform: "PC", status: "backlog", owned: "PC (Steam)", steam: +g.appid || null,
-      hours: g.playtime_forever ? Math.round(g.playtime_forever / 6) / 10 : parseFloat(String(g.hours_forever || "").replace(",", "")) || 0, src: "Steam" })).filter(x => x.title);
+      hours: null, mins: g.playtime_forever != null ? +g.playtime_forever || 0 : Math.round((parseFloat(String(g.hours_forever || "").replace(",", "")) || 0) * 60), src: "Steam" })).filter(x => x.title);
   }
   // Your owned games from a public Steam profile: tries the XML list, then the games page. Returns rows for GamesCore.importRows.
   // ---------------------------------------------------------------- live sync from more services (no sign-in, public profiles)
@@ -372,7 +375,7 @@
     const j = await get(`https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${encodeURIComponent(key)}&steamid=${id}&include_appinfo=1&include_played_free_games=1`);
     const games = j && j.response && j.response.games;
     if (!games) throw new Error("Steam: no games visible. Set Game details to Public in Steam › Edit profile › Privacy");
-    const rows = games.map(g => ({ title: g.name || "", platform: "PC", status: "backlog", owned: "PC (Steam)", steam: +g.appid || null, hours: g.playtime_forever ? Math.round(g.playtime_forever / 6) / 10 : 0, src: "Steam",
+    const rows = games.map(g => ({ title: g.name || "", platform: "PC", status: "backlog", owned: "PC (Steam)", steam: +g.appid || null, hours: null, src: "Steam",
       mins: g.playtime_forever || 0, last: g.rtime_last_played ? new Date(g.rtime_last_played * 1000).toISOString().slice(0, 10) : "" })).filter(x => x.title);
     rows.steamid = id; // 0.6.9: for recently played and achievements
     return rows;

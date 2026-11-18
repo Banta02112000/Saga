@@ -288,7 +288,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.6.9.7", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.6.9.8", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();
@@ -818,6 +818,17 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     document.querySelector("#overlay").innerHTML = "";
     __app.go("games"); press("gview", { v: "stats" }); out.backlog = /Backlog/.test(document.querySelector("#view").textContent) && /h to beat/.test(document.querySelector("#view").textContent);
     press("gview", { v: "grid" });
+    // 0.6.9.8: syncing one series applies the episodes you rated on IMDb (rated = watched) and their ratings
+    { const sv = __app.lib.all().find(x => x.type === "show" && x.epl && x.epl.length > 4);
+      if (sv) {
+        const k = [...sv.epl].map(x => `${x[0]}:${x[1]}`).find(x => !sv.eps[x] && !x.startsWith("0:"));
+        const prevU = __app.db.get("imdb_user"), prevT = __app.db.get("username"), prevTok = __app.db.get("token");
+        __app.db.set("imdb_user", ""); __app.db.set("username", ""); __app.db.set("token", "");
+        __app.db.set("imdb_eps", JSON.stringify({ [sv.imdb || "tt0999999"]: { t: sv.title, y: sv.year, eps: { [k]: "2026-11-17" }, r: { [k]: 9 } } }));
+        await __app.libSyncOne(sv);
+        out.epsync = !!sv.eps[k] && sv.er && sv.er[k] === 9; out.epsyncD = `${sv.title} ${k} ${JSON.stringify(sv.eps[k])} ${JSON.stringify((sv.er || {})[k])}`;
+        __app.db.set("imdb_user", prevU); __app.db.set("username", prevT); __app.db.set("token", prevTok);
+      } else { out.epsync = false; out.epsyncD = "no series with an episode list in the test library"; } }
     // 0.6.9.7: canon games you don't have, in the Games tab
     { __app.db.replaceCanon("canonlist", [{ franchise: "Made Up Saga", title: "Made Up Saga II", year: 2004, medium: "Video Game" }, { franchise: "Made Up Saga", title: "Made Up Saga III", year: 2099, medium: "Video Game" }]);
       __app.go("games"); press("gview", { v: "canon" }); const t = document.querySelector("#view").textContent;
@@ -875,6 +886,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     out.fixd = JSON.stringify(fx);
     return out;
   });
+  ok(n69.epsync, "syncing one series ticks and rates the episodes you rated on IMDb: " + n69.epsyncD);
   ok(n69.gcanon, "Games › Missing: canon games you don't have, not-out-yet apart, one tap to the wishlist: " + n69.gcanonD);
   ok(n69.prefs && n69.keys && n69.dropped, "settings travel (sections, look), keys on request, dropped shows out of Upcoming: " + JSON.stringify([n69.prefs, n69.keys, n69.dropped, n69.keysD]));
   ok(n69.music, "Music section: connect card, then Last.fm numbers, bars and top lists: " + n69.musicD);

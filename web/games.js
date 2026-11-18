@@ -479,7 +479,10 @@
       if (existed) updated++; else added++;
       if (r.date && st === "done" && !game.plays.includes(r.date)) { game.plays = game.plays.filter(d => d !== today() || r.date === today()); game.plays.push(r.date); game.plays.sort(); }
       if (r.rating && !game.rating) game.rating = Math.round(r.rating);
-      if (r.hours && !game.hours && kind !== "Steam library") game.hours = r.hours; // Steam gives hours played, not time to beat
+      if (r.hours && !game.hours && !/steam/i.test(kind || "") && !/steam/i.test(r.src || "")) game.hours = r.hours; // time to beat (Steam gives time played: below)
+      // 0.6.9.8: time played: Steam's minutes, your own times from HowLongToBeat
+      if (r.mins > 0 && (/steam/i.test(kind || "") || /steam/i.test(r.src || ""))) game.steamMins = Math.max(game.steamMins || 0, r.mins);
+      if (r.played > 0) { game.playedMins = Math.max(game.playedMins || 0, r.played); game.playedSrc = r.src || kind || ""; }
       if (r.owned && !game.owned) game.owned = r.owned;
     }
     return { added, updated };
@@ -539,6 +542,20 @@
     return out;
   }
   const gweight = g => (g.rating ? 4 : 0) + g.plays.length * 2 + (g.notes ? 2 : 0) + (GRANK[g.status] || 0) + (g.steam ? 1 : 0) + (g.owned ? 1 : 0) + (g.hours ? 1 : 0);
+  // ---- 0.6.9.8: time played, from every source that has it (the biggest one counts, as they cover the same hours)
+  function timePlayed(g) {
+    const sess = (g.sessions || []).reduce((a, s) => a + (+s.mins || +s.m || 0), 0);
+    const parts = [["Steam", g.steamMins || 0], [g.playedSrc || "HowLongToBeat", g.playedMins || 0], ["your sessions", sess]].filter(p => p[1] > 0);
+    return { mins: parts.reduce((a, p) => Math.max(a, p[1]), 0), parts };
+  }
+  const hrs = m => (m >= 120 ? `${Math.round(m / 60)} h` : m >= 60 ? `${Math.round(m / 6) / 10} h` : `${Math.round(m)} min`);
+  // where a game came from, and what it's linked to
+  const SRC = { list: "your games list (spreadsheet)", imdb: "IMDb", canon: "canon (Games › Missing)", itad: "IsThereAnyDeal waitlist", added: "added by you", steam: "Steam", "steam library": "Steam", howlongtobeat: "HowLongToBeat", grouvee: "Grouvee", backloggd: "Backloggd", gamecheck: "GameCheck", "": "" };
+  function sourceOf(g) {
+    const from = SRC[String(g.src || "").toLowerCase()] != null ? SRC[String(g.src || "").toLowerCase()] : String(g.src || "");
+    const linked = [g.imdb ? "IMDb" : "", g.steam ? "Steam" : "", g.itad ? "IsThereAnyDeal" : "", g.aiAt ? "details from AI" : "", g.steamMins ? "Steam playtime" : "", g.playedMins ? `${g.playedSrc || "HowLongToBeat"} playtime` : ""].filter(Boolean);
+    return { from: from || "added before Saga kept track", linked: [...new Set(linked)].filter(x => x !== from) };
+  }
   // ---- 0.6.9.7: game details from an AI, with your rules (the same questions your games list answers)
   const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
   // "January 1, 1900" (also "Jan 1 1900", "1 January 1900", "January 1900", "1900", ISO) → "1900-01-01" / "1900-01" / "1900"
@@ -775,7 +792,7 @@ ${titles.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
       games: lib.visible().map(g => ({ id: g.id, t: g.title, f: g.franchise, m: g.multiverse, done: g.status === "done", date: g.date })) };
   }
 
-  const API = { wordDate, longDate, infoPrompt, parseInfo, applyInfo, steamPlay, backlogHours, findDuplicates, mergeGames, linkRemake, mergeInto, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
+  const API = { timePlayed, hrs, sourceOf, wordDate, longDate, infoPrompt, parseInfo, applyInfo, steamPlay, backlogHours, findDuplicates, mergeGames, linkRemake, mergeInto, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
     steamSearch, linkSteam, steamPrices, storePrices, steamDates, importRows, fromImdb, storeLinks, indexFor, yearOf, NA };
   if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
   root.GamesCore = API;

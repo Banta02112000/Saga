@@ -16,7 +16,7 @@
     const badgeR = cut >= 10 && g.status !== "done" ? `${g.deal && g.deal.atLow && g.deal.cut === cut ? "Low " : ""}−${cut}%` : g.plays.length > 1 ? `${g.plays.length}×` : "";
     return K.poster({ key: "game:" + g.id, title: g.title, img: cover(g), kind: "game", badge, badgeAcc: g.status === "playing", badgeR, done: g.status === "done", attrs: `data-action="gopen" data-id="${esc(g.id)}"` });
   }
-  const tileOf = (g, why) => `<div class="tile">${posterOf(g)}<div class="cap">${esc(g.title)}</div><div class="cap2">${why ? esc(why) + " · " : ""}${esc(ui.sort === "remake" && g.remake ? `Remake ${g.remake.date ? g.remake.date.slice(0, 4) : ""} · ${g.remake.platform || ""}` : [G.yearOf(g), g.platform].filter(Boolean).join(" · "))}</div></div>`;
+  const tileOf = (g, why) => `<div class="tile">${posterOf(g)}<div class="cap">${esc(g.title)}</div><div class="cap2">${why ? esc(why) + " · " : ""}${ui.sort === "played" && G.timePlayed(g).mins ? esc(G.hrs(G.timePlayed(g).mins) + " played") + " · " : ""}${esc(ui.sort === "remake" && g.remake ? `Remake ${g.remake.date ? g.remake.date.slice(0, 4) : ""} · ${g.remake.platform || ""}` : [G.yearOf(g), g.platform].filter(Boolean).join(" · "))}</div></div>`;
 
   function listFor() {
     const t = today(), q = G.norm(ui.q);
@@ -39,7 +39,7 @@
       title: (a, b) => a.title.localeCompare(b.title), rating: (a, b) => (b.rating || 0) - (a.rating || 0) || (b.imdbR || 0) - (a.imdbR || 0),
       remake: (a, b) => ((a.remake && a.remake.date) || a.date || "9999").localeCompare((b.remake && b.remake.date) || b.date || "9999") || a.title.localeCompare(b.title),
       newest: (a, b) => (b.date || "").localeCompare(a.date || "") || a.title.localeCompare(b.title),
-      short: (a, b) => (a.hours || 999) - (b.hours || 999), price: (a, b) => ((a.price || {}).eur ?? 999) - ((b.price || {}).eur ?? 999) };
+      short: (a, b) => (a.hours || 999) - (b.hours || 999), played: (a, b) => G.timePlayed(b).mins - G.timePlayed(a).mins || a.title.localeCompare(b.title), price: (a, b) => ((a.price || {}).eur ?? 999) - ((b.price || {}).eur ?? 999) };
     return list.sort(by[ui.sort] || by.release);
   }
 
@@ -59,7 +59,7 @@
     return `${playing.length && ui.f === "all" && !ui.q ? `<section>${K.head("Playing and up next", "", playing.length)}${K.rail(playing.map(g => tileOf(g, L.whyNext(g))))}</section>` : ""}
       <div class="subnav">${[["grid", "Library"], ["mv", "Franchises"], ["canon", "Missing"], ["stats", "Stats"]].map(([k, l]) => `<button data-action="gview" data-v="${k}" ${ui.view === k ? 'aria-current="page"' : ""}>${l}</button>`).join("")}</div>
       <div class="toolbar"><input type="search" data-gq="1" data-input="gq" value="${esc(ui.q)}" placeholder="Filter your games" autocomplete="off">
-        ${ui.view === "grid" ? `<select data-gsort="1" aria-label="Sort">${[["release", "Release (oldest)"], ["newest", "Release (newest)"], ["remake", "Remake release"], ["recent", "Recently played"], ["title", "Title"], ["rating", "Rating"], ["deal", "Best deal"], ["short", "Shortest"], ["price", "Price"]].map(([k, l]) => `<option value="${k}" ${ui.sort === k ? "selected" : ""}>${l}</option>`).join("")}</select>` : ""}
+        ${ui.view === "grid" ? `<select data-gsort="1" aria-label="Sort">${[["release", "Release (oldest)"], ["newest", "Release (newest)"], ["remake", "Remake release"], ["recent", "Recently played"], ["played", "Most played"], ["title", "Title"], ["rating", "Rating"], ["deal", "Best deal"], ["short", "Shortest"], ["price", "Price"]].map(([k, l]) => `<option value="${k}" ${ui.sort === k ? "selected" : ""}>${l}</option>`).join("")}</select>` : ""}
         <button class="iconbtn" data-action="gadd" aria-label="Add a game">${K.icon("plus")}</button></div>
       ${ui.view !== "stats" ? strip() : ""}
       ${ui.view === "canon" ? renderCanon() : ui.view === "stats" ? renderStats() : ui.view === "grid" ? `<div class="chips" style="margin-bottom:14px">${f.map(([k, l, n]) => `<button class="chip" data-action="gfilter" data-v="${k}" aria-pressed="${ui.f === k}">${l}${n != null ? ` <span class="muted">${n}</span>` : ""}</button>`).join("")}</div>
@@ -71,7 +71,7 @@
   function strip() {
     const s = G.stats(lib());
     return `<div class="sstrip"><div><b>${s.total}</b><span>games</span></div><div><b>${s.done}</b><span>finished</span></div><div><b>${s.backlogDone}%</b><span>backlog cleared</span></div>
-      ${s.playedHours ? `<div><b>${s.playedHours} h</b><span>played</span></div>` : ""}<div><b>${s.avg != null ? "★ " + s.avg : "–"}</b><span>average</span></div><div><b>${s.ownedUnplayed}</b><span>owned, unplayed</span></div></div>`;
+      ${(() => { const h = Math.round(lib().visible().reduce((t, g) => t + G.timePlayed(g).mins, 0) / 60); return h ? `<div><b>${fmt(h)} h</b><span>played (Steam, HLTB, sessions)</span></div>` : ""; })()}<div><b>${s.avg != null ? "★ " + s.avg : "–"}</b><span>average</span></div><div><b>${s.ownedUnplayed}</b><span>owned, unplayed</span></div></div>`;
   }
   // 0.6.9: the backlog in hours, at the pace you finish games, and short owned games to finish next
   const fmt = n => Number(n || 0).toLocaleString(Saga.lang && Saga.lang() === "it" ? "it-IT" : "en-GB");
@@ -124,7 +124,7 @@
     for (const c of rows) { if (q && !G.norm(c.title).includes(q) && !G.norm(c.franchise).includes(q)) continue; const f = fr.get(c.franchise) || { name: c.franchise, have: 0, total: 0, miss: [], soon: [] }; if (c.unreleased) f.soon.push(c); else { f.total++; if (c.have) f.have++; else f.miss.push(c); } fr.set(c.franchise, f); }
     const list = [...fr.values()].filter(f => f.miss.length || f.soon.length).sort((a, b) => b.miss.length - a.miss.length || a.name.localeCompare(b.name));
     const all = rows.filter(c => !c.unreleased), have = all.filter(c => c.have).length;
-    const row = c => `<div class="item"><div class="grow" style="min-width:0"><b class="ell" style="display:block">${esc(c.title)}</b><div class="small muted">${esc([c.date || c.year || "", c.sub].filter(Boolean).join(" · "))}${c.unreleased ? " · <b>Not out yet</b>" : ""}</div></div>
+    const row = c => `<div class="item"><div class="grow" style="min-width:0"><b class="ell" style="display:block">${esc(c.title)}</b><div class="small muted">${esc([c.date || c.year || "", c.sub, window.Core && Core.canonFrom ? "from " + Core.canonFrom(c) : ""].filter(Boolean).join(" · "))}${c.unreleased ? " · <b>Not out yet</b>" : ""}</div></div>
       <button class="btn small" data-action="gcanonadd" data-t="${esc(c.title)}" data-y="${esc(c.date || c.year || "")}" data-i="${esc(c.imdb || "")}" data-f="${esc(c.franchise)}">${K.icon("plus")}Wishlist</button>
       <button class="iconbtn" data-action="gcanonno" data-t="${esc(c.title)}" data-y="${esc(c.year || "")}" data-i="${esc(c.imdb || "")}" data-f="${esc(c.franchise)}" aria-label="Not canon" title="Not canon">${K.icon("notcanon")}</button></div>`;
     const gaps = lib().visible().filter(g => !g.aiAt && (!g.date || !g.platform || g.hours == null)).length;
@@ -183,6 +183,8 @@
     const dl = d => (Saga.lang() === "it" ? K.when(d, "it") : G.longDate(d)); // January 1, 1900
     const facts = [["Release", g.date ? dl(g.date) + (g.date > t ? " (upcoming)" : "") : g.dateText || "Not announced"], ["Platform", g.platform], ["Owned on", g.owned],
       ["Remake", g.remake ? [g.remake.title, g.remake.platform, g.remake.date ? dl(g.remake.date) : ""].filter(Boolean).join(" · ") : ""],
+      ["Time played", (() => { const tp = G.timePlayed(g); return tp.mins ? `${G.hrs(tp.mins)}${tp.parts.length > 1 || tp.parts[0][0] !== "your sessions" ? ` (${tp.parts.map(p => `${p[0]} ${G.hrs(p[1])}`).join(" · ")})` : ""}` : ""; })()],
+      ["From", (() => { const so = G.sourceOf(g); return so.from + (so.linked.length ? ` · linked: ${so.linked.join(", ")}` : ""); })()],
       ["IMDb rating", g.imdbR ? `★ ${g.imdbR}` : ""], ["Time to beat", g.hours ? `${g.hours} h${g.hoursRemake ? ` (remake ${g.hoursRemake} h)` : ""}` : ""],
       ["Studio", g.dev || ""], ["Franchise", g.franchise], ["Multiverse", g.multiverse !== g.franchise ? g.multiverse : ""]].filter(x => x[1]);
     const pr = g.price;

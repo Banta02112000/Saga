@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.6.9.7";
+  const VERSION = "0.6.9.8";
   const AUTO_SYNC_HOURS = 12;
   Object.assign(C.PROFILES, (window.CANONSYNC_PRESET || {}).traktProfiles || {});
   const DEFAULT_PROFILE = (window.CANONSYNC_PRESET || {}).traktDefault || "PKCE (your own Trakt app)";
@@ -310,6 +310,10 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.6.9.8", ["Sync this title on a series now also brings its episodes: the ones you rated on IMDb (a rated episode is a watched one) and their ratings, plus Trakt's watched episodes and episode ratings.",
+      "Fixed: with more than 1,000 IMDb ratings, a sync reads only your newest 500, and the episodes among them were skipped, so an episode you'd just rated on IMDb wasn't ticked. They're kept now.",
+      "Every entry says where it came from: a title's sheet shows From: IMDb ratings, Trakt watched, an import…; canon entries show the IMDb or Trakt list, TMDB collection or AI scan that found them; a game shows the import it came from and what it's linked to.",
+      "Time played for games, where there is one: Steam's playtime and your own times from a HowLongToBeat export (Grouvee and Backloggd have none), plus the sessions you log. The biggest count is shown, never added up. New sort: Most played. Steam playtime is no longer taken as time to beat."]],
     ["0.6.9.7", ["Canon for games: Games › Missing lists the canon games you don't have yet, by series, checked against your Games tab (a remake you own counts for its original). One tap puts one on your wishlist; not-out-yet games are listed apart and not counted.",
       "The AI canon scan also checks the games in your Games tab that aren't on IMDb or Trakt.",
       "Fill missing details with AI (on a game, or for all in Games › Missing): OG release date, OG best platform, the remake (only one that tells the same story), its date and platform, and HLTB, with your rules. Only empty fields are filled; your list wins.",
@@ -681,6 +685,7 @@
       <div class="grow body">
         <div class="ttl">${opts.tag ? `<span class="tag">${esc(opts.tag)}</span>` : ""}<b>${esc(opts.title || c.title)}</b></div>
         <div class="sub">${medTag(c.medium)}${opts.sub ? `<span class="muted ellipsis">${opts.sub}</span>` : ""}</div>
+        ${kind === "canon" && c.origin ? `<div class="sub"><span class="muted small ellipsis">from ${esc(C.canonFrom(c))}</span></div>` : ""}
         ${bits.line || bits.badge ? `<div class="sub">${bits.badge}${bits.line ? `<span class="muted small ellipsis">${esc(bits.line)}</span>` : ""}</div>` : ""}
       </div>
       ${opts.trail || ""}
@@ -2169,6 +2174,18 @@
     const ix = originsIndex(), k = `${source}|${name || ""}`;
     return lib.all().filter(it => { if (yours(it)) return false; const o = originsOf(it, ix); return o.length > 0 && o.every(r => originKey(r) === k); });
   }
+  // 0.6.9.8: where a title came from, always shown: every site, sync and import that has it, and what you did here
+  const IMPORT_NAME = { myanimelist: "MyAnimeList", anilist: "AniList", tvtime: "TV Time", netflix: "Netflix", letterboxd: "Letterboxd", simkl: "Simkl", kitsu: "Kitsu", serializd: "Serializd", refract: "Refract", csv: "a CSV import", sync: "a sync", trakt: "Trakt", imdb: "IMDb", steam: "Steam", added: "you", manual: "you", itunes: "iTunes", plex: "Plex", jellyfin: "Jellyfin", justwatch: "JustWatch", goodreads: "Goodreads", storygraph: "StoryGraph" };
+  function sourceLine(it) {
+    const seen = new Set(), out = [];
+    const add = s => { if (s && !seen.has(s)) { seen.add(s); out.push(s); } };
+    for (const r of originsOf(it)) add(`${SRC_NAME[r.source] || r.source} ${r.kind === "list" && r.list_name ? `list “${r.list_name}”` : KIND_NAME[r.kind] || r.kind}`);
+    if (it.src && it.src !== "sync") add(`${IMPORT_NAME[String(it.src).toLowerCase()] || String(it.src).replace(/^./, c => c.toUpperCase())} import`.replace(/^you import$/, "added by you"));
+    if (it.ratedHere) add("your rating in Saga");
+    if (Object.keys(it.er || {}).length) add("episode ratings (IMDb/Trakt)");
+    if (it.mal) add("MyAnimeList link");
+    return `<p class="small muted srcline" style="margin:6px 0"><b>From:</b> ${out.length ? out.map(esc).join(" · ") : "added by you, or an import Saga didn't record"}</p>`;
+  }
   function whyHtml(it) {
     const o = originsOf(it), seen = new Set();
     const rows = o.filter(r => { const k = originKey(r); if (seen.has(k)) return false; seen.add(k); return true; });
@@ -2517,14 +2534,24 @@
     if (JSON.stringify([it.status, it.rating, it.watches]) !== before) said.push("rating and status updated from IMDb/Trakt");
     // 0.6.9.5: IMDb: your newest ratings read again (a title you just rated on IMDb is among them). Not on the
     // website: IMDb doesn't answer servers.
+    // 0.6.9.8: and for a series, the episodes you rated on IMDb (a rated episode is a watched one): the newest 500
+    // ratings are read, and every episode rating already stored for this series is applied
+    const epsBefore = it.type === "show" ? Object.keys(it.eps || {}).length : 0, erBefore = it.type === "show" ? Object.keys(it.er || {}).length : 0;
     if (db.get("imdb_user") && !window.__sagaWeb) {
       try {
         const tpl = { get: k => db.get(k, ""), set: (k, v) => db.set(k, v) };
-        const [groups] = await C.imdbRatings(Native.http, db.get("imdb_user"), 250, tpl);
+        const [groups] = await C.imdbRatings(Native.http, db.get("imdb_user"), it.type === "show" ? 500 : 250, tpl);
         for (const [k, items] of Object.entries(groups)) await db.addItemsAsync(items, "imdb", k, "");
+        C.keepImdbEps(db, Object.values(groups).flat());
         const mineI = db.items("imdb", ["rated"]).find(r => (it.imdb && r.imdb === it.imdb) || (r.norm === n0 && (!it.year || !r.year || Math.abs(r.year - it.year) <= 1)));
         if (mineI) { lib.adopt([mineI]); said.push(`IMDb: rated ${mineI.rating}`); }
       } catch (e) { said.push(`IMDb: ${String(e.message).slice(0, 90)}`); }
+    }
+    if (it.type === "show") {
+      let ieps = {}; try { ieps = JSON.parse(db.get("imdb_eps", "{}")) || {}; } catch (e) { ieps = {}; }
+      await adoptEpRatings(ieps);
+      const de = Object.keys(it.eps || {}).length - epsBefore, dr = Object.keys(it.er || {}).length - erBefore;
+      if (de > 0 || dr > 0) { lib.afterEps(it); said.push(`IMDb: ${de > 0 ? `${de} episode${de === 1 ? "" : "s"} ticked` : ""}${de > 0 && dr > 0 ? ", " : ""}${dr > 0 ? `${dr} episode rating${dr === 1 ? "" : "s"}` : ""}`); }
     }
     if (db.get("token") || db.get("username")) {
       try {
@@ -2658,6 +2685,7 @@
         ${libExtrasHtml(it)}
         ${sendButtons(it)}
         ${(() => { const f = friendsOn(it); return f.length ? `<p class="small" style="margin:8px 0">${f.map(x => `<b>${esc(x.name)}</b>: ${esc(LST[x.status] || x.status)}${x.rating ? ` · ★ ${x.rating}` : ""}`).join(" · ")}</p>` : ""; })()}
+        ${sourceLine(it)}
         ${whyHtml(it)}
         <button class="sheetbtn" data-action="libwhere">${icon("eye")}Where to watch and details</button>
         <button class="sheetbtn" data-action="open" data-url="${esc(it.imdb ? `https://www.imdb.com/title/${it.imdb}/` : `https://www.imdb.com/find/?q=${encodeURIComponent(it.title + " " + (it.year || ""))}`)}">${icon("open")}Open on IMDb</button>
@@ -3236,7 +3264,7 @@
     const rowHtml = (e, i) => `<div class="item${e.soon ? " soon" : ""}" style="gap:10px"><span class="small muted" style="width:22px;text-align:right">${i + 1}</span>
       <span class="uposter" ${e.attrs}>${e.img ? `<img loading="lazy" decoding="async" alt="" src="${esc(e.img)}">` : `<i>${esc((e.title || "?").slice(0, 1))}</i>`}</span>
       <div class="grow" ${e.attrs} style="min-width:0"><div class="row"><b class="grow ell">${esc(e.title)}</b>${e.done ? `<span class="pbadge">${icon("check")}</span>` : ""}</div>
-        <div class="small muted ell">${e.soon ? "<b>Not out yet</b> · " : ""}${esc({ movie: "Film", show: "Series", game: "Game", book: "Book" }[e.medium])}${e.sub ? " · " + esc(e.sub) : ""}${e.tier ? ` · <b>${esc(TIER_SHORT[e.tier])}</b>` : ""}</div></div>
+        <div class="small muted ell">${e.soon ? "<b>Not out yet</b> · " : ""}${esc({ movie: "Film", show: "Series", game: "Game", book: "Book" }[e.medium])}${e.sub ? " · " + esc(e.sub) : ""}${e.tier ? ` · <b>${esc(TIER_SHORT[e.tier])}</b>` : ""}${e.canon && C.canonFrom(e.canon) ? " · from " + esc(C.canonFrom(e.canon)) : ""}</div></div>
       ${u.edit ? `<button class="btn quiet small" data-action="utier" data-k="${esc(e.key)}" aria-label="Change tier">${esc(e.tier ? TIER_SHORT[e.tier] : "Tier")}</button>
         <button class="iconbtn" data-action="umove" data-k="${esc(e.key)}" data-v="-1" aria-label="Move up">↑</button><button class="iconbtn" data-action="umove" data-k="${esc(e.key)}" data-v="1" aria-label="Move down">↓</button>` : ""}</div>`;
     return `<section><div class="kicker">Universe</div><h2 style="font-size:30px;margin:6px 0">${esc(name)}</h2>
@@ -5062,5 +5090,5 @@
   const last = parseFloat(db.get("last_sync", "0")) || 0;
   const hasSources = db.get("username") || db.get("imdb_user") || db.get("canon_urls") || db.get("imdb_lists");
   if (db.get("auto_sync") === "1" && hasSources && Date.now() / 1000 - last > AUTO_SYNC_HOURS * 3600) { db.set("sync_open", "0"); doSync(); db.set("sync_open", "1"); }
-  window.__app = { fixListedWatched, webApi, webWhy, prefsIn, prefsOut, keysIn, keysText, notDropped, openLib, wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
+  window.__app = { libSyncOne, fixListedWatched, webApi, webWhy, prefsIn, prefsOut, keysIn, keysText, notDropped, openLib, wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
 })();

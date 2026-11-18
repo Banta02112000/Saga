@@ -1,9 +1,9 @@
 {
- "version": "0.6.9.7",
+ "version": "0.6.9.8",
  "shell": 1,
  "bundle": "bundle.gz",
  "sig": "bundle.sig",
- "size": 719196,
- "sha256": "38033c9a9368fb6fba8eb0c54dcaf2fe073dbc6e348556d1dd5d0a72b6a1d7f3",
+ "size": 723282,
+ "sha256": "815c080059e9a8b1c91001760ede9de6859cd09e6978227201bd29723ac1e4fd",
  "files": 32
 }

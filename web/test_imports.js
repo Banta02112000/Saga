@@ -46,7 +46,7 @@ assert(gv.target === "games" && gv.kind === "Grouvee" && gv.rows[0].status === "
 const bl = I.detect({ name: "backloggd.csv", text: "Game,Platform,Status,Rating\nOuter Wilds,PC,Completed,5\nElden Ring,PS5,Playing,\n" });
 assert(bl.target === "games" && bl.kind === "Backloggd" && bl.rows[0].status === "done" && bl.rows[0].rating === 10, "Backloggd-style CSV");
 const st = I.detect({ name: "games.xml", text: '<?xml version="1.0"?><gamesList><steamID64>1</steamID64><games><game><appID>1145360</appID><name><![CDATA[Hades]]></name><hoursOnRecord>61.2</hoursOnRecord></game></games></gamesList>' });
-assert(st.target === "games" && st.rows[0].steam === 1145360 && st.rows[0].hours === 61.2 && st.rows[0].owned === "PC (Steam)", "Steam library");
+assert(st.target === "games" && st.rows[0].steam === 1145360 && st.rows[0].mins === 3672 && st.rows[0].hours === null && st.rows[0].owned === "PC (Steam)", "Steam library");
 assert(I.steamProfileUrl("https://steamcommunity.com/id/banta/") === "https://steamcommunity.com/id/banta/games?tab=all&xml=1" && I.steamProfileUrl("76561197960287930").includes("/profiles/"), "Steam profile URL");
 assert(I.franchiseGuess("Hades II") === "Hades" && I.franchiseGuess("Mass Effect 2: Remastered") === "Mass Effect", "franchise guess");
 

@@ -103,7 +103,7 @@ const C = require("./core.js"), L = require("./library.js"), I = require("./impo
   const sh = async (m, u) => /xml=1/.test(u) ? { status: 200, body: "<?xml version='1.0'?><response><error><![CDATA[This feature is not available]]></error></response>" }
     : /games\/\?tab=all/.test(u) ? { status: 200, body: html } : { status: 404, body: "" };
   const rows = await I.steamLibrary(sh, "https://steamcommunity.com/id/someone/");
-  assert.deepStrictEqual(rows.map(r => [r.title, r.steam, r.hours]), [["Portal 2 & Co", 620, 12.6], ["Portal", 400, 0]]);
+  assert.deepStrictEqual(rows.map(r => [r.title, r.steam, r.mins]), [["Portal 2 & Co", 620, 754], ["Portal", 400, 0]]);
   await assert.rejects(I.steamLibrary(async () => ({ status: 200, body: '<div class="profile_private_info">This profile is private.</div>' }), "someone"), /private/);
   // Search with TMDB blocked: IMDb + TVmaze, merged
   const calls = [];
@@ -191,7 +191,7 @@ const C = require("./core.js"), L = require("./library.js"), I = require("./impo
     if (/GetOwnedGames/.test(u)) return { status: 200, body: JSON.stringify({ response: { game_count: 1, games: [{ appid: 620, name: "Portal 2", playtime_forever: 600 }] } }) };
     return { status: 404, body: "" }; };
   const rows = await I3.steamLibrary(h, "https://steamcommunity.com/id/somebody/", "KEY");
-  assert.deepStrictEqual(rows.map(r => [r.title, r.steam, r.hours]), [["Portal 2", 620, 10]]);
+  assert.deepStrictEqual(rows.map(r => [r.title, r.steam, r.mins]), [["Portal 2", 620, 600]]);
   assert.ok(/vanityurl=somebody/.test(calls[0]) && /steamid=76561198000000001/.test(calls[1]) && !calls.some(u => /steamcommunity/.test(u)));
   await assert.rejects(I3.steamLibrary(async () => ({ status: 200, body: "<html><title>Sign In</title></html>" }), "somebody"), /Steam Web API key/);
   console.log("5.4.1 TESTS PASSED");

@@ -547,3 +547,25 @@ D.update({"Missing": "Mancanti", "No canon games yet": "Ancora nessun gioco cano
 "Fill missing details with AI (release, platform, remake, HLTB)": "Completa i dettagli mancanti con l'IA (uscita, piattaforma, remake, HLTB)", "Fill missing details with AI": "Completa i dettagli mancanti con l'IA"})
 P += [(rf"You have {N} of {N} canon games \\({N}%\\), in {N} series\\. Your Games tab is what counts: IMDb lists are only a source\\.", "Hai $1 di $2 giochi canonici ($3%), in $4 serie. Conta la tua scheda Giochi: le liste IMDb sono solo una fonte."),
   (rf"Fill missing details with AI \\({N} games\\)", "Completa i dettagli mancanti con l'IA ($1 giochi)"), (rf"{N} games filled in(.*)", "$1 giochi completati$2")]
+
+# 0.6.9.8: sources and time played
+D.update({
+  "Most played": "Più giocati",
+  "Time played": "Tempo giocato",
+  "From": "Da",
+  "From:": "Da:",
+  "added before Saga kept track": "aggiunto prima che Saga lo registrasse",
+  "added by you, or an import Saga didn't record": "aggiunto da te, o da un'importazione che Saga non ha registrato",
+  "your rating in Saga": "il tuo voto in Saga",
+  "episode ratings (IMDb/Trakt)": "voti degli episodi (IMDb/Trakt)",
+  "MyAnimeList link": "collegamento MyAnimeList",
+  "added by you": "aggiunto da te",
+  "TMDB collection": "collezione TMDB",
+  "Gemini scan": "scansione Gemini",
+  "Claude scan": "scansione Claude",
+  "AI scan": "scansione AI",
+  "your file": "il tuo file",
+  "your canon list": "la tua lista canon",
+  "your sessions": "le tue sessioni",
+})
+P += [(rf"{N} h played", "$1 h giocate")]

@@ -306,7 +306,7 @@ window.BANTA_IT = {
 "Group into multiverses": "Raggruppa in multiversi",
 "Find entries per multiverse": "Trova le voci di ogni multiverso",
 "TMDB collections": "Collezioni TMDB",
-"Claude scan": "Scansione Claude",
+"Claude scan": "scansione Claude",
 "Show multiverses": "Mostra multiversi",
 "Hide multiverses": "Nascondi multiversi",
 "Stop after this batch": "Fermati dopo questo blocco",
@@ -812,7 +812,7 @@ window.BANTA_IT = {
 "Type": "Tipo",
 "Note": "Nota",
 "Type a title first": "Scrivi prima un titolo",
-"added by you": "aggiunta da te",
+"added by you": "aggiunto da te",
 "hidden": "nascosta",
 "Calendar": "Calendario",
 "Next in your canon": "Prossimi nel tuo canon",
@@ -1145,7 +1145,22 @@ window.BANTA_IT = {
 "Send my keys and sign-ins to my website": "Invia le mie chiavi e gli accessi al mio sito",
 "No canon games yet": "Ancora nessun gioco canonico",
 "Fill missing details with AI (release, platform, remake, HLTB)": "Completa i dettagli mancanti con l'IA (uscita, piattaforma, remake, HLTB)",
-"Fill missing details with AI": "Completa i dettagli mancanti con l'IA"
+"Fill missing details with AI": "Completa i dettagli mancanti con l'IA",
+"Most played": "Più giocati",
+"Time played": "Tempo giocato",
+"From": "Da",
+"From:": "Da:",
+"added before Saga kept track": "aggiunto prima che Saga lo registrasse",
+"added by you, or an import Saga didn't record": "aggiunto da te, o da un'importazione che Saga non ha registrato",
+"your rating in Saga": "il tuo voto in Saga",
+"episode ratings (IMDb/Trakt)": "voti degli episodi (IMDb/Trakt)",
+"MyAnimeList link": "collegamento MyAnimeList",
+"TMDB collection": "collezione TMDB",
+"Gemini scan": "scansione Gemini",
+"AI scan": "scansione AI",
+"your file": "il tuo file",
+"your canon list": "la tua lista canon",
+"your sessions": "le tue sessioni"
 };
 window.BANTA_IT_PAT = [
 [
@@ -2099,5 +2114,9 @@ window.BANTA_IT_PAT = [
 [
 "(\\d[\\d,.]*) games filled in(.*)",
 "$1 giochi completati$2"
+],
+[
+"(\\d[\\d,.]*) h played",
+"$1 h giocate"
 ]
 ];

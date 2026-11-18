@@ -1024,6 +1024,32 @@
     }
     return out.sort((a, b) => a.franchise.localeCompare(b.franchise) || String(a.date || a.year || "9999").localeCompare(String(b.date || b.year || "9999")));
   }
+  // 0.6.9.8: where a canon entry came from, in words: "IMDb list ls123 · Gemini scan"
+  function canonFrom(c) {
+    const src = String(c.src || "");
+    const one = o => o === "url" ? (/imdb\.com\/list\/(ls\d+)/.test(src) ? `IMDb list ${src.match(/(ls\d+)/)[1]}` : /trakt\.tv/.test(src) ? `Trakt list${/lists\/([^/?#]+)/.test(src) ? " " + decodeURIComponent(src.match(/lists\/([^/?#]+)/)[1]) : ""}` : src ? `canon list (${src.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)})` : "canon list")
+      : o === "tmdb" ? "TMDB collection" : o === "gemini" ? "Gemini scan" : o === "claude" ? "Claude scan" : o === "ai" ? "AI scan" : o === "csv" || o === "file" ? "your file" : o === "list" || o === "canonlist" ? "your canon list" : o || "";
+    return [...new Set(String(c.origin || "").split("+").map(one).filter(Boolean))].join(" · ");
+  }
+  // Episodes you rated on IMDb: kept by series, so the library can tick them (IMDb has no other episode progress).
+  function keepImdbEps(db, items) {
+    let m = {};
+    try { m = JSON.parse(db.get("imdb_eps", "{}")) || {}; } catch (e) { m = {}; }
+    const names = {};
+    for (const it of items) names[it.imdb] = it;
+    let n = 0;
+    for (const it of items) {
+      if (!it.ep) continue;
+      const [sid, sn, en, when] = it.ep;
+      const e = m[sid] = m[sid] || { t: (names[sid] || {}).title || "", y: (names[sid] || {}).year || null, eps: {} };
+      if (!e.t && names[sid]) e.t = names[sid].title;
+      if (!e.eps[`${sn}:${en}`]) { e.eps[`${sn}:${en}`] = /^\d{4}-\d\d-\d\d$/.test(when || "") ? when : 1; n++; }
+      if (it.rating) { e.r = e.r || {}; if (e.r[`${sn}:${en}`] !== it.rating) { e.r[`${sn}:${en}`] = it.rating; n++; } }
+    }
+    if (n) db.set("imdb_eps", JSON.stringify(m));
+    return n;
+  }
+
   function franchiseProgress(status) {
     const fr = new Map();
     for (const c of status) {
@@ -3680,24 +3706,7 @@ ${blocks.join("\n\n")}`;
       if (short && stored >= items.total * 0.97) return { msg: `${describe(items)} newest checked via in-app browser; your full history (${stored} of ${items.total}) is already stored from the CSV import`, part: false, got };
       return { msg: `${describe(items)} via ${route}${short ? ` (${items.length} of ${items.total} came through${items.isRatings ? "; import your IMDb ratings CSV once for the full history, after that a sync only needs the newest" : ""})` : ""}`, part: partial(route) || !!short, got };
     };
-    // Episodes you rated on IMDb: kept by series, so the library can tick them (IMDb has no other episode progress).
-    const keepEps = items => {
-      let m = {};
-      try { m = JSON.parse(db.get("imdb_eps", "{}")) || {}; } catch (e) { m = {}; }
-      const names = {};
-      for (const it of items) names[it.imdb] = it;
-      let n = 0;
-      for (const it of items) {
-        if (!it.ep) continue;
-        const [sid, sn, en, when] = it.ep;
-        const e = m[sid] = m[sid] || { t: (names[sid] || {}).title || "", y: (names[sid] || {}).year || null, eps: {} };
-        if (!e.t && names[sid]) e.t = names[sid].title;
-        if (!e.eps[`${sn}:${en}`]) { e.eps[`${sn}:${en}`] = /^\d{4}-\d\d-\d\d$/.test(when || "") ? when : 1; n++; }
-        if (it.rating) { e.r = e.r || {}; if (e.r[`${sn}:${en}`] !== it.rating) { e.r[`${sn}:${en}`] = it.rating; n++; } }
-      }
-      if (n) db.set("imdb_eps", JSON.stringify(m));
-      return n;
-    };
+    const keepEps = items => keepImdbEps(db, items);
     if (db.get("imdb_user")) {
       add("imdb", "IMDb ratings", async () => {
         // With thousands of ratings already stored, a sync reads only the newest 500 (IMDb lists them newest first,
@@ -3711,9 +3720,11 @@ ${blocks.join("\n\n")}`;
         const [groups, route] = await imdbRatings(http, db.get("imdb_user"), want, tplStore);
         for (const [k, items] of Object.entries(groups)) await db.addItemsAsync(items, "imdb", k, "");
         const all = Object.assign(Object.values(groups).flat(), { total: groups.total || 0, isRatings: true });
+        // 0.6.9.8: episode ratings kept from the newest batch too (they were skipped there, so an episode you'd just
+        // rated on IMDb wasn't ticked until a full read)
+        keepEps(all);
         if (groups.newest) return { msg: `newest ${all.length} ratings checked; the other ${Math.max(0, have - all.length)} are already stored (to catch ratings you removed on IMDb, use Settings › IMDb › Read all my ratings again)`, part: false, got: all.length };
         if (!want && groups.total && all.length >= groups.total * 0.98) db.set("imdb_full_at", String(Date.now()));
-        keepEps(all);
         return imdbRes(all, route);
       }, CONFIG.listTaskMs);
     }
@@ -3836,7 +3847,7 @@ ${blocks.join("\n\n")}`;
   const Core = {
     MEDIA, PROFILES, SECRET_RX, norm, parseYear, mediumFromImdb, mediumFromText, ratio, TitleIndex, Store,
     parseCsv, parseImdbText, importImdbCsv, importFranchiseFile, traktEntries, routeTraktFile, storeTrakt, importTraktZip,
-    breathe, jsonParts, BUSY: CONFIG_BUSY, consumed, Exclusion, canonStatus, canonStatusAsync, franchiseProgress, isUnreleased, gameCanon, upNext, missingCanon, discrepancies, computeStats,
+    breathe, jsonParts, BUSY: CONFIG_BUSY, consumed, Exclusion, canonStatus, canonStatusAsync, franchiseProgress, isUnreleased, gameCanon, keepImdbEps, canonFrom, upNext, missingCanon, discrepancies, computeStats,
     recommend, sourceHealth, personWorks, tmdbPosters, VMap, apiTitles, pageOrApi, gqlInfo, imdbReset: () => { gqlBlocked = false; }, imdbGql, gqlList, gqlRatings, imdbUr, authorizeUrl, exchangeCode, Trakt, traktSync, imdbList, imdbRatings, imdbWatchlist, imdbUserId, listIdFrom, walkTitles, browseTitles, pageExtract, pageProbe, probeFor, TMDB, collectionScan, season0Scan,
     CONFIG, AI_PRESETS, compatProvider, compatScan, localModels, serverBase, traktOne, traktEpRatings, parseLines, parseMvGroup, relevantNames, promptLine, netHint, robust, pool, details, titleInfo, justWatch, pickDates, dateSummary, bestOffer, cachedInfo, enrichInfo, platformRatings, ratingDiffs, withTimeout, watchProgress, continueWatching, testGemini, gemError, fillPosters, posterKey, aiState, resetAi, canonScan, claudeScan, claudeCall, claudeModels, rankClaudeModel, CLAUDE_DEFAULT, upcomingEpisodes, canonKeys, parseJsonArray, multiverseScan, collectionRows, refreshCollections, tvNext, upcomingEvents, computeAlerts, backgroundRun, fmtWhen, hashId, geminiState, resetGemini, mvGroup, mvExpand, multiverses, mvMap, mvAlias, mvPending, mvDone, geminiProvider, vpnOptions, bestVpn, worldFrom, worldCountries, jwQuery, flag: FLAGS, VPN_DEFAULT, manualScan, franchiseBatches, verifyPrompt, parseVerify, newsBatches, newsPrompt, parseCanonRows, franchiseName, releaseList, releaseKey, parseDate, seeds, rankGeminiModel, resolveGeminiModel, syncAll, sleep,
   };
