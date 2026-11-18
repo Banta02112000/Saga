@@ -19,7 +19,7 @@ $J8 -cp tools/d8-jvm.jar com.android.tools.r8.D8 --release --min-api 26 --output
 cp dexout/classes.dex app/
 cp -r res_gen/res app/res
 python3 scripts/gen_it.py
-cp web/index.html web/boot.js web/style.css web/saga.css web/core.js web/extras.js web/app.js web/library.js web/activity.js web/imports.js web/kit.js web/images.js web/games.js web/games-ui.js web/books-ui.js web/timeline.js web/bg.html web/bg.js app/assets/
+cp web/index.html web/boot.js web/style.css web/saga.css web/core.js web/extras.js web/app.js web/library.js web/activity.js web/imports.js web/kit.js web/images.js web/games.js web/games-ui.js web/books-ui.js web/timeline.js web/music.js web/bg.html web/bg.js app/assets/
 python3 scripts/stage_web.py app/assets $([ "$EDITION" = blank ] && echo --blank)
 if [ "$EDITION" = blank ]; then
   printf '/* Shareable build: no personal sources or keys. Everything is entered in Settings. */\nwindow.CANONSYNC_PRESET = {};\n' > app/assets/preset.js
@@ -27,7 +27,7 @@ if [ "$EDITION" = blank ]; then
   sed -i 's/client_id: "YOUR_TRAKT_CLIENT_ID_PKCE"/client_id: ""/; s/client_id: "YOUR_TRAKT_CLIENT_ID_OOB"/client_id: ""/' app/assets/core.js
   sed -i 's/PKCE \/ Public Client (App 000001)/PKCE (your own Trakt app)/; s/OAuth OOB (App 000002)/OAuth with secret (your own Trakt app)/' app/assets/core.js app/assets/app.js
 else
-  cp web/preset.js app/assets/
+  cp private/own_preset.js app/assets/preset.js
 fi
 cp -r web/fonts app/assets/fonts
 cp -r web/shared app/assets/shared

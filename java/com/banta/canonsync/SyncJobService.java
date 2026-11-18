@@ -29,7 +29,7 @@ public class SyncJobService extends JobService {
             s.setAllowFileAccess(true);
             web.addJavascriptInterface(new Bridge(this, null, web, this), "Android");
             web.addJavascriptInterface(new Shared(this, "canon-bg"), "Banta");
-            web.setWebViewClient(new WebViewClient());
+            web.setWebViewClient(new OtaClient(this));
             web.loadUrl("file:///android_asset/bg.html");
             timeout = new Finish(this);
             handler.postDelayed(timeout, 9 * 60 * 1000L); // stay inside the system's 10-minute job limit
@@ -75,6 +75,21 @@ public class SyncJobService extends JobService {
 
         public void run() {
             s.finishFromJs();
+        }
+    }
+
+    // 0.6.9.5: the background sync uses a screen update's files too
+    static class OtaClient extends android.webkit.WebViewClient {
+        final android.content.Context c;
+
+        OtaClient(android.content.Context c) {
+            this.c = c;
+        }
+
+        @Override
+        public android.webkit.WebResourceResponse shouldInterceptRequest(android.webkit.WebView view, android.webkit.WebResourceRequest request) {
+            android.webkit.WebResourceResponse r = Ota.serve(c, request.getUrl().toString());
+            return r != null ? r : super.shouldInterceptRequest(view, request);
         }
     }
 }

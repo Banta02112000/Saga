@@ -973,9 +973,12 @@
       if (mv && mv !== fr0 && !c.sub) c.sub = fr0;
       if (hidden.has(c.franchise)) continue;
       if (canonKeys(c).some(k => notCanon[k])) continue;
+      // 0.6.9.5: games aren't canon entries here (they're in the Games tab, and in the Doctor Who timeline)
+      if (c.medium === "Video Game") continue;
       if (!c.poster) { const pc = db.cacheGet(posterKey(c)); if (pc && pc.p) c.poster = pc.p; }
       c.state = ex.state(c, threshold);
       c.have = c.state !== "missing";
+      c.unreleased = isUnreleased(c);
       list.push(c);
       kept.set(c.norm, list);
       out.push(c);
@@ -983,11 +986,18 @@
     return out;
   }
 
+  // not out yet: a future date, a future year, or no date and no year. Not counted in progress (0.6.9.5).
+  function isUnreleased(c, today = new Date().toISOString().slice(0, 10)) {
+    if (c.state === "seen") return false; // you've seen it, so it's out
+    if (c.date) return c.date.length === 7 ? c.date > today.slice(0, 7) : c.date.length === 4 ? +c.date > +today.slice(0, 4) : c.date > today;
+    return !c.year || c.year > +today.slice(0, 4);
+  }
   function franchiseProgress(status) {
     const fr = new Map();
     for (const c of status) {
-      if (!fr.has(c.franchise)) fr.set(c.franchise, { name: c.franchise, have: 0, seen: 0, listed: 0, total: 0, missing: {} });
+      if (!fr.has(c.franchise)) fr.set(c.franchise, { name: c.franchise, have: 0, seen: 0, listed: 0, total: 0, upcoming: 0, missing: {} });
       const f = fr.get(c.franchise);
+      if (c.unreleased || (c.unreleased === undefined && isUnreleased(c))) { f.upcoming++; continue; }
       f.total++;
       if (c.state === "seen") f.seen++;
       else if (c.state === "listed") f.listed++;
@@ -1206,9 +1216,11 @@
   }
 
   const TRAKT = "https://api.trakt.tv";
+  // 0.6.9.5: the same in every copy of Saga (so screen updates can come from one place); a build with its own Trakt
+  // apps adds them through preset.js (CANONSYNC_PRESET.traktProfiles)
   const PROFILES = {
-    "PKCE / Public Client (App 000001)": { client_id: "YOUR_TRAKT_CLIENT_ID_PKCE", redirect: "https://trakt.tv", pkce: true },
-    "OAuth OOB (App 000002)": { client_id: "YOUR_TRAKT_CLIENT_ID_OOB", redirect: "urn:ietf:wg:oauth:2.0:oob", pkce: false },
+    "PKCE (your own Trakt app)": { client_id: "", redirect: "https://trakt.tv", pkce: true },
+    "OAuth with secret (your own Trakt app)": { client_id: "", redirect: "urn:ietf:wg:oauth:2.0:oob", pkce: false },
   };
 
   function authorizeUrl(clientId, redirect, challenge) {
@@ -1272,28 +1284,44 @@
     }
   }
 
-  // One title on Trakt: the episodes (or viewings) you logged there and the day of each. Needs a sign-in.
-  async function traktOne(http, clientId, token, it) {
-    if (!token) throw new Error("Sign in to Trakt in Settings first.");
+  // One title on Trakt: viewings (or episodes), your rating, and whether it's on your watchlist.
+  // 0.6.9.5: works without a sign-in too, from your public profile (username), like the full sync.
+  async function traktOne(http, clientId, token, it, username) {
+    if (!token && !username) throw new Error("Add your Trakt username (or sign in to Trakt) in Settings first.");
     const t = new Trakt(http, clientId, token);
-    let id = it.imdb || "";
-    if (!id) {
-      const kind = it.type === "show" ? "show" : "movie";
+    const kind = it.type === "show" ? "show" : "movie", kinds = kind + "s";
+    const me = token ? "/sync" : `/users/${encodeURIComponent(username)}`;
+    let hit = null;
+    if (it.imdb) { const f = await t.get(`/search/imdb/${encodeURIComponent(it.imdb)}`, { type: kind }); hit = ((Array.isArray(f) ? f : [])[0] || {})[kind] || null; }
+    if (!hit) {
       const found = await t.get(`/search/${kind}`, { query: it.title });
-      const hit = (Array.isArray(found) ? found : []).map(x => x[kind]).find(x => x && norm(x.title) === norm(it.title) && (!it.year || !x.year || Math.abs(x.year - it.year) <= 1));
-      if (!hit) throw new Error(`Trakt doesn't list "${it.title}"`);
-      id = hit.ids.imdb || hit.ids.slug || String(hit.ids.trakt);
+      hit = (Array.isArray(found) ? found : []).map(x => x[kind]).find(x => x && norm(x.title) === norm(it.title) && (!it.year || !x.year || Math.abs(x.year - it.year) <= 1)) || null;
     }
-    const out = { eps: {}, watches: [], id };
+    if (!hit || !hit.ids) throw new Error(`Trakt doesn't list "${it.title}"`);
+    const tid = hit.ids.trakt, id = hit.ids.imdb || hit.ids.slug || String(tid);
+    const out = { eps: {}, watches: [], id, rating: 0, epRatings: {}, watchlisted: false };
     const day = d => String(d || "").slice(0, 10);
-    if (it.type === "show") {
-      const p = await t.get(`/shows/${encodeURIComponent(id)}/progress/watched`, { hidden: "false", specials: "false" });
+    const same = x => x && x[kind] && x[kind].ids && x[kind].ids.trakt === tid;
+    if (kind === "show" && token) {
+      const p = await t.get(`/shows/${tid}/progress/watched`, { hidden: "false", specials: "false" });
       for (const sn of (p && p.seasons) || []) for (const e of sn.episodes || []) if (e.completed) out.eps[`${sn.number}:${e.number}`] = day(e.last_watched_at);
     } else {
-      const h = await t.get(`/sync/history/movies/${encodeURIComponent(id)}`);
-      for (const x of Array.isArray(h) ? h : []) if (x.watched_at) out.watches.push(day(x.watched_at));
+      const h = await t.get(`${me}/history/${kinds}/${tid}`);
+      for (const x of Array.isArray(h) ? h : []) {
+        if (!x.watched_at) continue;
+        if (kind === "show" && x.episode) { const k = `${x.episode.season}:${x.episode.number}`; if (x.episode.season > 0 && (!out.eps[k] || out.eps[k] < day(x.watched_at))) out.eps[k] = day(x.watched_at); }
+        else if (kind === "movie") out.watches.push(day(x.watched_at));
+      }
       out.watches.sort();
     }
+    const rated = await t.get(`${me}/ratings/${kinds}`);
+    const mine = (Array.isArray(rated) ? rated : []).find(same); if (mine) out.rating = +mine.rating || 0;
+    if (kind === "show") {
+      const er = await t.get(`${me}/ratings/episodes`);
+      for (const x of Array.isArray(er) ? er : []) if (x.show && x.show.ids && x.show.ids.trakt === tid && x.episode) out.epRatings[`${x.episode.season}:${x.episode.number}`] = +x.rating || 0;
+    }
+    const wl = await t.get(`${me}/watchlist/${kinds}`);
+    out.watchlisted = (Array.isArray(wl) ? wl : []).some(same);
     return out;
   }
 
@@ -3637,6 +3665,9 @@ ${blocks.join("\n\n")}`;
         // With thousands of ratings already stored, a sync reads only the newest 500 (IMDb lists them newest first,
         // and a changed rating moves to the top). Reading every page each time kept IMDb's page busy on the engine
         // the app shares, freezing the screen. The whole list is read only when asked (Settings › IMDb).
+        // 0.6.9.5: on the website there's no hidden browser, and IMDb answers servers with a challenge (HTTP 202):
+        // the phone reads your ratings, the website gets them from the phone's next website sync
+        if (typeof window !== "undefined" && window.__sagaWeb) return { msg: "left to the phone (IMDb doesn't answer servers): the phone's next sync brings them here" };
         const have = db.items("imdb", ["rated"]).length;
         const want = have >= 1000 && !opt.fullImdb ? 500 : 0;
         const [groups, route] = await imdbRatings(http, db.get("imdb_user"), want, tplStore);
@@ -3767,7 +3798,7 @@ ${blocks.join("\n\n")}`;
   const Core = {
     MEDIA, PROFILES, SECRET_RX, norm, parseYear, mediumFromImdb, mediumFromText, ratio, TitleIndex, Store,
     parseCsv, parseImdbText, importImdbCsv, importFranchiseFile, traktEntries, routeTraktFile, storeTrakt, importTraktZip,
-    breathe, jsonParts, BUSY: CONFIG_BUSY, consumed, Exclusion, canonStatus, canonStatusAsync, franchiseProgress, upNext, missingCanon, discrepancies, computeStats,
+    breathe, jsonParts, BUSY: CONFIG_BUSY, consumed, Exclusion, canonStatus, canonStatusAsync, franchiseProgress, isUnreleased, upNext, missingCanon, discrepancies, computeStats,
     recommend, sourceHealth, personWorks, tmdbPosters, VMap, apiTitles, pageOrApi, gqlInfo, imdbReset: () => { gqlBlocked = false; }, imdbGql, gqlList, gqlRatings, imdbUr, authorizeUrl, exchangeCode, Trakt, traktSync, imdbList, imdbRatings, imdbWatchlist, imdbUserId, listIdFrom, walkTitles, browseTitles, pageExtract, pageProbe, probeFor, TMDB, collectionScan, season0Scan,
     CONFIG, AI_PRESETS, compatProvider, compatScan, localModels, serverBase, traktOne, traktEpRatings, parseLines, parseMvGroup, relevantNames, promptLine, netHint, robust, pool, details, titleInfo, justWatch, pickDates, dateSummary, bestOffer, cachedInfo, enrichInfo, platformRatings, ratingDiffs, withTimeout, watchProgress, continueWatching, testGemini, gemError, fillPosters, posterKey, aiState, resetAi, canonScan, claudeScan, claudeCall, claudeModels, rankClaudeModel, CLAUDE_DEFAULT, upcomingEpisodes, canonKeys, parseJsonArray, multiverseScan, collectionRows, refreshCollections, tvNext, upcomingEvents, computeAlerts, backgroundRun, fmtWhen, hashId, geminiState, resetGemini, mvGroup, mvExpand, multiverses, mvMap, mvAlias, mvPending, mvDone, geminiProvider, vpnOptions, bestVpn, worldFrom, worldCountries, jwQuery, flag: FLAGS, VPN_DEFAULT, manualScan, franchiseBatches, verifyPrompt, parseVerify, newsBatches, newsPrompt, parseCanonRows, franchiseName, releaseList, releaseKey, parseDate, seeds, rankGeminiModel, resolveGeminiModel, syncAll, sleep,
   };

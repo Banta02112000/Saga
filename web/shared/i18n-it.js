@@ -1107,7 +1107,33 @@ window.BANTA_IT = {
 "Put back the built-in marks": "Rimetti i segni incorporati",
 "Lines like “12. The Aztecs (8)” under headings like “------S1------”, as you keep them in Samsung Notes. A rating marks the story done with that rating (the note's rating wins over Saga's); an empty () leaves Saga's mark alone; “-[Polly]”, ⤵️ and Avg. lines are ignored. A copy of everything is kept first.": "Righe come “12. The Aztecs (8)” sotto intestazioni come “------S1------”, come le tieni in Samsung Notes. Un voto segna la storia come fatta con quel voto (il voto della nota vince su quello di Saga); un () vuoto lascia com'è il segno in Saga; “-[Polly]”, ⤵️ e le righe Avg. vengono ignorati. Prima si tiene una copia di tutto.",
 "In Samsung Notes: open the note › ⋮ › Share › Text file, then pick it here. Or select all the text in the note, copy, and paste it below.": "In Samsung Notes: apri la nota › ⋮ › Condividi › File di testo, poi sceglilo qui. Oppure seleziona tutto il testo della nota, copialo e incollalo qui sotto.",
-"Or, if your copy of Saga came with your list built in: put back those marks, only where a story has no mark now.": "Oppure, se la tua copia di Saga ha la tua lista incorporata: rimetti quei segni, solo dove una storia ora non ne ha."
+"Or, if your copy of Saga came with your list built in: put back those marks, only where a story has no mark now.": "Oppure, se la tua copia di Saga ha la tua lista incorporata: rimetti quei segni, solo dove una storia ora non ne ha.",
+"Music": "Musica",
+"Top": "Classifiche",
+"Accounts": "Account",
+"Sync music": "Sincronizza musica",
+"Week": "Settimana",
+"Month": "Mese",
+"All time": "Sempre",
+"Artists": "Artisti",
+"Tracks": "Brani",
+"Albums": "Album",
+"4 weeks": "4 settimane",
+"6 months": "6 mesi",
+"Last 30 days": "Ultimi 30 giorni",
+"By hour (30 days)": "Per ora (30 giorni)",
+"Playing now": "In riproduzione",
+"Top tracks this week": "Brani più ascoltati questa settimana",
+"Sign in to Spotify": "Accedi a Spotify",
+"Sign out of Spotify": "Esci da Spotify",
+"Last.fm username": "Nome utente Last.fm",
+"Last.fm API key": "Chiave API Last.fm",
+"What you listen to, counted": "Cosa ascolti, contato",
+"Share with people on this website": "Condividi con le persone su questo sito",
+"Update by itself": "Aggiornati da solo",
+"Go back to the built-in screens": "Torna alle schermate incorporate",
+"Not out yet": "Non ancora uscito",
+"Sync this title (rating, watched, episodes, details)": "Sincronizza questo titolo (voto, visto, episodi, dettagli)"
 };
 window.BANTA_IT_PAT = [
 [
@@ -2033,5 +2059,21 @@ window.BANTA_IT_PAT = [
 [
 "(\\d[\\d,.]*) not found in the timeline",
 "$1 non trovate nella cronologia"
+],
+[
+"Saga (\\S+) is ready: it starts next time you open Saga",
+"Saga $1 è pronta: parte la prossima volta che apri Saga"
+],
+[
+"(\\d[\\d,.]*) not out yet",
+"$1 non ancora usciti"
+],
+[
+"Doctor Who: (\\S+) stories done(.*)",
+"Doctor Who: $1 storie fatte$2"
+],
+[
+"(\\d[\\d,.]*) scrobbles since (\\d[\\d,.]*)",
+"$1 ascolti dal $2"
 ]
 ];

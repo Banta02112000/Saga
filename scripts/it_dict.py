@@ -532,3 +532,11 @@ D.update({"Import my list from a note": "Importa la mia lista da una nota", "Pic
 "Or, if your copy of Saga came with your list built in: put back those marks, only where a story has no mark now.": "Oppure, se la tua copia di Saga ha la tua lista incorporata: rimetti quei segni, solo dove una storia ora non ne ha."})
 P += [(rf"{N} stories in the note, {N} rated: {N} new, {N} with a different rating \(the note's wins\), {N} already the same\. {N} without a rating are left as they are(.*)", "$1 storie nella nota, $2 con voto: $3 nuove, $4 con un voto diverso (vince quello della nota), $5 già uguali. $6 senza voto restano come sono$7"),
   (rf"{N} not found in the timeline", "$1 non trovate nella cronologia")]
+D.update({"Music": "Musica", "Overview": "Panoramica", "Top": "Classifiche", "Recent": "Recenti", "Accounts": "Account", "Sync music": "Sincronizza musica", "Week": "Settimana", "Month": "Mese", "Year": "Anno", "All time": "Sempre",
+"Artists": "Artisti", "Tracks": "Brani", "Albums": "Album", "4 weeks": "4 settimane", "6 months": "6 mesi", "Last 30 days": "Ultimi 30 giorni", "By hour (30 days)": "Per ora (30 giorni)", "Playing now": "In riproduzione",
+"Top tracks this week": "Brani più ascoltati questa settimana", "Sign in to Spotify": "Accedi a Spotify", "Sign out of Spotify": "Esci da Spotify", "Last.fm username": "Nome utente Last.fm", "Last.fm API key": "Chiave API Last.fm",
+"What you listen to, counted": "Cosa ascolti, contato", "Share with people on this website": "Condividi con le persone su questo sito", "Films & series": "Film e serie", "Doctor Who": "Doctor Who",
+"Update by itself": "Aggiornati da solo", "Go back to the built-in screens": "Torna alle schermate incorporate", "Not out yet": "Non ancora uscito",
+"Sync this title (rating, watched, episodes, details)": "Sincronizza questo titolo (voto, visto, episodi, dettagli)"})
+P += [(rf"Saga (\S+) is ready: it starts next time you open Saga", "Saga $1 è pronta: parte la prossima volta che apri Saga"), (rf"{N} not out yet", "$1 non ancora usciti"),
+  (r"Doctor Who: (\S+) stories done(.*)", "Doctor Who: $1 storie fatte$2"), (rf"{N} scrobbles since {N}", "$1 ascolti dal $2")]

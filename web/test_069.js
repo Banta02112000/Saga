@@ -112,6 +112,21 @@ const resp = (b, status = 200) => ({ status, headers: {}, body: typeof b === "st
       assert.ok(ad.version && ad.people.length === 2 && ad.people.find(p => p.name === "pal").shares && ad.people.find(p => p.name === "me").calendar && ad.people.find(p => p.name === "pal").at > 0, JSON.stringify(ad).slice(0, 300));
       assert.strictEqual((await api("/api/admin", as(his))).status, 403, "only the owner");
       console.log("ok  website: calendar address, sending to friends, inbox, activity, owner's page");
+      // 0.6.9.5: sharing chosen per person and per part
+      fs.writeFileSync(path.join(data, "users", "pal", "games.json"), JSON.stringify({ games: [{ id: "g1", title: "Made Up Quest", status: "done", rating: 8, plays: ["2026-11-12"] }] }));
+      fs.writeFileSync(path.join(data, "users", "pal", "dw.json"), JSON.stringify({ works: { a: { done: true, rating: 8 }, b: { done: true, rating: 6 }, c: { done: true } } }));
+      const g0 = await (await api("/api/share", as(his))).json();
+      assert.deepStrictEqual([g0.on, g0.to, g0.people], [true, null, ["me"]], "on, the old way (everyone), and who else is here");
+      await api("/api/share", as(his, { method: "POST", body: JSON.stringify({ on: true, to: { me: { lib: false, games: true, books: false, dw: true }, stranger: { lib: true } } }) }));
+      const sh2 = await (await api("/api/share", as(his))).json();
+      assert.deepStrictEqual(sh2.to, { me: { lib: false, games: true, books: false, dw: true } }, "only real people kept");
+      const pal2 = (await (await api("/api/people", as(mine))).json()).people.find(x => x.name === "pal");
+      assert.ok(pal2 && !pal2.lib.length && pal2.games.length === 1 && pal2.dw.done === 3 && pal2.dw.avg === 7, JSON.stringify(pal2).slice(0, 300));
+      assert.ok(!pal2.recent.some(x => x.title === "Heat") && pal2.recent.some(x => x.title === "Made Up Quest"), "activity only from what's shared: " + JSON.stringify(pal2.recent));
+      await api("/api/share", as(his, { method: "POST", body: JSON.stringify({ on: true, to: { me: {} } }) }));
+      assert.ok(!(await (await api("/api/people", as(mine))).json()).people.some(x => x.name === "pal"), "nothing shared with me: pal isn't listed");
+      assert.strictEqual((await api("/api/send", as(mine, { method: "POST", body: JSON.stringify({ to: "pal", item }) }))).status, 403, "sending needs sharing both ways");
+      console.log("ok  sharing per person and per part (films and series, games, books, Doctor Who)");
     } finally { srv.kill(); }
   }
   // ---- AniList two-way: sign-in token from the address, what changed in Saga goes back

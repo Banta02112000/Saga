@@ -187,6 +187,8 @@ const mock = () => {
   const after = await canonCap();
   console.log(`hero: "${before}" -> "${after}"`);
   if (before === after) throw new Error("mark as seen did not advance");
+  // undone again: the details test below opens this same title from the missing list
+  await page.evaluate(() => { for (const [k, x] of [...__app.db.exclusionsMap]) if (/Jedi/.test(x.title || k)) __app.db.removeExclusion(k); __app.invalidate(); });
 
   // Gemini scan from Missing tab
   await page.evaluate(() => __app.go("missing"));
@@ -206,10 +208,11 @@ const mock = () => {
   await page.click('[data-action=mview][data-v=franchise]');
   await page.click('.fr [data-f="The Matrix"]');
   await page.screenshot({ path: `${OUT}/3-missing.png`, fullPage: true });
-  await page.fill('[data-input=missingQ]', "jedi");
+  if ((await page.textContent("#missingList")).includes("Enter the Matrix")) throw new Error("a game is listed as missing canon (0.6.9.5: games stay in the Games tab)");
+  await page.fill('[data-input=missingQ]', "resurrections");
   await page.waitForTimeout(300);
   const filtered = await page.textContent("#missingList");
-  if (!filtered.includes("Fallen Order") || filtered.includes("Animatrix")) throw new Error("search filter broken");
+  if (!filtered.includes("Resurrections") || filtered.includes("Animatrix")) throw new Error("search filter broken");
   await page.fill('[data-input=missingQ]', "");
   await page.waitForTimeout(300);
   await page.click('[data-action=copy]');

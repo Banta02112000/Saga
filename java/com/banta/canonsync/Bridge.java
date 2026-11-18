@@ -35,7 +35,7 @@ import java.util.zip.ZipInputStream;
 
 public class Bridge {
     static final int PICK = 4242;
-    static final String UA = "Saga/0.6.9.4 (Android)";
+    static final String UA = "Saga/0.6.9.5 (Android)";
     final Context ctx;
     final MainActivity act;       // null when running inside the background job
     final SyncJobService job;     // null in the app
@@ -298,6 +298,44 @@ public class Bridge {
 
     static String safe(String n) {
         return n.replaceAll("[^A-Za-z0-9._-]", "_");
+    }
+
+    // ---------- 0.6.9.5: screen updates without an APK (see Ota.java) ----------
+    @JavascriptInterface
+    public String otaInfo() {
+        return Ota.info(ctx);
+    }
+
+    @JavascriptInterface
+    public void otaOk() {
+        Ota.started(ctx);
+    }
+
+    @JavascriptInterface
+    public void otaReset() {
+        Ota.reset(ctx);
+    }
+
+    @JavascriptInterface
+    public void otaInstall(final String id, final String bundleUrl, final String sigUrl) {
+        new Thread(new OtaTask(this, id, bundleUrl, sigUrl)).start();
+    }
+
+    static class OtaTask implements Runnable {
+        final Bridge b;
+        final String id, bundleUrl, sigUrl;
+
+        OtaTask(Bridge b, String id, String bundleUrl, String sigUrl) {
+            this.b = b;
+            this.id = id;
+            this.bundleUrl = bundleUrl;
+            this.sigUrl = sigUrl;
+        }
+
+        public void run() {
+            String r = Ota.install(b.ctx, bundleUrl, sigUrl);
+            b.deliver("__httpDone", id, "{\"status\":200,\"value\":" + org.json.JSONObject.quote(r) + "}");
+        }
     }
 
     // ---------- http ----------
@@ -1146,7 +1184,7 @@ public class Bridge {
 
     @JavascriptInterface
     public String version() {
-        return "0.6.9.4";
+        return "0.6.9.5";
     }
 
     // ---------- background sync & notifications ----------

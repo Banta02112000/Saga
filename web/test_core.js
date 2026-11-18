@@ -70,7 +70,8 @@ async function main() {
     { franchise: "TWD", title: "Walking Dead: Red Machete", year: "2012", medium: "Special" },
   ]);
   db.replaceCanon("tmdb", [{ franchise: "Matrix", title: "The Matrix Reloaded", year: "2003", medium: "Movie", imdb: "tt0234215" }]);
-  eqSet(C.missingCanon(db, 0.8).map(c => c.title), ["The Matrix Resurrections", "Enter the Matrix", "Alien"]);
+  // 0.6.9.5: a game isn't a canon entry here (it's in the Games tab)
+  eqSet(C.missingCanon(db, 0.8).map(c => c.title), ["The Matrix Resurrections", "Alien"]);
   db.addExclusion("Enter the Matrix", 2003, "Video Game");
   assert.ok(!C.missingCanon(db, 0.8).some(c => c.title === "Enter the Matrix"));
   const cnt = db.counters();
@@ -154,11 +155,11 @@ async function main() {
   db.replaceCanon("gemini", [{ franchise: "The Matrix", title: "The Matrix Resurrections", year: "2021", medium: "Movie" },
                              { franchise: "The Matrix", title: "Enter the Matrix", year: "2003", medium: "Video Game" }]);
   const st = C.canonStatus(db, 0.9);
-  assert.deepStrictEqual(st.map(c => c.title).sort(), ["Enter the Matrix", "The Matrix", "The Matrix Resurrections"]);
+  assert.deepStrictEqual(st.map(c => c.title).sort(), ["The Matrix", "The Matrix Resurrections"]); // the game stays in Games
   eqSet(new Set(st.map(c => c.franchise)), ["The Matrix"]);
   assert.ok(st.find(c => c.title === "The Matrix Resurrections").origin.includes("+"));
   const s = C.computeStats(db, st);
-  assert.ok(s.total >= 5 && s.avg_rating && s.canon_have === 2 && s.franchises[0].total === 3, JSON.stringify(s.franchises));
+  assert.ok(s.total >= 5 && s.avg_rating && s.canon_have === 1 && s.franchises[0].total === 2, JSON.stringify(s.franchises));
   assert.ok(s.overlap.both >= 1 && s.decades.size);
 
   // Scrapers + syncAll
@@ -338,7 +339,7 @@ async function main() {
   assert.strictEqual(r6.ok, 3, r6.report);
   assert.ok(r6.report.includes("IMDb ratings: 2 titles (1 series) via in-app browser"), r6.report);
   assert.ok(browsed.every(u => !u.includes("page=")), "no ?page= requests any more");
-  assert.strictEqual(C.canonStatus(db6).length, 3);
+  assert.strictEqual(C.canonStatus(db6).length, 2); // the game on that list stays in Games
 
   // v1.4: seen / listed / missing, list titles seed the scans, release order, incremental Gemini
   assert.strictEqual(C.parseDate("2010-07-16T00:00:00.000Z"), "2010-07-16");
@@ -365,10 +366,10 @@ async function main() {
   assert.strictEqual(state("Alien"), "listed");
   assert.strictEqual(state("The Empire Strikes Back"), "missing");
   const sw = C.franchiseProgress(st7).find(f => f.name === "Star Wars");
-  assert.deepStrictEqual([sw.seen, sw.listed, sw.total], [1, 1, 6]);
+  assert.deepStrictEqual([sw.seen, sw.listed, sw.total, sw.upcoming], [1, 1, 4, 1], "a game isn't counted, nor a film not out yet: " + JSON.stringify(sw));
   const rl = C.releaseList(st7, "2026-10-29");
   assert.deepStrictEqual(rl.released.map(c => [c.title, !!c.upNext]),
-    [["The Empire Strikes Back", true], ["Aliens", true], ["The Clone Wars", false], ["Star Wars Jedi: Fallen Order", false]]);
+    [["The Empire Strikes Back", true], ["Aliens", true], ["The Clone Wars", false]]);
   assert.deepStrictEqual(rl.upcoming.map(c => c.title), ["Star Wars: Episode X"]);
   assert.ok(!rl.released.concat(rl.upcoming).some(c => c.title === "Return of the Jedi" || c.title === "Alien"), "listed titles must not be missing");
   assert.deepStrictEqual(C.upNext(st7).map(c => c.title), ["Aliens", "The Empire Strikes Back"]);

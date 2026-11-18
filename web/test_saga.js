@@ -288,7 +288,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.6.9.4", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.6.9.5", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();
@@ -497,9 +497,10 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     __app.invalidate(); __app.ui.mv = "Alien"; __app.go("mv"); __app.render();
     for (let i = 0; i < 60 && !/Films/.test(document.querySelector("#view").textContent); i++) await new Promise(r => setTimeout(r, 50)); // 0.6.2: redrawn once the new canon check is in
     const t1 = document.querySelector("#view").textContent;
-    return { ok: /Universe/.test(t1) && /Films/.test(t1) && /Games/.test(t1) && /Alien: Isolation/.test(t1), n: __app.universeEntries("Alien").length, gid: g.id, ov: document.querySelector("#overlay").innerHTML.length, t: t1.slice(0, 300), sec: __app.ui.sec };
+    const imgs = document.querySelectorAll("#view .uposter").length;
+    return { ok: /Universe/.test(t1) && /Alien/.test(t1) && !/Alien: Isolation/.test(t1) && imgs >= 3, n: __app.universeEntries("Alien").length, gid: g.id, ov: document.querySelector("#overlay").innerHTML.length, t: t1.slice(0, 300), sec: __app.ui.sec };
   });
-  ok(uv.ok && uv.n === 4, "universe dashboard: films and games together with bars per medium: " + JSON.stringify(uv));
+  ok(uv.ok && uv.n === 3, "universe dashboard: films with posters; games stay in the Games tab (0.6.9.5): " + JSON.stringify(uv));
   await pg.click('[data-action="uedit"]');
   await pg.click('[data-action="utier"][data-k^="canon:"]');
   const tierT = await A(() => document.querySelector("#view").textContent);
@@ -513,7 +514,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   ok(after[0] === before[1] && after[1] === before[0] && await A(() => __app.ui.u.mode === "custom"), "moving an entry makes your own order: " + JSON.stringify([before, after]));
   await pg.click('[data-action="umode"][data-v="release"]');
   const rel = await A(() => [...document.querySelectorAll("#view .listcard .item b.grow")].map(b => b.textContent));
-  ok(rel[0] === "Alien" && rel.indexOf("Alien: Isolation") === rel.length - 1, "release order puts the 2014 game last: " + rel);
+  ok(rel[0] === "Alien" && rel[rel.length - 1] === "Prometheus", "release order: " + rel);
   const rl = await A(() => {
     const r1 = __app.applyRule({ media: ["game"], status: ["want"], maxHours: 12, ownedOnly: false, sort: "short" });
     const r2 = __app.applyRule({ minRating: 9 });
@@ -802,6 +803,13 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     press("webadmin"); await wait(() => /People/.test(document.querySelector("#overlay").textContent));
     const av = document.querySelector("#overlay").textContent;
     out.admin = /Saga 0\.6\.9/.test(av) && /pal/.test(av) && /never/.test(av) && /Less than 1 GB free/.test(av) && /auto-update\.sh on/.test(av);
+    // 0.6.9.5: sharing per person and part
+    { let posted = null;
+      window.__webSrv = (m, url, body) => /api\/share/.test(url) ? (m === "POST" ? (posted = JSON.parse(body), { status: 200, body: JSON.stringify({ ok: true, people: ["pal"] }) }) : { status: 200, body: JSON.stringify({ on: true, to: null, people: ["pal"] }) }) : /api\/people/.test(url) ? { status: 200, body: '{"me":"me","people":[]}' } : prev(m, url, body);
+      __app.ui.share = null; __app.ui.setGroup = "*"; __app.go("settings"); await wait(() => document.querySelector('[data-action="sharepart"][data-p="pal"][data-k="dw"]'));
+      press("sharepart", { p: "pal", k: "dw" }); await wait(() => posted);
+      out.share = posted.on === true && posted.to.pal.dw === true && posted.to.pal.lib === true && document.querySelector('[data-action="sharepart"][data-k="dw"]').getAttribute("aria-pressed") === "true";
+      out.shareD = JSON.stringify(posted); }
     window.__webSrv = prev; __app.db.set("web_sync_url", ""); document.querySelector("#overlay").innerHTML = "";
     // Steam numbers on a game, backlog card in Games › Stats
     const g = __app.games.add({ title: "Steam Numbers", steam: 99001, hours: 12, owned: "PC" }, "backlog").game; g.steamMins = 750; g.steamLast = "2026-11-12"; g.ach = { got: 3, total: 4 }; __app.games.save();
@@ -810,6 +818,16 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     document.querySelector("#overlay").innerHTML = "";
     __app.go("games"); press("gview", { v: "stats" }); out.backlog = /Backlog/.test(document.querySelector("#view").textContent) && /h to beat/.test(document.querySelector("#view").textContent);
     press("gview", { v: "grid" });
+    // 0.6.9.5: the Music section: empty, then with Last.fm numbers
+    { __app.go("music"); const e0 = document.querySelector("#view").textContent;
+      const now = Math.floor(Date.now() / 1000);
+      Saga.Native.save("music.json", JSON.stringify({ info: { playcount: 4321, artists: 12, tracks: 40, since: 1500000000 }, recent: [{ artist: "Made Up Band", track: "Tune", at: now - 3600 }, { artist: "Made Up Band", track: "Tune 2", at: now - 7200 }],
+        top: { "7day": { artists: [{ name: "Made Up Band", plays: 2 }], tracks: [{ name: "Tune", artist: "Made Up Band", plays: 1 }], albums: [] } }, lastfmAt: Date.now() }));
+      __app.db.set("lastfm_user", "someone"); __app.db.set("lastfm_key", "k"); Kit.mods.music.reset(); __app.render();
+      const e1 = document.querySelector("#view").textContent, nb = document.querySelectorAll("#view .mbars .mb").length;
+      press("muview", { v: "top" }); press("muperiod", { v: "7day" }); const e2 = document.querySelector("#view").textContent;
+      out.music = /Connect Last\.fm/.test(e0) && /4,321/.test(e1) && /Last 30 days/.test(e1) && nb >= 54 && /Made Up Band/.test(e2) && !!document.querySelector('#tabs [data-sec="music"]');
+      out.musicD = JSON.stringify([/Connect Last\.fm/.test(e0), /4,321/.test(e1), /Last 30 days/.test(e1), document.querySelectorAll("#view .mbars .mb").length, /Made Up Band/.test(e2), !!document.querySelector('#tabs [data-sec="music"]'), e0.slice(0, 80)]); Kit.mods.music.ui.view = "overview"; __app.go("home"); }
     // 0.6.9.3: the Doctor Who list from a note: check first, then import
     { press("dwimport"); await wait(() => document.querySelector("#dwnote"));
       document.querySelector("#dwnote").value = "-----S1-----\n1. An Unearthly Child (9)\n2. The Daleks (8) -[Susan]\n3. Nowhere Story (5)\n";
@@ -839,6 +857,8 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     out.fixd = JSON.stringify(fx);
     return out;
   });
+  ok(n69.music, "Music section: connect card, then Last.fm numbers, bars and top lists: " + n69.musicD);
+  ok(n69.share, "sharing chosen per person and part: " + n69.shareD);
   ok(n69.dwPrev && n69.dwDone, "Doctor Who list from a note: checked, then imported, with a copy first: " + n69.dwD);
   ok(n69.webAddr, "website address without https:// works; a :8443 failure explains itself: " + n69.webAddrD);
   ok(n69.fix, "listed-only titles and games marked watched by an old import go back to To watch / Wishlist, once, with a copy first: " + n69.fixd);

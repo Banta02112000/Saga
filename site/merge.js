@@ -1,4 +1,4 @@
-/* Saga: three-way merge of one data file (canonsync.json, library.json, games.json, books.json, dw.json).
+/* Saga: three-way merge of one data file (canonsync.json, library.json, games.json, books.json, dw.json, music.json).
    base = the version both sides last agreed on, mine = the phone's, theirs = the server's (the website's).
    Per entry: changed on one side only → that side; changed on both → merged further down, and where they really
    differ the phone's wins. Entries removed on one side and untouched on the other stay removed. Lists of
@@ -10,6 +10,7 @@ const KEYS = {
   "library.json": { outbox: x => `${x.id}|${x.ts}|${x.op}|${x.s || ""}|${x.e || ""}` },
   "games.json": { games: x => x.id },
   "books.json": { books: x => x.id },
+  "music.json": { recent: x => `${x.at}|${x.track}|${x.artist}` },
 };
 const isObj = v => v && typeof v === "object" && !Array.isArray(v);
 const same = (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b);

@@ -55,6 +55,7 @@ public class MainActivity extends Activity {
         web.addJavascriptInterface(bridge, "Android");
         web.addJavascriptInterface(new Shared(this, appName()), "Banta");
         web.setWebViewClient(new LocalOnly(this));
+        Ota.starting(this);
         web.setWebChromeClient(new Chrome(this));
         String h = tabHash(getIntent());
         web.loadUrl("file:///android_asset/" + (h.length() > 1 ? "index.html" + h : startPage()));
@@ -137,6 +138,13 @@ public class MainActivity extends Activity {
 
         LocalOnly(MainActivity a) {
             this.a = a;
+        }
+
+        // 0.6.9.5: the app's files from a screen update, when there is one
+        @Override
+        public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view, android.webkit.WebResourceRequest request) {
+            android.webkit.WebResourceResponse r = Ota.serve(a, request.getUrl().toString());
+            return r != null ? r : super.shouldInterceptRequest(view, request);
         }
 
         @Override

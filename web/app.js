@@ -2,9 +2,10 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.6.9.4";
+  const VERSION = "0.6.9.5";
   const AUTO_SYNC_HOURS = 12;
-  const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
+  Object.assign(C.PROFILES, (window.CANONSYNC_PRESET || {}).traktProfiles || {});
+  const DEFAULT_PROFILE = (window.CANONSYNC_PRESET || {}).traktDefault || "PKCE (your own Trakt app)";
 
   // ---- security: the page runs under a Content-Security-Policy (index.html), so no inline handlers anywhere.
   // Broken pictures are handled here: data-fb="rm" removes the picture, "ph" puts the initials placeholder in its place.
@@ -103,10 +104,16 @@
     if (A && A.browse) http.browse = browse;
     http.cancelBrowse = () => { try { if (A && A.cancelBrowse) A.cancelBrowse(""); } catch (e) { /* older app */ } };
 
+    // 0.6.9.5: a screen update (signed bundle), downloaded and checked by the Android side
+    function otaInstall(bundleUrl, sigUrl) {
+      if (!(A && A.otaInstall)) return Promise.resolve("error:this app can't take screen updates");
+      return new Promise(res => { const id = "o" + (++seq); pending.set(id, r => res(r && r.value != null ? String(r.value) : "error:" + ((r && r.error) || "no answer"))); A.otaInstall(id, bundleUrl, sigUrl); });
+    }
+    const otaInfo = () => { try { return A && A.otaInfo ? JSON.parse(A.otaInfo()) : null; } catch (e) { return null; } };
     const mem = {};
     return {
       native: !!A,
-      http, pick, browse, saveAs,
+      http, pick, browse, saveAs, otaInstall, otaInfo,
       openInApp: u => (A && A.openInApp ? A.openInApp(u) : window.open(u, "_blank")),
       status: (title, text, pct, ongoing) => (A && A.status ? A.status(title, text, Math.round(pct), !!ongoing) : null),
       clearStatus: () => (A && A.clearStatus ? A.clearStatus() : null),
@@ -243,6 +250,7 @@
   const pct = f => `${Math.round(f * 100)}%`;
 
   const ICON = {
+    music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
     share: '<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.3M8.2 13.2l7.6 4.3"/>',
     x: '<path d="M6 6l12 12M18 6 6 18"/>',
     undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
@@ -279,11 +287,11 @@
 
   let toastTimer = null;
   let undoFn = null;
-  function toast(msg, undo) {
+  function toast(msg, undo, label) {
     const t = $("#toast");
-    undoFn = typeof undo === "function" ? undo : null;
+    undoFn = typeof undo === "function" && label !== "" ? undo : null;
     t.textContent = msg;
-    if (undoFn) { const b = document.createElement("button"); b.className = "undo"; b.dataset.action = "undo"; b.textContent = "Undo"; t.appendChild(b); }
+    if (undoFn) { const b = document.createElement("button"); b.className = "undo"; b.dataset.action = "undo"; b.textContent = label || "Undo"; t.appendChild(b); }
     t.classList.add("show");
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { t.classList.remove("show"); undoFn = null; }, undoFn ? 10000 : 3200); // 0.6.1: 10 s to undo
@@ -300,6 +308,12 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.6.9.5", ["Updates without installing: Saga downloads new screens and features by itself (checked against Saga's own signing key) and uses them the next time you open it (Settings › About). Only changes to the Android part still need an APK. This version is the first that can do it.",
+      "Music: a new section with your listening from Last.fm (full history and play counts from any app that scrobbles) and Spotify (top artists and tracks, last 50 plays).",
+      "Sync this title (on a film or series): your rating, viewings, episodes, episode ratings and watchlist from Trakt (no sign-in needed, your public profile is enough), and your newest IMDb ratings.",
+      "Sharing on your Saga website: choose for each person what they see: films and series, games, books, Doctor Who.",
+      "Canon: entries not out yet aren't counted in your progress (shown as Not out yet), and games aren't canon entries any more (they stay in the Games tab and the Doctor Who timeline). Posters in the universe list.",
+      "Website: syncs from the website reach Trakt again (Trakt turned away the server's default name, so your latest episodes didn't arrive). IMDb ratings are left to the phone there. A tidier layout on big screens."]],
     ["0.6.9.4", ["Your Saga website no longer reloads itself: when the phone syncs or another page saves, the changes appear in place (two open pages used to keep setting each other off). A save that changes nothing no longer disturbs open pages.", "Import: an IMDb list file you pick goes into the library as To watch (it used to stay out unless the list's name looked like a watchlist), and the games in an IMDb file go to Games straight away.", "Every import format is now checked together in one test: IMDb ratings, watchlist and lists, Trakt, Letterboxd, MyAnimeList, Simkl, Netflix, TV Time, your own CSV, Goodreads, Steam, HowLongToBeat, Grouvee, Backloggd.", "The website reads friends' libraries once until they change, instead of on every visit."]],
     ["0.6.9.3", ["Doctor Who › Import my list from a note: your list as you keep it in Samsung Notes (Share › Text file, or copy and paste). Check first shows what changes; a rating in the note wins, an empty () leaves Saga's mark alone; a copy is kept first.", "Doctor Who › Put back the built-in marks: the marks your copy of Saga came with, only where a story has none now."]],
     ["0.6.9.2", ["Your Saga website: the address works typed without https://, and a failed sync says why (an address ending in :8443 works only with Tailscale on; a name the phone can't find means Funnel is off; a refused sync key).", "Your own AI server: an address typed without http:// (like 100.116.92.58:3000) works.", "The error log no longer fills up with tiny screen hitches: only real pauses are written."]],
@@ -432,6 +446,32 @@
   // website's download page (the website's owner puts it there). Checked at most once a day.
   const UPDATE_URL = "https://raw.githubusercontent.com/Banta02112000/Saga/main/web/app.js";
   const verNum = v => String(v || "").split(".").map(x => parseInt(x, 10) || 0).reduce((a, x, i) => a + x * Math.pow(1000, 3 - i), 0);
+  // 0.6.9.5: updates without installing: Saga downloads its new screens (signed with Saga's key, checked by the app)
+  // and uses them from the next start. Only a change to the Android part still needs an APK.
+  const OTA_BASE = "https://raw.githubusercontent.com/Banta02112000/Saga/main/update/";
+  async function otaCheck(loud) {
+    const info = Native.otaInfo();
+    if (!info) return checkUpdate(loud);
+    if (!loud && Date.now() - (+db.get("ota_at", "0") || 0) < 12 * 3600e3) return db.get("ota_ready", "");
+    if (!loud && db.get("ota_auto", "1") !== "1") return "";
+    let m;
+    try {
+      const r = await Native.http("GET", OTA_BASE + "manifest.json?t=" + Math.floor(Date.now() / 3600e3), { headers: { Accept: "application/json" } });
+      m = r && r.status === 200 ? JSON.parse(r.body) : null;
+      if (!m || !m.version) throw new Error(r && r.status ? `HTTP ${r.status}` : "no answer");
+    } catch (e) { if (loud) toast(`Couldn't check for updates: ${e.message}`); return ""; }
+    db.set("ota_at", String(Date.now()));
+    if (verNum(m.version) <= verNum(VERSION)) { db.set("upd_ver", ""); if (loud) toast(`Saga ${VERSION} is the newest`); return ""; }
+    if ((m.shell || 1) > (info.shell || 0)) { db.set("upd_ver", m.version); if (loud) toast(`Saga ${m.version} needs the new app (APK): download it from your Saga website`); render(); return ""; }
+    if (info.active === m.version) { db.set("ota_ready", m.version); if (loud) otaReadyToast(m.version); return m.version; }
+    if (loud) toast(`Downloading Saga ${m.version}…`);
+    const res = await Native.otaInstall(OTA_BASE + (m.bundle || "bundle.gz"), OTA_BASE + (m.sig || "bundle.sig"));
+    if (/^ok:/.test(res)) { db.set("ota_ready", m.version); db.set("upd_ver", ""); otaReadyToast(m.version); render(); return m.version; }
+    logError("update", res);
+    if (loud) toast(`Saga ${m.version}: ${res.replace(/^\w+:/, "")}`);
+    return "";
+  }
+  function otaReadyToast(v) { toast(`Saga ${v} is ready: it starts next time you open Saga`, () => { location.reload(); }, "Restart now"); }
   async function checkUpdate(loud) {
     if (!loud && Date.now() - (+db.get("upd_at", "0") || 0) < 20 * 3600e3) return db.get("upd_ver", "");
     let v = "";
@@ -1082,7 +1122,7 @@
   }
 
   function renderMissing() {
-    const meds = ["All", "Movie", "TV Series", "Special", "Video Game"];
+    const meds = ["All", "Movie", "TV Series", "Special"];
     const hasClaude = !!db.get("claude_key"), hasGemini = !!db.get("gemini_key");
     const m = mvState(), via = hasGemini ? "auto" : "app";
     const step = (n, k, title, sub, done) => `<button class="tool step${done ? " done" : ""}" data-action="mv" data-k="${k}" data-via="${via}" ${ui.job ? "disabled" : ""}>
@@ -1366,7 +1406,7 @@
         <label class="switch"><input type="checkbox" data-setting="web_sync_auto" ${db.get("web_sync_auto", "1") === "1" ? "checked" : ""}><span>Sync with the website by itself<small class="muted" style="display:block">After each sync, when you open the app, and a little after you change something.</small></span></label>
         <button class="btn" data-action="websync" ${db.get("web_sync_url") ? "" : "disabled"}>${icon("sync")}Sync with the website now</button>
         ${window.__sagaWeb || db.get("web_sync_url") ? `<button class="btn small" data-action="webadmin">${icon("box")}Website status (owner)</button>` : ""}
-        ${window.__sagaWeb || db.get("web_sync_url") ? `<label class="switch"><input type="checkbox" data-action="webshare" ${db.get("web_share") === "1" ? "checked" : ""}><span>Share my films, series, games and books with the other people on this website<small class="muted" style="display:block">They see titles, status and ratings (not notes, diary or keys), and you see theirs if they share too: “You and …” on Home, and their rating on a title.</small></span></label>
+        ${window.__sagaWeb || db.get("web_sync_url") ? `${shareHtml()}
         <button class="btn small" data-action="peoplenow">Refresh friends</button>` : ""}
         ${calUrl() ? `<div class="card" style="padding:10px"><b>Your calendar</b><p class="small muted" style="margin:4px 0">Episodes, releases, games and books you're waiting for. In Google Calendar: Other calendars › + › From URL, and paste this address (keep it private: anyone with it can read the dates). It updates after each sync.</p>
           <div class="row wrap"><code class="small" style="word-break:break-all">${esc(calUrl())}</code></div><div class="row wrap"><button class="btn small" data-action="copyval" data-text="${esc(calUrl())}">Copy</button><button class="btn small quiet" data-action="calnew">New address</button></div></div>`
@@ -1520,6 +1560,7 @@
         <p class="small muted" style="margin:0">This product uses the TMDB API but is not endorsed or certified by TMDB. Other data comes from Trakt, IMDb, TVmaze, Jikan, AniList, Open Library, Google Books, Steam, IsThereAnyDeal and CheapShark.</p>
         <button class="btn small" data-action="whatsnew">What's new</button>
         <button class="btn small" data-action="updcheck">Check for updates</button>
+        ${Native.otaInfo() ? (() => { const oi = Native.otaInfo(); return `<label class="switch"><input type="checkbox" data-action="otaauto" ${db.get("ota_auto", "1") === "1" ? "checked" : ""}><span>Update by itself<small class="muted" style="display:block">New screens and features download in the background (checked against Saga's signing key) and start the next time you open Saga. No install. Only changes to the Android part still come as an APK.${oi.active ? ` Now running update ${esc(oi.active)} on app ${esc(oi.apk)}.` : ""}${oi.disabled ? ` Update ${esc(oi.disabled)} didn't start and was put aside.` : ""}</small></span></label>${oi.active ? `<button class="btn quiet small" data-action="otareset">Go back to the built-in screens</button>` : ""}`; })() : ""}
       </section>
       <section>
         <h2>Data</h2>
@@ -1598,6 +1639,7 @@
     ["games", "Games", "The Games section in the bar at the bottom"],
     ["books", "Books", "The Books section in the bar at the bottom"],
     ["dw", "Doctor Who timeline", "The fixed Doctor Who timeline (off until you switch it on)"],
+    ["music", "Music", "The Music section: your listening from Last.fm and Spotify"],
     ["bookPrices", "Book price alerts", "Ebook prices and alerts for books you want to read"],
     ["gemini", "AI tools (Gemini)", "Off until you switch it on. Multiverse grouping, canon search, verification and news through the Gemini app or your API key, in every tab"],
     ["vpn", "Worldwide streaming (VPN)", "Where a title streams in other countries, and the VPN badge"],
@@ -1655,12 +1697,12 @@
   function openOrder(mv, mode) {
     ui.order = { mv, mode: mode || (ui.order && ui.order.mv === mv ? ui.order.mode : "release") };
     const o = C.watchOrder(db, mv, status(), ui.order.mode);
-    const have = o.rows.filter(c => c.have && c.state !== "listed").length;
-    const x = crossLine(mv, have, o.rows.length);
+    const out = o.rows.filter(c => !c.unreleased), have = out.filter(c => c.have && c.state !== "listed").length;
+    const x = crossLine(mv, have, out.length);
     const via = db.get("gemini_key") ? "auto" : "app";
     $("#overlay").innerHTML = `<div class="scrim bottom" data-action="dismiss"><div class="sheet" role="dialog" aria-modal="true">
       <h3 style="margin:0">${esc(mv)}</h3>
-      <p class="small muted" style="margin:2px 0 8px">${fmt(have)} of ${fmt(o.rows.length)} seen${x ? ` · ${esc(x.text)} · ${x.pct}% across all tabs` : ""}</p>
+      <p class="small muted" style="margin:2px 0 8px">${fmt(have)} of ${fmt(out.length)} seen${o.rows.length > out.length ? ` (${fmt(o.rows.length - out.length)} not out yet, not counted)` : ""}${x ? ` · ${esc(x.text)} · ${x.pct}% across all tabs` : ""}</p>
       <div class="chips"><button class="chip" data-action="ordermode" data-v="release" aria-pressed="${ui.order.mode === "release"}">Release order</button>
         <button class="chip" data-action="ordermode" data-v="chrono" aria-pressed="${ui.order.mode === "chrono"}">In-universe order</button></div>
       ${ui.order.mode === "chrono" ? (o.chrono
@@ -2426,16 +2468,34 @@
     const before = JSON.stringify([it.status, it.rating, it.watches]);
     if (rows.length) lib.adopt(rows);
     if (JSON.stringify([it.status, it.rating, it.watches]) !== before) said.push("rating and status updated from IMDb/Trakt");
-    if (db.get("token")) {
+    // 0.6.9.5: IMDb: your newest ratings read again (a title you just rated on IMDb is among them). Not on the
+    // website: IMDb doesn't answer servers.
+    if (db.get("imdb_user") && !window.__sagaWeb) {
       try {
-        const t = await C.traktOne(Native.http, db.get("client_id"), db.get("token"), it);
+        const tpl = { get: k => db.get(k, ""), set: (k, v) => db.set(k, v) };
+        const [groups] = await C.imdbRatings(Native.http, db.get("imdb_user"), 250, tpl);
+        for (const [k, items] of Object.entries(groups)) await db.addItemsAsync(items, "imdb", k, "");
+        const mineI = db.items("imdb", ["rated"]).find(r => (it.imdb && r.imdb === it.imdb) || (r.norm === n0 && (!it.year || !r.year || Math.abs(r.year - it.year) <= 1)));
+        if (mineI) { lib.adopt([mineI]); said.push(`IMDb: rated ${mineI.rating}`); }
+      } catch (e) { said.push(`IMDb: ${String(e.message).slice(0, 90)}`); }
+    }
+    if (db.get("token") || db.get("username")) {
+      try {
+        const t = await C.traktOne(Native.http, db.get("client_id"), db.get("token"), it, db.get("username"));
         let n = 0;
-        if (it.type === "show") { for (const [k, d] of Object.entries(t.eps)) if (!it.eps[k]) { it.eps[k] = d || TODAY(); n++; } if (n) lib.afterEps(it); }
-        else { for (const d of t.watches) if (d && !it.watches.includes(d)) { it.watches.push(d); n++; } if (n) { it.watches.sort(); if (it.status !== "watched") it.status = "watched"; } }
+        if (it.type === "show") {
+          for (const [k, d] of Object.entries(t.eps)) if (!it.eps[k]) { it.eps[k] = d || TODAY(); n++; }
+          // episodes you rated on Trakt: rated means watched
+          for (const [k, r] of Object.entries(t.epRatings || {})) { it.er = it.er || {}; if (!(it.erMine && it.erMine[k]) && r && it.er[k] !== r) { it.er[k] = r; n++; } if (!it.eps[k]) { it.eps[k] = TODAY(); L.markBulk(it, k); n++; } }
+          if (n) lib.afterEps(it);
+        } else { for (const d of t.watches) if (d && !it.watches.includes(d)) { it.watches.push(d); n++; } if (n) { it.watches.sort(); if (it.status !== "watched") it.status = "watched"; } }
+        if (t.rating && !it.ratedHere && it.rating !== t.rating) { it.rating = t.rating; n++; if (it.type === "movie" && it.status === "watchlist") { it.status = "watched"; if (!it.watches.length) it.watches.push(""); } }
+        if (t.watchlisted && !it.rating && !it.watches.length && !Object.keys(it.eps).length && it.status !== "watchlist") { it.status = "watchlist"; n++; }
         if (!it.imdb && /^tt\d+$/.test(t.id)) it.imdb = t.id;
-        said.push(n ? `${n} ${it.type === "show" ? "episode" : "viewing"}${n === 1 ? "" : "s"} added from Trakt` : "Trakt has nothing new");
+        it.updated = Date.now();
+        said.push(n ? `Trakt: ${[t.rating ? `rated ${t.rating}` : "", it.type === "show" ? `${Object.keys(t.eps).length} episodes watched` : `${t.watches.length} viewing${t.watches.length === 1 ? "" : "s"}`, t.watchlisted ? "on your watchlist" : ""].filter(Boolean).join(", ")}` : "Trakt has nothing new");
       } catch (e) { said.push(`Trakt: ${e.message}`); }
-    } else said.push("Trakt not signed in, so only stored data was used");
+    } else said.push("no Trakt account in Settings");
     libSave();
     if (ui.libOpen === it.id && $(".libsheet")) openLib(it.id);
     toast(`${it.title}: ${said.join("; ")}`);
@@ -2555,7 +2615,7 @@
         <button class="sheetbtn" data-action="libwhere">${icon("eye")}Where to watch and details</button>
         <button class="sheetbtn" data-action="open" data-url="${esc(it.imdb ? `https://www.imdb.com/title/${it.imdb}/` : `https://www.imdb.com/find/?q=${encodeURIComponent(it.title + " " + (it.year || ""))}`)}">${icon("open")}Open on IMDb</button>
         <button class="sheetbtn" data-action="mlistadd" data-k="lib:${esc(it.id)}">${icon("plus")}Add to a list</button>
-        <button class="sheetbtn" data-action="libsync1">${icon("sync")}Sync this title (details, IMDb and Trakt)</button>
+        <button class="sheetbtn" data-action="libsync1">${icon("sync")}Sync this title (rating, watched, episodes, details)</button>
         <button class="sheetbtn" data-action="libcanon1">${icon("eye")}Check canon for this title (AI)</button>
         <div class="tagrow" style="margin:6px 0 10px">${(it.tags || []).map(t => `<button class="tagchip" data-action="libtagdel" data-v="${esc(t)}" aria-label="Remove tag ${esc(t)}">${esc(t)} ✕</button>`).join("")}
           <input type="text" id="libTag" list="libTags" placeholder="Add a tag or list…" autocomplete="off" style="flex:1;min-width:130px;height:34px"><datalist id="libTags">${allTags().map(([t]) => `<option value="${esc(t)}">`).join("")}</datalist>
@@ -2662,10 +2722,10 @@
   const gamesFile = lazyFile("games.json", () => games), booksFile = lazyFile("books.json", () => books);
   const games = new GC.Games({ load: () => Native.load("games.json"), save: t => Native.save("games.json", t), saveLazy: Native.parts ? () => gamesFile.lazy() : null });
   const books = new BC.Library({ load: () => Native.load("books.json"), save: t => Native.save("books.json", t), saveLazy: Native.parts ? () => booksFile.lazy() : null });
-  const NAV = [["home", "Home", "home"], ["watch", "Watch", "library"], ["games", "Games", "pad"], ["books", "Books", "book"], ["timeline", "Who", "box"]];
+  const NAV = [["home", "Home", "home"], ["watch", "Watch", "library"], ["games", "Games", "pad"], ["books", "Books", "book"], ["timeline", "Who", "box"], ["music", "Music", "music"]];
   const WATCH = [["library", "Library"], ["anime", "Anime"], ["upcoming", "Upcoming"], ["missing", "Canon"], ["stats", "Stats"]];
-  const TITLES = { watch: "Watch", games: "Games", books: "Books", timeline: "Doctor Who", settings: "Settings", sync: "Sync", year: "Your year", mv: "Multiverse" };
-  const secOn = s => (s === "games" ? feat("games") : s === "books" ? feat("books") : s === "timeline" ? feat("dw") : true);
+  const TITLES = { watch: "Watch", games: "Games", books: "Books", timeline: "Doctor Who", music: "Music", settings: "Settings", sync: "Sync", year: "Your year", mv: "Multiverse" };
+  const secOn = s => (s === "games" ? feat("games") : s === "books" ? feat("books") : s === "timeline" ? feat("dw") : s === "music" ? feat("music") : true);
   const RENDER = { library: renderLibrary, anime: renderAnime, upcoming: renderUpcoming, missing: renderMissing, stats: renderStats, compare: renderCompare };
   const SECR = { home: renderHome, settings: renderSettings, sync: renderSync, year: renderYear, mv: renderMv };
   let changeTimer = null;
@@ -3076,7 +3136,8 @@
     const MED = c => c.medium === "TV Series" ? "show" : c.medium === "Video Game" ? "game" : "movie";
     for (const c of status()) if (C.norm(c.franchise) === n && MED(c) !== "game") out.push({ key: "canon:" + canonKey(c), title: c.title, medium: MED(c), date: c.date || (c.year ? c.year + "-07-01" : ""), done: !!c.have && c.state !== "listed",
       img: cImg(c), attrs: `data-action="sheet" data-sid="${sid(c, "canon")}"`, sub: [c.year, c.medium].filter(Boolean).join(" · "), canon: c });
-    if (secOn("games")) for (const g of games.visible()) if (C.norm(g.multiverse) === n || C.norm(g.franchise) === n) out.push({ key: "game:" + g.id, title: g.title, medium: "game", date: g.date || "", done: g.status === "done",
+    // 0.6.9.5: games count in the Games tab and in Doctor Who, not in other universes
+    if (secOn("games") && /doctorwho|whoniverse/.test(n)) for (const g of games.visible()) if (C.norm(g.multiverse) === n || C.norm(g.franchise) === n) out.push({ key: "game:" + g.id, title: g.title, medium: "game", date: g.date || "", done: g.status === "done",
       img: g.cover || (g.steam ? GC.COVER(g.steam) : ""), attrs: `data-action="gopen" data-id="${esc(g.id)}"`, sub: [G_YEAR(g), g.platform].filter(Boolean).join(" · ") });
     if (secOn("books")) for (const b of books.books) if (b.series && (C.norm(b.series).includes(n) || n.includes(C.norm(b.series)))) out.push({ key: "book:" + b.id, title: b.title, medium: "book", date: String(b.published || "").slice(0, 10), done: b.status === "read",
       img: (b.cover || "").replace(/^http:/, "https:"), attrs: `data-action="bopen" data-id="${esc(b.id)}"`, sub: [(b.authors || [])[0], b.seriesNum ? `#${b.seriesNum}` : ""].filter(Boolean).join(" · ") });
@@ -3107,8 +3168,10 @@
     const name = ui.mv || "", u = ui.u || (ui.u = { mode: "release", tier: "all", missing: false, edit: false });
     if (u.name !== name) Object.assign(u, { name, mode: uGet("order", name).length ? "custom" : "release", tier: "all", missing: false, edit: false });
     const tiers = uGet("tier", name), all = universeEntries(name);
-    all.forEach(e => { e.tier = tiers[e.key] || ""; });
-    const counted = all.filter(e => e.tier !== "notcanon");
+    const today = new Date().toISOString().slice(0, 10);
+    all.forEach(e => { e.tier = tiers[e.key] || ""; e.soon = !e.done && (e.canon ? !!e.canon.unreleased : !e.date || e.date > today); });
+    // 0.6.9.5: what isn't out yet is listed, not counted
+    const counted = all.filter(e => e.tier !== "notcanon" && !e.soon), soon = all.filter(e => e.soon && e.tier !== "notcanon").length;
     // completion per medium
     const MEDS = [["movie", "Films"], ["show", "Series"], ["game", "Games"], ["book", "Books"]];
     const bars = MEDS.map(([m, l]) => { const xs = counted.filter(e => e.medium === m); return xs.length ? { l, done: xs.filter(e => e.done).length, n: xs.length } : null; }).filter(Boolean);
@@ -3121,13 +3184,14 @@
     const next = universeOrdered(name, u.mode, counted).find(e => !e.done && (!ess.length || e.tier === "essential" || u.tier === "all"));
     const who = /doctor ?who|whoniverse/i.test(name) && secOn("timeline");
     const chip = (act, v, cur, label) => `<button class="chip" data-action="${act}" data-v="${v}" aria-pressed="${cur === v}">${label}</button>`;
-    const rowHtml = (e, i) => `<div class="item" style="gap:10px"><span class="small muted" style="width:26px;text-align:right">${i + 1}</span>
+    const rowHtml = (e, i) => `<div class="item${e.soon ? " soon" : ""}" style="gap:10px"><span class="small muted" style="width:22px;text-align:right">${i + 1}</span>
+      <span class="uposter" ${e.attrs}>${e.img ? `<img loading="lazy" decoding="async" alt="" src="${esc(e.img)}">` : `<i>${esc((e.title || "?").slice(0, 1))}</i>`}</span>
       <div class="grow" ${e.attrs} style="min-width:0"><div class="row"><b class="grow ell">${esc(e.title)}</b>${e.done ? `<span class="pbadge">${icon("check")}</span>` : ""}</div>
-        <div class="small muted ell">${esc({ movie: "Film", show: "Series", game: "Game", book: "Book" }[e.medium])}${e.sub ? " · " + esc(e.sub) : ""}${e.tier ? ` · <b>${esc(TIER_SHORT[e.tier])}</b>` : ""}</div></div>
+        <div class="small muted ell">${e.soon ? "<b>Not out yet</b> · " : ""}${esc({ movie: "Film", show: "Series", game: "Game", book: "Book" }[e.medium])}${e.sub ? " · " + esc(e.sub) : ""}${e.tier ? ` · <b>${esc(TIER_SHORT[e.tier])}</b>` : ""}</div></div>
       ${u.edit ? `<button class="btn quiet small" data-action="utier" data-k="${esc(e.key)}" aria-label="Change tier">${esc(e.tier ? TIER_SHORT[e.tier] : "Tier")}</button>
         <button class="iconbtn" data-action="umove" data-k="${esc(e.key)}" data-v="-1" aria-label="Move up">↑</button><button class="iconbtn" data-action="umove" data-k="${esc(e.key)}" data-v="1" aria-label="Move down">↓</button>` : ""}</div>`;
     return `<section><div class="kicker">Universe</div><h2 style="font-size:30px;margin:6px 0">${esc(name)}</h2>
-      <p class="muted">${done} of ${counted.length} · ${Math.round(100 * done / Math.max(1, counted.length))}%${ess.length ? ` · essential: ${ess.filter(e => e.done).length} of ${ess.length}` : ""}</p>
+      <p class="muted">${done} of ${counted.length} · ${Math.round(100 * done / Math.max(1, counted.length))}%${soon ? ` · ${fmt(soon)} not out yet` : ""}${ess.length ? ` · essential: ${ess.filter(e => e.done).length} of ${ess.length}` : ""}</p>
       ${bars.length > 1 ? `<div class="card" style="margin:10px 0">${bars.map(b => `<div class="row small" style="gap:8px;margin:4px 0"><span style="width:56px">${b.l}</span><div class="grow" style="height:8px;border-radius:4px;background:var(--line);overflow:hidden"><i style="display:block;height:100%;width:${Math.round(100 * b.done / b.n)}%;background:var(--accent)"></i></div><span class="muted" style="width:64px;text-align:right">${b.done}/${b.n}</span></div>`).join("")}</div>` : ""}
       ${next ? `<div class="nextbox" style="margin:10px 0"><div class="grow" ${next.attrs}><div class="kicker">Next</div><b>${esc(next.title)}</b><div class="small muted">${esc(next.sub || "")}</div></div></div>` : ""}
       ${who ? `<button class="btn" data-action="go" data-sec="timeline">${icon("box")}Open the Doctor Who timeline</button>` : ""}
@@ -3383,6 +3447,8 @@
     // 0.6.6: IsThereAnyDeal: ids, best price in any store with the all-time low, subscriptions (twice a day at most),
     // and your ITAD waitlist and collection when you've signed in
     if (secOn("games") && db.get("itad_key")) await step("itad", "IsThereAnyDeal", async () => itadRefresh(http, false), 180000);
+    // 0.6.9.5: your listening (Last.fm, Spotify)
+    if (secOn("music") && Kit.mods.music && (Kit.mods.music.ready().lastfm || Kit.mods.music.ready().spotify)) await step("music", "Music", async () => Kit.mods.music.sync(true), 180000);
     await step("episodes", "Episodes", async () => {
       const shows = L.stale(lib).slice(0, 20);
       let n = 0;
@@ -3397,7 +3463,7 @@
   let detailsRunning = false;
   // ---- 0.5.9: two-way sync with the Saga website (site/server.js). Each file the phone or the website changed since
   // they last agreed is sent; the server merges it entry by entry (site/merge.js) and both keep the result.
-  const WEB_FILES = ["canonsync.json", "library.json", "games.json", "books.json", "dw.json"];
+  const WEB_FILES = ["canonsync.json", "library.json", "games.json", "books.json", "dw.json", "music.json"];
   const fileStamp = t => (t ? t.length + ":" + t.slice(-24) : "");
   let webSyncing = false, webSyncT = null;
   // its own small file, so keeping track doesn't itself change the synced files
@@ -3469,11 +3535,27 @@
   const sendButtons = x => people().length ? `<div class="row wrap" style="margin:6px 0">${people().map(P => `<button class="btn small quiet" data-action="sendto" data-to="${esc(P.name)}" data-item="${esc(JSON.stringify({ type: x.type, title: x.title, year: x.year || null, tmdb: x.tmdb || null, imdb: x.imdb || null, poster: /^https:/.test(x.poster || "") ? x.poster : "" }))}">${icon("share")}Send to ${esc(P.name)}</button>`).join("")}</div>` : "";
   const WHEN = d => { try { return new Date(d + "T12:00:00").toLocaleDateString(lang() === "it" ? "it-IT" : "en-GB", { day: "numeric", month: "short" }); } catch (e) { return d; } };
   const ACT = { watched: "watched", finished: "watched", episode: "watched", played: "finished", read: "read" };
+  // 0.6.9.5: sharing, chosen per person and per part
+  const SHARE_LABEL = { lib: "Films & series", games: "Games", books: "Books", dw: "Doctor Who" };
+  function loadShare() { if (ui.shareLoading) return; ui.shareLoading = true; webApi("GET", "api/share").then(r => { ui.share = r; db.set("web_share", r.on ? "1" : "0"); }, () => { ui.share = { on: db.get("web_share") === "1", to: null, people: [], failed: true }; }).then(() => { ui.shareLoading = false; if (ui.sec === "settings") render(); }); }
+  function saveShare(st) {
+    ui.share = st; render();
+    webApi("POST", "api/share", { on: !!st.on, to: st.to || undefined }).then(r => { ui.share = Object.assign({}, st, { people: r.people || st.people }); db.set("web_share", st.on ? "1" : "0"); peopleRefresh(false); render(); }, e => toast(e.message));
+  }
+  function shareHtml() {
+    const st = ui.share;
+    if (!st) { loadShare(); return `<p class="small muted">Sharing: asking the website…</p>`; }
+    const to = st.to || Object.fromEntries((st.people || []).map(n => [n, { lib: true, games: true, books: true, dw: false }]));
+    return `<div class="card" style="padding:10px"><label class="switch"><input type="checkbox" data-action="shareon" ${st.on ? "checked" : ""}><span><b>Share with people on this website</b><small class="muted" style="display:block">They see titles, status and ratings (never notes, diary or keys) of the parts you pick for each of them. You see theirs if they share with you.</small></span></label>
+      ${st.on && (st.people || []).length ? (st.people || []).map(n => `<div style="margin:8px 0 2px"><b>${esc(n)}</b></div><div class="chips">${Object.keys(SHARE_LABEL).map(k => `<button class="chip" data-action="sharepart" data-p="${esc(n)}" data-k="${k}" aria-pressed="${!!(to[n] || {})[k]}">${SHARE_LABEL[k]}</button>`).join("")}</div>`).join("") : st.on ? `<p class="small muted">Nobody else has an account on this website yet.</p>` : ""}
+      ${st.failed ? `<p class="small muted">The website didn't answer: try again later.</p>` : ""}</div>`;
+  }
   function friendsHtml() {
     const ps = people(); if (!ps.length) return "";
     return ps.map(P => { const c = friendCompare(P);
       return `<section>${Kit.head(`You and ${esc(P.name)}`)}
         <div class="sstrip"><div><b>${c.match == null ? "–" : c.match + "%"}</b><span>taste match${c.rated ? ` (${c.rated} both rated)` : ""}</span></div><div><b>${fmt(c.seen)}</b><span>both watched</span></div><div><b>${fmt(c.bothWant.length)}</b><span>both want to watch</span></div><div><b>${fmt(P.games.filter(g => g.status === "done").length)}</b><span>games ${esc(P.name)} finished</span></div></div>
+        ${P.dw ? `<p class="small muted" style="margin:6px 0">Doctor Who: ${fmt(P.dw.done)} stories done${P.dw.avg != null ? ` · average ${P.dw.avg}` : ""}</p>` : ""}
         ${(P.recent || []).length ? `<h4>Lately</h4><div class="listcard">${P.recent.slice(0, 6).map((x, i) => `<div class="item"${x.type === "movie" || x.type === "show" ? ` data-action="actopen" data-p="${esc(P.name)}" data-i="${i}" role="button"` : ""}><div class="grow" style="min-width:0"><b class="ell">${esc(x.title)}</b><div class="small muted ell">${esc([`${P.name} ${ACT[x.kind] || x.kind}${x.kind === "episode" ? " S" + String(x.ep).replace(":", " E") : ""}`, x.rating ? "★ " + x.rating : "", WHEN(x.date)].filter(Boolean).join(" · "))}</div></div></div>`).join("")}</div>` : ""}
         ${c.bothWant.length ? `<h4>You both want to watch</h4><div class="listcard">${c.bothWant.slice(0, 8).map(it => `<div class="item" data-action="libopen" data-id="${esc(it.id)}">${libThumb(it)}<b class="grow ell">${esc(it.title)}</b><span class="small muted">${esc(it.year || "")}</span></div>`).join("")}</div>` : ""}
         ${c.loved.length ? `<h4>${esc(P.name)} loved, you haven't seen</h4><div class="listcard">${c.loved.slice(0, 8).map((x, i) => `<div class="item" data-action="friendopen" data-p="${esc(P.name)}" data-i="${P.lib.indexOf(x)}" role="button"><div class="grow" style="min-width:0"><b class="ell">${esc(x.title)}</b><div class="small muted">${esc([x.year, x.type === "show" ? "Series" : "Film", "★ " + x.rating].filter(Boolean).join(" · "))}</div></div><button class="btn quiet small" data-action="friendadd" data-p="${esc(P.name)}" data-i="${P.lib.indexOf(x)}">${icon("plus")}Add</button></div>`).join("")}</div>` : ""}</section>`; }).join("");
@@ -3552,6 +3634,7 @@
     else if (n === "games.json") games.fromJSON(d);
     else if (n === "books.json") books.fromJSON(d);
     else if (n === "dw.json") { try { Kit.mods.timeline.reset(); } catch (e) { /* not loaded */ } }
+    else if (n === "music.json") { try { Kit.mods.music.reset(); } catch (e) { /* not loaded */ } }
     else return true;
     invalidate();
     // shown when you're not typing and nothing is running
@@ -3568,6 +3651,7 @@
     else if (n === "games.json") { games.fromJSON(d); Native.save(n, text); }
     else if (n === "books.json") { books.fromJSON(d); Native.save(n, text); }
     else if (n === "dw.json") { Native.save(n, text); try { Kit.mods.timeline.reset(); } catch (e) { /* not loaded */ } }
+    else if (n === "music.json") { Native.save(n, text); try { Kit.mods.music.reset(); } catch (e) { /* not loaded */ } }
   }
   // 0.5.7: what follows a sync runs one thing after another, after the sync's own save, instead of all at once
   let afterRunning = false;
@@ -3626,7 +3710,7 @@
       return "Signed in to IsThereAnyDeal. " + await itadRefresh(Native.http, true);
     });
   }
-  window.__oauth = url => { if (/oauth\/itad/.test(url)) itadFinish(url); else if (/oauth\/anilist/.test(url)) anilistFinish(url); };
+  window.__oauth = url => { if (/oauth\/itad/.test(url)) itadFinish(url); else if (/oauth\/anilist/.test(url)) anilistFinish(url); else if (/oauth\/spotify/.test(url) && Kit.mods.music) Kit.mods.music.spotifyFinish(url); };
   // 0.6.9: AniList sign-in (the token comes back in the address: …://oauth/anilist#access_token=…)
   const anilistRedirect = () => `${(Native.linkScheme && Native.linkScheme()) || "bantaapps"}://oauth/anilist`;
   function anilistFinish(url) {
@@ -3638,7 +3722,7 @@
   window.__oauthPoll = () => { const u = Native.takeOauth(); if (u) window.__oauth(u); };
   setTimeout(() => { try { window.__oauthPoll(); } catch (e) { logError("oauth", e.message); } }, 600);
   async function afterSync() {
-    setTimeout(() => checkUpdate(false).catch(() => {}), 5000);
+    setTimeout(() => otaCheck(false).catch(() => {}), 5000);
     setTimeout(() => { if (db.get("cal_path")) pushCalendar(); }, 7000);
     setTimeout(() => recsRefresh(false).catch(() => {}), 9000);
     setTimeout(() => peopleRefresh(false).catch(() => {}), 12000);
@@ -4512,7 +4596,9 @@
       case "lookback": { delete lib.adopted[el.dataset.k]; const b = libTotals(); libAdopt(); libSave(); const a = libTotals(); toast(a.titles > b.titles ? "Brought into the library" : "Updated"); render(); break; }
       case "theme": setLook("saga_theme", el.dataset.v === "night" ? "" : el.dataset.v); render(); break;
       case "whatsnew": whatsNew(true); break;
-      case "updcheck": checkUpdate(true); break;
+      case "updcheck": otaCheck(true); break;
+      case "otaauto": db.set("ota_auto", el.checked ? "1" : "0"); break;
+      case "otareset": try { Android.otaReset(); } catch (e) { /* older app */ } toast("Back to the screens built into the app: restarting", () => {}, ""); setTimeout(() => location.reload(), 800); break;
       case "recsnow": recsRefresh(true); break;
       case "itadin": itadSignIn(); break;
       case "alin": Native.openUrl(Imports.anilistAuthUrl(db.get("anilist_client_id"))); toast("Approve Saga on AniList; you'll come back here by yourself"); break;
@@ -4521,6 +4607,9 @@
       case "itadout": db.set("itad_token", ""); db.flush(); toast("Signed out of IsThereAnyDeal"); render(); break;
       case "itadnow": runJob("IsThereAnyDeal", async () => itadRefresh(Native.http, true)); break;
       case "itadpaste": { const u = prompt("Paste the address the browser showed after approving (it starts with " + itadRedirect() + ")"); if (u) itadFinish(u); break; }
+      case "shareon": { const st = ui.share || {}; st.on = el.checked; saveShare(st); return; }
+      case "sharepart": { const st = ui.share || {}; st.to = st.to || Object.fromEntries((st.people || []).map(n => [n, { lib: true, games: true, books: true, dw: false }]));
+        const v = st.to[el.dataset.p] = st.to[el.dataset.p] || {}; v[el.dataset.k] = !v[el.dataset.k]; saveShare(st); return; }
       case "webshare": { const on = el.checked; db.set("web_share", on ? "1" : "0"); webApi("POST", "api/share", { on }).then(() => { toast(on ? "Sharing with the other people on the website" : "Not sharing any more"); peopleRefresh(false); }, e => { toast(e.message); db.set("web_share", on ? "0" : "1"); render(); }); break; }
       case "peoplenow": peopleRefresh(true); break;
       case "friendadd": { const P = people().find(x => x.name === el.dataset.p), x = P && P.lib[+el.dataset.i]; if (x) { libAdd({ type: x.type, title: x.title, year: x.year, imdb: x.imdb, tmdb: x.tmdb, poster: x.poster }, "watchlist"); render(); } break; }
@@ -4875,7 +4964,9 @@
   // (automated test browsers skip it unless they ask, so it doesn't cover what they're testing)
   setTimeout(() => { try { if (!$(".sheet") && !BantaAI.isOpen() && (!navigator.webdriver || window.__wantWhatsNew)) whatsNew(false); } catch (e) { logError("whatsnew", e.message); } }, 900);
   // 0.6.5: friends, suggestions and the update check also when no sync runs (the website, a quick look)
-  if (!navigator.webdriver) setTimeout(() => { peopleRefresh(false).catch(() => {}); recsRefresh(false).catch(() => {}); checkUpdate(false).catch(() => {}); }, 15000);
+  // 0.6.9.5: the screens started fine (a screen update that fails to start 3 times is put aside by the app)
+  setTimeout(() => { try { if (window.Android && Android.otaOk) Android.otaOk(); } catch (e) { /* older app */ } }, 4000);
+  if (!navigator.webdriver) setTimeout(() => { peopleRefresh(false).catch(() => {}); recsRefresh(false).catch(() => {}); otaCheck(false).catch(() => {}); }, 15000);
   setInterval(() => { if (!document.hidden) livePull(); }, 5 * 60000);
   setTimeout(() => { fillImages().catch(() => {}); if (secOn("games")) GC.linkSteam(games, Saga.http, 40, 700).then(n => { if (n) { games.save(); if (!document.querySelector("#overlay .sheet")) render(); } }).catch(() => {}); }, 2500);
   if (db.get("bg_enabled", "1") === "1" && !db.get("notif_asked")) { Native.requestNotifications(); db.set("notif_asked", "1"); }

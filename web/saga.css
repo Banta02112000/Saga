@@ -333,3 +333,28 @@ html[data-theme="light"] .hero2 .btn:not(.primary) { background: rgba(255,255,25
 html, body { overflow-x: clip; max-width: 100%; }
 .sheet { overflow-x: hidden; }
 img, video, svg { max-width: 100%; }
+/* 0.6.9.5: posters in the universe (canon) list; entries not out yet are dimmed */
+.uposter { flex: none; width: 40px; height: 60px; border-radius: 6px; overflow: hidden; background: var(--line); display: grid; place-items: center; cursor: pointer; }
+.uposter img { width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .25s; }
+.uposter img.in, .uposter img[complete] { opacity: 1; }
+.uposter i { font-style: normal; font-weight: 600; color: var(--muted); }
+.item.soon { opacity: .6; }
+/* 0.6.9.5: Music: day and hour bars, square covers */
+.mbars { display: flex; align-items: flex-end; gap: 3px; height: 110px; padding: 6px 0 18px; }
+.mbars .mb { flex: 1; height: 100%; position: relative; display: flex; align-items: flex-end; }
+.mbars .mb i { display: block; width: 100%; min-height: 2px; border-radius: 3px 3px 0 0; background: var(--acc, var(--accent, #c9a2ff)); opacity: .85; }
+.mbars .mb small { position: absolute; bottom: -16px; left: 50%; transform: translateX(-50%); font-size: 10px; color: var(--muted); white-space: nowrap; }
+.uposter.sq { height: 40px; border-radius: 6px; }
+.uposter.sq i { width: 100%; height: 100%; display: grid; place-items: center; color: #fff; }
+body[data-sec="music"] { --acc: #1db954; }
+/* 0.6.9.5: website and wide screens, tidier: a compact navigation rail, a shorter Home hero, filter chips that wrap
+   instead of running off the right edge, and lists in two columns */
+@media (min-width: 1024px) {
+  nav#tabs { gap: 2px; padding-top: 14px; }
+  nav#tabs button { min-height: 0; height: 44px; border-radius: 12px; }
+  .hero2 { min-height: 0 !important; height: clamp(260px, 32vh, 360px); }
+  .chips, .subnav { flex-wrap: wrap; overflow-x: visible; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .rail { grid-auto-columns: 150px; }
+  .listcard:has(> .item:nth-child(6)) { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); column-gap: 16px; }
+}

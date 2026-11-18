@@ -6,7 +6,7 @@ const ok = (c, m) => { if (!c) { console.error("FAIL: " + m); process.exit(1); }
 (async () => {
   const data = fs.mkdtempSync(path.join(os.tmpdir(), "saga-site-")), port = 18000 + Math.floor(Math.random() * 2000);
   const srv = spawn(process.execPath, [path.join(__dirname, "../site/server.js")], { env: Object.assign({}, process.env, { SAGA_DATA: data, SAGA_WEB: __dirname, SAGA_PORT: String(port), SAGA_PUBLIC_PORT: String(port + 2) }), stdio: "inherit" });
-  const target = http.createServer((q, r) => { r.writeHead(200, { "Content-Type": "application/json" }); r.end(JSON.stringify({ path: q.url, method: q.method })); }).listen(port + 1, "127.0.0.1");
+  const target = http.createServer((q, r) => { r.writeHead(200, { "Content-Type": "application/json" }); r.end(JSON.stringify({ path: q.url, method: q.method, ua: q.headers["user-agent"] || "" })); }).listen(port + 1, "127.0.0.1");
   await new Promise(r => setTimeout(r, 900));
   const b = await chromium.launch(); const pg = await b.newPage(); const errs = [];
   pg.on("pageerror", e => errs.push(String(e)));
@@ -25,7 +25,10 @@ const ok = (c, m) => { if (!c) { console.error("FAIL: " + m); process.exit(1); }
     const kept = await pg.evaluate(async () => { const c = await caches.open("saga-shell-1"); const k = (await c.keys()).map(r => new URL(r.url).pathname); return k; });
     ok(swOk && kept.includes("/app.js") && kept.some(k => k === "/" || k === "/index.html") && !kept.some(k => k.startsWith("/api/")), "service worker keeps the app, not the data: " + kept.slice(0, 6).join(" "));
     const r = await pg.evaluate(p => new Promise(res => { const id = "t1"; window.__httpDone = i => res(JSON.parse(Android.take(i))); Android.http(id, "POST", `http://127.0.0.1:${p}/x?y=1`, "Accept: application/json", "{}"); }), port + 1);
-    ok(r.status === 200 && r.split === 1 && /\/x\?y=1/.test(await pg.evaluate(() => Android.takeBody("t1"))), "calls to other sites go through the server");
+    const tb = await pg.evaluate(() => Android.takeBody("t1"));
+    ok(r.status === 200 && r.split === 1 && /\/x\?y=1/.test(tb), "calls to other sites go through the server");
+    const ua = JSON.parse(tb).ua;
+    ok(/^Saga\/[\d.]+ \(website/.test(ua), "the website's calls say they're Saga (Trakt turns away Node's own name): " + ua);
     const bad = await pg.evaluate(() => fetch("api/http", { method: "POST", body: JSON.stringify({ method: "GET", url: "http://example.com/" }) }).then(r => r.json()));
     ok(bad.error === "HTTPS only", "plain http only to your own tailnet or this machine");
     execFileSync("python3", ["-c", `import zipfile; z=zipfile.ZipFile('${data}/../t-${port}.zip','w',zipfile.ZIP_DEFLATED); z.writestr('watched-movies.json','[{"a":1}]'); z.writestr('pic.png',b'x'); z.close()`]);

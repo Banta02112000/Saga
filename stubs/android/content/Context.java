@@ -7,4 +7,7 @@ public abstract class Context {
     public String getPackageName() { return null; }
     public Context getApplicationContext() { return null; }
     public void startActivity(Intent i) {}
+    public static final int MODE_PRIVATE = 0;
+    public SharedPreferences getSharedPreferences(String name, int mode) { return null; }
+    public android.content.pm.PackageManager getPackageManager() { return null; }
 }

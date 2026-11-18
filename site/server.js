@@ -28,7 +28,7 @@ const ICONS = Object.fromEntries(["icon-192.png", "icon-512.png"].filter(n => fs
 const KEEP_DAYS = 7, MAX_BODY = 200 * 1024 * 1024;
 fs.mkdirSync(path.join(DATA, ".daily"), { recursive: true });
 fs.mkdirSync(path.join(DATA, ".sync"), { recursive: true });
-const SYNC_FILES = ["canonsync.json", "library.json", "games.json", "books.json", "dw.json"];
+const SYNC_FILES = ["canonsync.json", "library.json", "games.json", "books.json", "dw.json", "music.json"];
 
 // ---- sign-in: a password (scrypt), a sync key for the phone app, a secret for session cookies (data/auth.json)
 const AUTH_FILE = path.join(DATA, "auth.json");
@@ -152,10 +152,20 @@ function readJson(f) {
   jsonMemo.set(f, { stamp, v }); if (jsonMemo.size > 60) jsonMemo.delete(jsonMemo.keys().next().value);
   return v;
 }
+// 0.6.9.5: what `owner` shares with `viewer`: { lib, games, books, dw } or null. Sharing on with no list of people
+// (the way 0.6.5–0.6.9.4 saved it) means films, series, games and books with everyone, as before.
+const SHARE_PARTS = ["lib", "games", "books", "dw"];
+function shareFor(owner, viewer) {
+  if (!AUTH || !AUTH.users[owner]) return null;
+  const sh = readJson(path.join(dirOf(owner === AUTH.owner ? "" : owner), "share.json"));
+  if (!sh || !sh.on) return null;
+  const sec = sh.to ? sh.to[viewer] : { lib: true, games: true, books: true, dw: false };
+  return sec && SHARE_PARTS.some(k => sec[k]) ? Object.fromEntries(SHARE_PARTS.map(k => [k, !!sec[k]])) : null;
+}
 // 0.6.9: what a person who shares did lately, for their friends: watched, finished, read (newest first)
-function activityOf(d) {
+function activityOf(d, sec = { lib: true, games: true, books: true }) {
   const read = n => readJson(path.join(d, n));
-  const out = [], L = read("library.json") || {}, G = read("games.json") || {}, B = read("books.json") || {};
+  const out = [], L = sec.lib ? read("library.json") || {} : {}, G = sec.games ? read("games.json") || {} : {}, B = sec.books ? read("books.json") || {} : {};
   for (const i of Object.values(L.items || {})) {
     const w = (i.watches || []).filter(Boolean).sort().pop();
     if (w) out.push({ kind: i.type === "show" ? "finished" : "watched", type: i.type, title: i.title, year: i.year || null, tmdb: i.tmdb || null, imdb: i.imdb || null, date: String(w).slice(0, 10), rating: i.rating || 0 });
@@ -237,6 +247,9 @@ async function passOn(spec) {
   if (u.protocol !== "https:" && !(u.protocol === "http:" && local)) return { status: 0, headers: {}, body: "", error: "HTTPS only" };
   const headers = Object.assign({}, spec.headers || {});
   for (const h of Object.keys(headers)) if (/^(host|content-length|connection|accept-encoding)$/i.test(h)) delete headers[h];
+  // 0.6.9.5: Node's own User-Agent ("node") is turned away by Cloudflare in front of Trakt (403, "denied access"),
+  // so a sync from the website never got your watched episodes. The phone sends its own; the website now does too.
+  if (!Object.keys(headers).some(h => /^user-agent$/i.test(h))) headers["User-Agent"] = `Saga/${APP_VERSION} (website; +https://github.com/Banta02112000/Saga)`;
   const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), local ? 600e3 : 120e3);
   try {
     const m = String(spec.method || "GET").toUpperCase();
@@ -351,34 +364,47 @@ const handler = isPublic => async (req, res) => {
     }
     // 0.6.5: friends on the same website. Each person chooses to share; only then do the others see their films,
     // series, games and books (title, status, rating; no notes, no diary, no keys).
+    // 0.6.9.5: and for each person, which parts: films and series, games, books, Doctor Who.
     if (p === "/api/share") {
-      const f = path.join(DIR, "share.json");
-      if (req.method === "POST") { let on = false; try { on = !!JSON.parse((await readBody(req, 4096)).toString("utf8")).on; } catch (e) { /* off */ } writeAtomic(DIR, "share.json", Buffer.from(JSON.stringify({ on, at: Date.now() }))); return send(res, 200, JSON.stringify({ on })); }
-      let on = false; try { on = !!JSON.parse(fs.readFileSync(f, "utf8")).on; } catch (e) { /* off */ }
-      return send(res, 200, JSON.stringify({ on }));
+      const f = path.join(DIR, "share.json"), me = user || (AUTH && AUTH.owner) || "";
+      const others = AUTH ? Object.keys(AUTH.users).filter(n => n !== me) : [];
+      if (req.method === "POST") {
+        let j = {}; try { j = JSON.parse((await readBody(req, 65536)).toString("utf8")); } catch (e) { j = {}; }
+        const out = { on: !!j.on, at: Date.now() };
+        if (j.to && typeof j.to === "object") { out.to = {}; for (const n of others) { const v = j.to[n] || {}; out.to[n] = Object.fromEntries(SHARE_PARTS.map(k => [k, !!v[k]])); } }
+        writeAtomic(DIR, "share.json", Buffer.from(JSON.stringify(out)));
+        return send(res, 200, JSON.stringify(Object.assign({ ok: true, people: others }, out)));
+      }
+      let sh = {}; try { sh = JSON.parse(fs.readFileSync(f, "utf8")) || {}; } catch (e) { sh = {}; }
+      return send(res, 200, JSON.stringify({ on: !!sh.on, to: sh.to || null, people: others, parts: SHARE_PARTS }));
     }
     if (p === "/api/people" && AUTH) {
       const me = user || AUTH.owner, out = [];
       const read = (d, n) => readJson(path.join(d, n));
       for (const n of Object.keys(AUTH.users)) {
         if (n === me) continue;
-        const d = dirOf(n === AUTH.owner ? "" : n), sh = read(d, "share.json");
-        if (!sh || !sh.on) continue;
-        const L = read(d, "library.json") || {}, G = read(d, "games.json") || {}, B = read(d, "books.json") || {};
-        out.push({ name: n, recent: activityOf(d),
+        const sec = shareFor(n, me);
+        if (!sec) continue;
+        const d = dirOf(n === AUTH.owner ? "" : n);
+        const L = sec.lib ? read(d, "library.json") || {} : {}, G = sec.games ? read(d, "games.json") || {} : {}, B = sec.books ? read(d, "books.json") || {} : {};
+        let dw = null;
+        if (sec.dw) { const W = (read(d, "dw.json") || {}).works || {}, done = Object.values(W).filter(w => w && w.done), rated = done.filter(w => +w.rating > 0);
+          dw = { done: done.length, rated: rated.length, avg: rated.length ? Math.round(10 * rated.reduce((a, w) => a + +w.rating, 0) / rated.length) / 10 : null }; }
+        out.push({ name: n, parts: sec, recent: activityOf(d, sec),
           lib: Object.values(L.items || {}).map(i => ({ type: i.type, title: i.title, year: i.year || null, imdb: i.imdb || null, tmdb: i.tmdb || null, status: i.status, rating: i.rating || 0, poster: i.poster || "" })),
           games: (G.games || []).filter(g => !g.hidden).map(g => ({ title: g.title, date: g.date || "", platform: g.platform || "", status: g.status, rating: g.rating || 0 })),
-          books: (B.books || []).map(b => ({ title: b.title, authors: (b.authors || []).slice(0, 2), status: b.status, rating: b.rating || 0 })) });
+          books: (B.books || []).map(b => ({ title: b.title, authors: (b.authors || []).slice(0, 2), status: b.status, rating: b.rating || 0 })), dw });
       }
       return send(res, 200, JSON.stringify({ me, people: out }));
     }
     // 0.6.9: send a title to someone (only to people who share, and only if you share too); your inbox
     const shares = n => { try { return !!JSON.parse(fs.readFileSync(path.join(dirOf(n === AUTH.owner ? "" : n), "share.json"), "utf8")).on; } catch (e) { return false; } };
+    const sharesWith = (a, b) => !!shareFor(a, b);
     if (p === "/api/send" && req.method === "POST" && AUTH) {
       let j = {}; try { j = JSON.parse((await readBody(req, 65536)).toString("utf8")); } catch (e) { return send(res, 400, '{"error":"not JSON"}'); }
       const me = user || AUTH.owner, to = String(j.to || "").toLowerCase(), it = j.item || {};
       if (!AUTH.users[to] || to === me) return send(res, 404, '{"error":"no such person"}');
-      if (!shares(me) || !shares(to)) return send(res, 403, '{"error":"both of you need sharing on (Settings › Accounts and sync)"}');
+      if (!sharesWith(me, to) || !sharesWith(to, me)) return send(res, 403, '{"error":"you both need to share with each other (Settings › Accounts and sync › Sharing)"}');
       if (!it.title || !/^(movie|show|game|book)$/.test(it.type || "")) return send(res, 400, '{"error":"what to send?"}');
       const d = dirOf(to === AUTH.owner ? "" : to), f = path.join(d, "inbox.json");
       let box = []; try { box = JSON.parse(fs.readFileSync(f, "utf8")); } catch (e) { box = []; }
