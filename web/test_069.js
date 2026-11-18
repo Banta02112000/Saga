@@ -141,5 +141,30 @@ const resp = (b, status = 200) => ({ status, headers: {}, body: typeof b === "st
     calls.length = 0; const r2 = await I.anilistPush(http, "TOK", lib.all(), st); assert.strictEqual(r2.sent, 0, "nothing twice");
     await assert.rejects(I.anilistPush(async () => ({ status: 401, body: "" }), "OLD", [Object.assign(a, { eps: eps(9) })], st), /expired/);
     console.log("ok  AniList: changes in Saga go back (episodes, status, rating), nothing twice"); }
+  // ---- 0.6.9.1: only a rating means watched / finished; a listed title is to watch, a listed game is wishlist
+  { const C = require("./core.js"), I = require("./imports.js");
+    const csv = "Const,Your Rating,Date Rated,Title,Title Type,Year,Release Date\n" +
+      "tt0000001,8,2024-03-05,Rated Film,Movie,1999,1999-05-01\n" +
+      "tt0000002,,,Listed Film,Movie,2001,2001-06-01\n" +
+      "tt0000003,,,Listed Show,TV Series,2010,2010-01-01\n" +
+      "tt0000004,,,Listed Game,Video Game,2015,2015-02-02\n" +
+      "tt0000005,7,2023-01-01,Rated Game,Video Game,2012,2012-01-01\n";
+    const db = new C.Store(); C.importImdbCsv(db, "My favourites.csv", csv, "auto");
+    const kinds = Object.fromEntries(db.items().map(r => [r.title, r.kind + (r.list_name ? ":" + r.list_name : "")]));
+    assert.deepStrictEqual(kinds, { "Rated Film": "rated", "Listed Film": "list:My favourites", "Listed Show": "list:My favourites", "Listed Game": "list:My favourites", "Rated Game": "rated" });
+    const db2 = new C.Store(); C.importImdbCsv(db2, "WATCHLIST.csv", csv, "auto");
+    assert.ok(db2.items().filter(r => !r.rating).every(r => r.kind === "watchlist"), "a watchlist file goes to the watchlist");
+    const lib = new L.Library(); lib.adopt(db.items());
+    const st = t => lib.all().find(x => x.title === t);
+    assert.strictEqual(st("Rated Film").status, "watched"); assert.deepStrictEqual(st("Rated Film").watches, ["2024-03-05"], "watched the day you rated it, not the release day");
+    assert.strictEqual(st("Listed Film").status, "watchlist"); assert.strictEqual(st("Listed Show").status, "watchlist");
+    const gl = new G.Games(); G.fromImdb(gl, db.items());
+    assert.strictEqual(gl.games.find(g => g.title === "Rated Game").status, "done");
+    assert.strictEqual(gl.games.find(g => g.title === "Listed Game").status, "wishlist");
+    // any CSV: a plain list is to watch; a rating, a watched status or a watched date means watched
+    const d = I.detect({ name: "mine.csv", text: "Title,Year,Date,Rating,Status\nPlain,2000,2024-01-01,,\nRated,2001,,8,\nSeen,2002,,,Watched\nPlanned,2003,,9,Plan to watch\n" });
+    const by = Object.fromEntries(d.rows.map(r => [r.title, r.status]));
+    assert.deepStrictEqual(by, { Plain: "watchlist", Rated: "watched", Seen: "watched", Planned: "watched" }, JSON.stringify(by));
+    console.log("ok  only rated titles and games count as watched / finished; listed ones are to watch / wishlist"); }
   console.log("0.6.9 TESTS PASSED");
 })().catch(e => { console.error(e); process.exit(1); });

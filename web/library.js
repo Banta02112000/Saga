@@ -287,7 +287,7 @@ const epKey = (s, e) => `${s}:${e}`;
           else if (r.rating && +r.rating === ex.rating && rd > (ex.ratedAt || "")) ex.ratedAt = rd;
           if (!want && ex.status === "watchlist") {
             ex.status = "watched"; ch = true;
-            if (type === "movie" && !ex.watches.length) ex.watches.push(day(r.date) || "");
+            if (type === "movie" && !ex.watches.length) ex.watches.push((r.source === "imdb" ? day(r.rated_at || "") : day(r.date || "")) || "");
           }
           for (const f of ["imdb", "tmdb"]) if (o[f] && !ex[f]) { ex[f] = o[f]; ch = true; }
           if (ch) { ex.updated = Date.now(); this._index(ex); this.touched = (this.touched || 0) + 1; }
@@ -296,8 +296,10 @@ const epKey = (s, e) => `${s}:${e}`;
         this.adopted[k] = 1;
         const ex = this.find(o);
         const { item } = this.add(o, want ? "watchlist" : "watched");
-        if (!want && type === "movie" && r.date && !item.watches.includes(day(r.date))) { item.watches.push(day(r.date)); item.watches.sort(); }
-        if (!want && type === "movie" && !item.watches.length) item.watches.push(day(r.date) || "");
+        // 0.6.9.1: an IMDb row's date is the release date, not when you watched it: the day you rated it is used instead
+        const wd = r.source === "imdb" ? day(r.rated_at || "") : day(r.date || "");
+        if (!want && type === "movie" && wd && !item.watches.includes(wd)) { item.watches.push(wd); item.watches.sort(); }
+        if (!want && type === "movie" && !item.watches.length) item.watches.push(wd || "");
         if (r.rating && !item.rating) { item.rating = +r.rating; item.ratedAt = day(r.rated_at || "") || ""; item.ratingSrc = r.source || ""; }
         if (!ex) n++;
       }

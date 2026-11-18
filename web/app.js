@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.6.9";
+  const VERSION = "0.6.9.1";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -300,6 +300,7 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.6.9.1", ["Only a rating means watched or finished. An IMDb list or watchlist file brought in through Import used to mark every title on it as watched (and its games as finished): now an unrated title goes to To watch (a game to the Wishlist), and titles and games marked only because of an earlier import are put back once, with a copy kept first. Anything you rated, ticked, dated or wrote a note on stays as it is.", "Any other CSV: a title counts as watched only with a rating, a watched status or a watched date.", "A film rated on IMDb is dated the day you rated it, not the day it came out."]],
     ["0.6.9", ["History (Settings › Backup): before every import, Start over, list removal, merge, going back and the first sync of the day, a copy of what you made yourself is kept (the last 12); go back to any of them.",
       "Find duplicates (Settings › Tidy up): the same film, series or game entered twice, side by side; merge keeps the further status, your rating, every date, ticked episodes, notes and ids. The same game on two consoles isn't a duplicate.",
       "Steam (with your Web API key): hours played and last played on each game, achievements, and a game you've played in the last two weeks moves to Playing by itself.",
@@ -4108,6 +4109,40 @@
   const openApp = app => go(app === "dw" ? "timeline" : app);
 
   // ---- first start of 5.0: bring the old Games, Books and Doctor Who data in, once
+  // 0.6.9.1: an IMDb list or watchlist file imported through Import used to count every title without your rating as
+  // watched (and a game as finished). Once: those rows become watchlist entries, and titles and games that were marked
+  // watched/finished only because of them go back to To watch / Wishlist. Anything you rated, ticked, dated or wrote a
+  // note on stays as it is. A copy is kept first (Settings › Backup › Earlier copies).
+  function fixListedWatched() {
+    if (db.get("fix_listed_v1")) return null;
+    const bad = db.items("imdb", ["watched"]).filter(r => !(+r.rating > 0));
+    if (!bad.length) { db.set("fix_listed_v1", "1"); return null; }
+    snapshot("before un-marking titles that were only on a list");
+    const relDays = new Set(bad.map(r => r.date).filter(Boolean));
+    const gameKeys = new Set(bad.filter(r => r.medium === "Video Game").flatMap(r => [r.imdb && "i:" + r.imdb, "n:" + C.norm(r.title)].filter(Boolean)));
+    for (const r of bad) {
+      db.itemsMap.delete(C.Store.itemId(r));
+      db.addItems([{ title: r.title, year: r.year, medium: r.medium, imdb: r.imdb, tmdb: r.tmdb, genres: r.genres, runtime: r.runtime, date: r.date }], "imdb", "watchlist", "");
+    }
+    let films = 0, gms = 0;
+    const ix = originsIndex();
+    for (const it of lib.all()) {
+      if (it.status !== "watched" || it.rating > 0 || it.ratedHere || it.notes || Object.keys(it.eps || {}).length) continue;
+      if (!it.watches.every(d => !d || relDays.has(d))) continue; // a watch date of your own: you saw it
+      const o = originsOf(it, ix);
+      if (!o.length || !o.every(r => !(+r.rating > 0) && ["watchlist", "list", "collection"].includes(r.kind))) continue;
+      it.status = "watchlist"; it.watches = []; delete it.autoWatching; it.updated = Date.now(); films++;
+    }
+    if (films) libSave();
+    for (const g of games.games) {
+      if (g.status !== "done" || g.rating > 0 || g.notes || (g.sessions || []).length || g.plays.length > 1 || g.src !== "imdb") continue;
+      if (!gameKeys.has(g.imdb && "i:" + g.imdb) && !gameKeys.has("n:" + C.norm(g.title))) continue;
+      g.status = "wishlist"; g.plays = []; gms++;
+    }
+    if (gms) games.save();
+    db.set("fix_listed_v1", "1"); db.flush(); invalidate();
+    return { rows: bad.length, films, games: gms };
+  }
   async function migrate() {
     if (db.get("saga5_migrated")) return;
     const existing = db.items().length || lib.all().length || Native.load("books.json") || db.get("username") || db.get("imdb_user");
@@ -4736,6 +4771,7 @@
   render();
   if (["search", "syncnow", "scanbook", "nextep"].includes(startTab)) setTimeout(() => shortcut(startTab), 300);
   migrate().catch(e => console.error(e));
+  try { const fx = fixListedWatched(); if (fx && (fx.films || fx.games)) { render(); setTimeout(() => toast(`${fmt(fx.films)} titles and ${fmt(fx.games)} games were only on a list, not rated: back to To watch / Wishlist`), 1200); } } catch (e) { logError("fixlisted", e.message); }
   applyPending();
   setTimeout(() => window.__sharePoll(), 400);
   applyBackground();
@@ -4753,5 +4789,5 @@
   const last = parseFloat(db.get("last_sync", "0")) || 0;
   const hasSources = db.get("username") || db.get("imdb_user") || db.get("canon_urls") || db.get("imdb_lists");
   if (db.get("auto_sync") === "1" && hasSources && Date.now() / 1000 - last > AUTO_SYNC_HOURS * 3600) { db.set("sync_open", "0"); doSync(); db.set("sync_open", "1"); }
-  window.__app = { openLib, wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
+  window.__app = { fixListedWatched, openLib, wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
 })();

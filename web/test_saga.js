@@ -288,7 +288,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.6.9", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.6.9.1", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();
@@ -810,8 +810,20 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     document.querySelector("#overlay").innerHTML = "";
     __app.go("games"); press("gview", { v: "stats" }); out.backlog = /Backlog/.test(document.querySelector("#view").textContent) && /h to beat/.test(document.querySelector("#view").textContent);
     press("gview", { v: "grid" });
+    // 0.6.9.1: titles and games marked watched / finished only because an IMDb list file was imported go back
+    const db = __app.db; db.set("fix_listed_v1", "");
+    db.addItems([{ title: "Only Listed Film", year: 2004, medium: "Movie", imdb: "tt6660001", date: "2004-03-03" }, { title: "Listed And Ticked", year: 2005, medium: "Movie", imdb: "tt6660002", date: "2005-01-01" },
+      { title: "Only Listed Game", year: 2014, medium: "Video Game", imdb: "tt6660003", date: "2014-01-01" }], "imdb", "watched", "");
+    const lf = __app.lib.add({ type: "movie", title: "Only Listed Film", year: 2004, imdb: "tt6660001" }, "watchlist").item; lf.status = "watched"; lf.watches = ["2004-03-03"];
+    const lt = __app.lib.add({ type: "movie", title: "Listed And Ticked", year: 2005, imdb: "tt6660002" }, "watchlist").item; lt.status = "watched"; lt.watches = ["2023-08-08"];
+    const lg = __app.games.add({ title: "Only Listed Game", imdb: "tt6660003", src: "imdb", date: "2014-01-01" }, "done").game;
+    const fx = __app.fixListedWatched();
+    out.fix = fx && fx.films === 1 && fx.games === 1 && lf.status === "watchlist" && !lf.watches.length && lt.status === "watched" && lg.status === "wishlist" && !lg.plays.length
+      && db.items("imdb", ["watched"]).every(r => r.rating > 0) && __app.fixListedWatched() === null && /only on a list/.test(db.get("snaps"));
+    out.fixd = JSON.stringify(fx);
     return out;
   });
+  ok(n69.fix, "listed-only titles and games marked watched by an old import go back to To watch / Wishlist, once, with a copy first: " + n69.fixd);
   ok(n69.snap && n69.restored, "History: a copy, and going back to it (with a copy of now first): " + JSON.stringify(n69));
   ok(n69.dupList && n69.merged, "Duplicates: shown side by side, merged with everything kept");
   ok(n69.inbox && n69.lately && n69.inboxPage, "Friends: what they sent you, what they did lately, Send to on a page");

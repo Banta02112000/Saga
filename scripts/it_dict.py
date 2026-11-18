@@ -521,3 +521,4 @@ P += [(r"You and (.+)", "Tu e $1"), (r"games (.+) finished", "giochi finiti da $
   (rf"taste match \({N} both rated\)", "affinità di gusti ($1 votati da entrambi)"), (rf"free on the Pi of (.+)", "liberi sul Pi su $1"), (r"free on the Pi", "liberi sul Pi"),
   (rf"Saga (\S+) · Node (\S+) · running for {N} (days|h)", "Saga $1 · Node $2 · attivo da $3 $4"),
   (r"App updates on the download page: (.+)", "Aggiornamenti dell'app nella pagina di download: $1")]
+P += [(rf"{N} titles and {N} games were only on a list, not rated: back to To watch / Wishlist", "$1 titoli e $2 giochi erano solo in una lista, senza voto: tornati in Da vedere / Lista desideri")]

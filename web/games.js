@@ -657,7 +657,7 @@
     for (const r of rows) {
       if (r.medium !== "Video Game" || !r.title) continue;
       if (lib.removed[norm(r.title)]) continue;
-      const isRated = r.kind === "rated" || r.kind === "watched";
+      const isRated = +r.rating > 0; // 0.6.9.1: only a rating means played; a listed game goes to the wishlist
       const before = lib.find({ title: r.title, imdb: r.imdb, year: r.year });
       if (before) before._st = before.status;
       if (!before && !isRated && lib.settings.imdbLists === "0") continue;

@@ -118,13 +118,17 @@
       ic = col(cols, ["IMDB", "imdb_id", "IMDb ID", "Const", "imdb"]), tm = col(cols, ["TMDB", "tmdb_id", "TMDb ID"]),
       st = col(cols, ["Status", "Watchlist", "List", "Shelf", "State"]), rc = col(cols, ["Rating", "My Rating", "Your Rating", "Score", "user_rating"]),
       dc = col(cols, ["WatchedDate", "Watched Date", "Last Watched", "Date Watched", "watched_at", "Date", "Date Rated", "Completed"]),
+      dcSeen = !!col(cols, ["WatchedDate", "Watched Date", "Last Watched", "Date Watched", "watched_at", "Date Rated", "Completed"]),
       ec = col(cols, ["LastEpWatched", "Episodes Watched", "Progress", "watched_episodes"]);
     return rows.map(r => {
       const title = r[tc]; if (!title) return null;
       const ty = low(r[typ]);
       const type = /tv|show|series|anime|serie|episode/.test(ty) && !/movie|film/.test(ty) ? "show" : "movie";
       const s = low(r[st]);
-      const status = /plan|watchlist|want|to.?watch|da vedere/.test(s) ? "watchlist" : /drop|abandon/.test(s) ? "dropped" : /watching|progress|current|in corso|hold/.test(s) ? "watching" : (s || r[dc] || r[rc]) ? "watched" : "watchlist";
+      // 0.6.9.1: watched only when the row says so (a watched status, a watched date) or you rated it; a plain list is to watch
+      const rated = (parseFloat(String(r[rc] || "").replace(",", ".")) || 0) > 0;
+      const status = /plan|watchlist|want|to.?watch|da vedere/.test(s) ? (rated ? "watched" : "watchlist") : /drop|abandon/.test(s) ? "dropped" : /watching|progress|current|in corso|hold/.test(s) ? "watching"
+        : /watched|seen|complete|finished|done|visto|visti|completat/.test(s) || rated || (dcSeen && r[dc]) ? "watched" : "watchlist";
       let rating = parseFloat(String(r[rc] || "").replace(",", ".")) || 0;
       if (rating > 10) rating = Math.round(rating / 10); else if (rating && rating <= 5 && /letterboxd|5/.test(src || "")) rating = Math.round(rating * 2);
       const imdb = ((r[ic] || Object.values(r).join(" ")).match(/tt\d{6,10}/) || [])[0] || null;

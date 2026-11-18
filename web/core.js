@@ -710,7 +710,8 @@
       const c = g(row, "Const"), title = g(row, "Title", "Original Title");
       if (!c && !title) continue;
       const rating = toInt(g(row, "Your Rating"));
-      const k = kind === "auto" ? (rating ? "rated" : "watched") : kind;
+      // 0.6.9.1: only a rating means you've seen it; a row without one (a list or watchlist export) is a list entry
+      const k = kind === "auto" ? (rating ? "rated" : "list") : kind;
       (groups[k] = groups[k] || []).push({
         imdb: c.startsWith("tt") ? c : null, title, year: parseYear(g(row, "Year")),
         medium: mediumFromImdb(g(row, "Title Type")), rating, genres: g(row, "Genres"),
@@ -726,9 +727,13 @@
   function importImdbCsv(db, name, text, kind = "auto") {
     const groups = parseImdbText(text, kind);
     if (!Object.keys(groups).length) throw new Error(`${name} is not an IMDb CSV export (no Const column)`);
-    const ln = kind === "list" ? stem(name) : "";
+    const ln = kind === "list" || kind === "auto" ? stem(name) : "";
     let total = 0;
-    for (const [k, items] of Object.entries(groups)) total += db.addItems(items, "imdb", k, ln);
+    for (const [k, items] of Object.entries(groups)) {
+      // an unrated row from a file named like a watchlist goes to the watchlist; from any other file, to a list named after the file
+      if (k === "list" && kind === "auto" && /watch\s*list/i.test(stem(name))) { total += db.addItems(items, "imdb", "watchlist", ""); continue; }
+      total += db.addItems(items, "imdb", k, k === "list" ? ln : "");
+    }
     return total;
   }
 

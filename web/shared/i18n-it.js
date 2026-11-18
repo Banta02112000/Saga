@@ -1998,5 +1998,9 @@ window.BANTA_IT_PAT = [
 [
 "App updates on the download page: (.+)",
 "Aggiornamenti dell'app nella pagina di download: $1"
+],
+[
+"(\\d[\\d,.]*) titles and (\\d[\\d,.]*) games were only on a list, not rated: back to To watch / Wishlist",
+"$1 titoli e $2 giochi erano solo in una lista, senza voto: tornati in Da vedere / Lista desideri"
 ]
 ];
