@@ -543,3 +543,7 @@ P += [(rf"Saga (\S+) is ready: it starts next time you open Saga", "Saga $1 è p
 D.update({"Oldest first (original release)": "Prima i più vecchi (uscita originale)", "Biggest first": "Prima i più grandi", "Link: its remake, or the same game twice": "Collega: il suo remake, o lo stesso gioco due volte",
 "Its remake": "Il suo remake", "Its original": "Il suo originale", "Same game": "Stesso gioco", "Find the other game": "Trova l'altro gioco", "Its remake, or the same game": "Il suo remake, o lo stesso gioco",
 "Send my keys and sign-ins to my website": "Invia le mie chiavi e gli accessi al mio sito"})
+D.update({"Missing": "Mancanti", "No canon games yet": "Ancora nessun gioco canonico", "Wishlist": "Lista desideri", "Not canon": "Non canonico",
+"Fill missing details with AI (release, platform, remake, HLTB)": "Completa i dettagli mancanti con l'IA (uscita, piattaforma, remake, HLTB)", "Fill missing details with AI": "Completa i dettagli mancanti con l'IA"})
+P += [(rf"You have {N} of {N} canon games \\({N}%\\), in {N} series\\. Your Games tab is what counts: IMDb lists are only a source\\.", "Hai $1 di $2 giochi canonici ($3%), in $4 serie. Conta la tua scheda Giochi: le liste IMDb sono solo una fonte."),
+  (rf"Fill missing details with AI \\({N} games\\)", "Completa i dettagli mancanti con l'IA ($1 giochi)"), (rf"{N} games filled in(.*)", "$1 giochi completati$2")]

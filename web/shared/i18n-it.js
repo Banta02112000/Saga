@@ -295,7 +295,7 @@ window.BANTA_IT = {
 "Removes synced and imported titles, scans and caches. Keeps your settings and the titles you marked as seen. Keys are stored only on this phone, unencrypted.": "Rimuove titoli sincronizzati e importati, scansioni e cache. Mantiene le impostazioni e i titoli segnati come visti. Le chiavi restano solo su questo telefono, non cifrate.",
 "Hidden franchises": "Franchise nascosti",
 "Franchises you hide on the Missing tab appear here.": "Qui compaiono i franchise che nascondi nella scheda Canon.",
-"Not canon": "Non canon",
+"Not canon": "Non canonico",
 "Compilations and other entries you mark as not canon appear here.": "Qui compaiono le raccolte e le altre voci che segni come non canon.",
 "Hidden from Upcoming": "Nascosti da In arrivo",
 "Shows and releases you hide in the calendar appear here.": "Qui compaiono le serie e le uscite che nascondi nel calendario.",
@@ -861,7 +861,7 @@ window.BANTA_IT = {
 "Add a game": "Aggiungi un gioco",
 "Recently played": "Giocati di recente",
 "Shortest": "Più brevi",
-"Wishlist": "Desiderati",
+"Wishlist": "Lista desideri",
 "Owned, to play": "Posseduti, da giocare",
 "Your games, all in one place": "I tuoi giochi, tutti in un posto",
 "Search Steam to add a game, import your Steam library, HowLongToBeat, Grouvee or Backloggd, or let your IMDb ratings bring the games you've rated.": "Cerca su Steam per aggiungere un gioco, importa la tua libreria Steam, HowLongToBeat, Grouvee o Backloggd, oppure lascia che i tuoi voti IMDb portino i giochi che hai votato.",
@@ -1142,7 +1142,10 @@ window.BANTA_IT = {
 "Same game": "Stesso gioco",
 "Find the other game": "Trova l'altro gioco",
 "Its remake, or the same game": "Il suo remake, o lo stesso gioco",
-"Send my keys and sign-ins to my website": "Invia le mie chiavi e gli accessi al mio sito"
+"Send my keys and sign-ins to my website": "Invia le mie chiavi e gli accessi al mio sito",
+"No canon games yet": "Ancora nessun gioco canonico",
+"Fill missing details with AI (release, platform, remake, HLTB)": "Completa i dettagli mancanti con l'IA (uscita, piattaforma, remake, HLTB)",
+"Fill missing details with AI": "Completa i dettagli mancanti con l'IA"
 };
 window.BANTA_IT_PAT = [
 [
@@ -2084,5 +2087,17 @@ window.BANTA_IT_PAT = [
 [
 "(\\d[\\d,.]*) scrobbles since (\\d[\\d,.]*)",
 "$1 ascolti dal $2"
+],
+[
+"You have (\\d[\\d,.]*) of (\\d[\\d,.]*) canon games \\\\((\\d[\\d,.]*)%\\\\), in (\\d[\\d,.]*) series\\\\. Your Games tab is what counts: IMDb lists are only a source\\\\.",
+"Hai $1 di $2 giochi canonici ($3%), in $4 serie. Conta la tua scheda Giochi: le liste IMDb sono solo una fonte."
+],
+[
+"Fill missing details with AI \\\\((\\d[\\d,.]*) games\\\\)",
+"Completa i dettagli mancanti con l'IA ($1 giochi)"
+],
+[
+"(\\d[\\d,.]*) games filled in(.*)",
+"$1 giochi completati$2"
 ]
 ];

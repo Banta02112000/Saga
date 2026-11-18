@@ -992,6 +992,38 @@
     if (c.date) return c.date.length === 7 ? c.date > today.slice(0, 7) : c.date.length === 4 ? +c.date > +today.slice(0, 4) : c.date > today;
     return !c.year || c.year > +today.slice(0, 4);
   }
+  // 0.6.9.7: the canon games (from your canon lists and the AI scans), checked against your Games tab instead of
+  // your IMDb/Trakt rows. games: [{ id, title, date, imdb, status, remake }]. Each entry: have (the game, or its
+  // remake, is in your games), done (finished), unreleased (not out yet: not counted).
+  function gameCanon(db, games, today = new Date().toISOString().slice(0, 10)) {
+    const hidden = db.hiddenFranchises(), notCanon = db.notCanon(), alias = mvAlias(db);
+    const byImdb = new Map(), byNorm = new Map();
+    const put = (n, y, g) => { if (!n) return; const a = byNorm.get(n) || []; a.push({ y, g }); byNorm.set(n, a); };
+    for (const g of games || []) {
+      if (g.imdb) byImdb.set(g.imdb, g);
+      put(norm(g.title), parseYear(g.date), g);
+      if (g.remake && g.remake.title) put(norm(g.remake.title), parseYear(g.remake.date), g);
+    }
+    const kept = new Map(), out = [];
+    for (const c0 of db.canon()) {
+      if (c0.medium !== "Video Game") continue;
+      const k0 = `${c0.norm}|${c0.year || ""}`;
+      const prev = kept.get(k0);
+      if (prev) { if (c0.date && !prev.date) prev.date = c0.date; if (c0.imdb && !prev.imdb) prev.imdb = c0.imdb; continue; }
+      const c = Object.assign({}, c0), fr0 = franchiseName(c.franchise), mv = alias[fr0];
+      c.franchise = mv || fr0;
+      if (mv && mv !== fr0 && !c.sub) c.sub = fr0;
+      if (hidden.has(c.franchise) || canonKeys(c).some(k => notCanon[k])) continue;
+      kept.set(k0, c);
+      const g = (c.imdb && byImdb.get(c.imdb)) || ((byNorm.get(c.norm) || []).find(x => !c.year || !x.y || Math.abs(x.y - c.year) <= 1) || {}).g || null;
+      c.game = g ? g.id : null;
+      c.have = !!g;
+      c.done = !!(g && g.status === "done");
+      c.unreleased = !c.have && isUnreleased(c, today);
+      out.push(c);
+    }
+    return out.sort((a, b) => a.franchise.localeCompare(b.franchise) || String(a.date || a.year || "9999").localeCompare(String(b.date || b.year || "9999")));
+  }
   function franchiseProgress(status) {
     const fr = new Map();
     for (const c of status) {
@@ -2928,10 +2960,13 @@ TITLES:
 
   // Incremental: only titles not yet sent to Gemini are processed, results are merged, and a large library is
   // covered over several runs (each run handles up to maxBatches batches). resetGemini() starts over.
-  function aiState(db, origin = "gemini") {
+  // extra: more titles to check (0.6.9.7: the games in your Games tab, which aren't always on IMDb or Trakt)
+  function aiState(db, origin = "gemini", extra = null) {
+    if (!extra) { try { extra = (CONFIG.extraSeeds && CONFIG.extraSeeds(db)) || []; } catch (e) { extra = []; } }
     let sent;
     try { sent = new Set(JSON.parse(db.get(`${origin}_sent`, "[]"))); } catch (e) { sent = new Set(); }
-    const pool = seeds(db).filter(i => MEDIA.includes(i.medium) && i.title);
+    const have = new Set();
+    const pool = seeds(db).concat(extra || []).filter(i => MEDIA.includes(i.medium) && i.title && !have.has(i.key) && have.add(i.key));
     const pending = pool.filter(i => !sent.has(i.key));
     return { sent, pool, pending };
   }
@@ -3801,7 +3836,7 @@ ${blocks.join("\n\n")}`;
   const Core = {
     MEDIA, PROFILES, SECRET_RX, norm, parseYear, mediumFromImdb, mediumFromText, ratio, TitleIndex, Store,
     parseCsv, parseImdbText, importImdbCsv, importFranchiseFile, traktEntries, routeTraktFile, storeTrakt, importTraktZip,
-    breathe, jsonParts, BUSY: CONFIG_BUSY, consumed, Exclusion, canonStatus, canonStatusAsync, franchiseProgress, isUnreleased, upNext, missingCanon, discrepancies, computeStats,
+    breathe, jsonParts, BUSY: CONFIG_BUSY, consumed, Exclusion, canonStatus, canonStatusAsync, franchiseProgress, isUnreleased, gameCanon, upNext, missingCanon, discrepancies, computeStats,
     recommend, sourceHealth, personWorks, tmdbPosters, VMap, apiTitles, pageOrApi, gqlInfo, imdbReset: () => { gqlBlocked = false; }, imdbGql, gqlList, gqlRatings, imdbUr, authorizeUrl, exchangeCode, Trakt, traktSync, imdbList, imdbRatings, imdbWatchlist, imdbUserId, listIdFrom, walkTitles, browseTitles, pageExtract, pageProbe, probeFor, TMDB, collectionScan, season0Scan,
     CONFIG, AI_PRESETS, compatProvider, compatScan, localModels, serverBase, traktOne, traktEpRatings, parseLines, parseMvGroup, relevantNames, promptLine, netHint, robust, pool, details, titleInfo, justWatch, pickDates, dateSummary, bestOffer, cachedInfo, enrichInfo, platformRatings, ratingDiffs, withTimeout, watchProgress, continueWatching, testGemini, gemError, fillPosters, posterKey, aiState, resetAi, canonScan, claudeScan, claudeCall, claudeModels, rankClaudeModel, CLAUDE_DEFAULT, upcomingEpisodes, canonKeys, parseJsonArray, multiverseScan, collectionRows, refreshCollections, tvNext, upcomingEvents, computeAlerts, backgroundRun, fmtWhen, hashId, geminiState, resetGemini, mvGroup, mvExpand, multiverses, mvMap, mvAlias, mvPending, mvDone, geminiProvider, vpnOptions, bestVpn, worldFrom, worldCountries, jwQuery, flag: FLAGS, VPN_DEFAULT, manualScan, franchiseBatches, verifyPrompt, parseVerify, newsBatches, newsPrompt, parseCanonRows, franchiseName, releaseList, releaseKey, parseDate, seeds, rankGeminiModel, resolveGeminiModel, syncAll, sleep,
   };

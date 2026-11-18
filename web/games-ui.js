@@ -57,12 +57,12 @@
       ["wishlist", "Wishlist", c.wishlist], ["upcoming", "Upcoming", c.upcoming], ["owned", "Owned, to play", null], ["sale", "On sale", null], ["lowest", "At its lowest", null], ["subs", "In a subscription", null], ["remakes", "Has a remake", null], ["dropped", "Dropped", c.dropped]];
     const list = ui.view === "grid" ? listFor() : [];
     return `${playing.length && ui.f === "all" && !ui.q ? `<section>${K.head("Playing and up next", "", playing.length)}${K.rail(playing.map(g => tileOf(g, L.whyNext(g))))}</section>` : ""}
-      <div class="subnav">${[["grid", "Library"], ["mv", "Franchises"], ["stats", "Stats"]].map(([k, l]) => `<button data-action="gview" data-v="${k}" ${ui.view === k ? 'aria-current="page"' : ""}>${l}</button>`).join("")}</div>
+      <div class="subnav">${[["grid", "Library"], ["mv", "Franchises"], ["canon", "Missing"], ["stats", "Stats"]].map(([k, l]) => `<button data-action="gview" data-v="${k}" ${ui.view === k ? 'aria-current="page"' : ""}>${l}</button>`).join("")}</div>
       <div class="toolbar"><input type="search" data-gq="1" data-input="gq" value="${esc(ui.q)}" placeholder="Filter your games" autocomplete="off">
         ${ui.view === "grid" ? `<select data-gsort="1" aria-label="Sort">${[["release", "Release (oldest)"], ["newest", "Release (newest)"], ["remake", "Remake release"], ["recent", "Recently played"], ["title", "Title"], ["rating", "Rating"], ["deal", "Best deal"], ["short", "Shortest"], ["price", "Price"]].map(([k, l]) => `<option value="${k}" ${ui.sort === k ? "selected" : ""}>${l}</option>`).join("")}</select>` : ""}
         <button class="iconbtn" data-action="gadd" aria-label="Add a game">${K.icon("plus")}</button></div>
       ${ui.view !== "stats" ? strip() : ""}
-      ${ui.view === "stats" ? renderStats() : ui.view === "grid" ? `<div class="chips" style="margin-bottom:14px">${f.map(([k, l, n]) => `<button class="chip" data-action="gfilter" data-v="${k}" aria-pressed="${ui.f === k}">${l}${n != null ? ` <span class="muted">${n}</span>` : ""}</button>`).join("")}</div>
+      ${ui.view === "canon" ? renderCanon() : ui.view === "stats" ? renderStats() : ui.view === "grid" ? `<div class="chips" style="margin-bottom:14px">${f.map(([k, l, n]) => `<button class="chip" data-action="gfilter" data-v="${k}" aria-pressed="${ui.f === k}">${l}${n != null ? ` <span class="muted">${n}</span>` : ""}</button>`).join("")}</div>
         ${list.length ? K.grid(list.slice(0, ui.lim).map(g => tileOf(g))) : `<p class="muted">Nothing here.</p>`}
         ${list.length > ui.lim ? `<button class="btn block" style="margin-top:16px" data-action="gmore">Show more (${list.length - ui.lim})</button>` : ""}
         <p class="small muted" style="margin-top:16px">${c.all} games · ${c.done} finished · ${c.plays} playthroughs</p>` : renderMv()}`;
@@ -105,6 +105,33 @@
       <section class="card" style="padding:14px"><div class="kicker">By decade</div>${rows(s.decades, o => `${o.n}${o.avg != null ? ` · ★ ${o.avg}` : ""}`)}</section>
       ${s.wishValue || s.sale ? `<section class="card" style="padding:14px"><div class="kicker">Wishlist</div><p class="small">${s.sale} on sale now${s.wishValue ? ` · about €${s.wishValue} for all of it at today's prices` : ""}</p></section>` : ""}
     </div>`;
+  }
+  // 0.6.9.7: canon games you don't have yet (from your canon lists and the AI scans), by series; what isn't out yet is
+  // listed apart and not counted
+  function canonRows() {
+    const C = window.Core, db = Saga.db;
+    if (!C || !C.gameCanon) return [];
+    const st = db.ver ? db.ver() : 0;
+    if (ui.cMemo && ui.cMemo.st === st && ui.cMemo.n === lib().games.length && ui.cMemo.at > Date.now() - 4000) return ui.cMemo.rows;
+    const rows = C.gameCanon(db, lib().visible());
+    ui.cMemo = { st, n: lib().games.length, at: Date.now(), rows };
+    return rows;
+  }
+  function renderCanon() {
+    const rows = canonRows(), q = G.norm(ui.q || "");
+    if (!rows.length) return `<div class="empty2"><h3>No canon games yet</h3><p class="muted">Canon games come from your canon lists (Settings › Canon sources) and the AI canon scan (Watch › Missing), which now also checks the games in this tab.</p></div>`;
+    const fr = new Map();
+    for (const c of rows) { if (q && !G.norm(c.title).includes(q) && !G.norm(c.franchise).includes(q)) continue; const f = fr.get(c.franchise) || { name: c.franchise, have: 0, total: 0, miss: [], soon: [] }; if (c.unreleased) f.soon.push(c); else { f.total++; if (c.have) f.have++; else f.miss.push(c); } fr.set(c.franchise, f); }
+    const list = [...fr.values()].filter(f => f.miss.length || f.soon.length).sort((a, b) => b.miss.length - a.miss.length || a.name.localeCompare(b.name));
+    const all = rows.filter(c => !c.unreleased), have = all.filter(c => c.have).length;
+    const row = c => `<div class="item"><div class="grow" style="min-width:0"><b class="ell" style="display:block">${esc(c.title)}</b><div class="small muted">${esc([c.date || c.year || "", c.sub].filter(Boolean).join(" · "))}${c.unreleased ? " · <b>Not out yet</b>" : ""}</div></div>
+      <button class="btn small" data-action="gcanonadd" data-t="${esc(c.title)}" data-y="${esc(c.date || c.year || "")}" data-i="${esc(c.imdb || "")}" data-f="${esc(c.franchise)}">${K.icon("plus")}Wishlist</button>
+      <button class="iconbtn" data-action="gcanonno" data-t="${esc(c.title)}" data-y="${esc(c.year || "")}" data-i="${esc(c.imdb || "")}" data-f="${esc(c.franchise)}" aria-label="Not canon" title="Not canon">${K.icon("notcanon")}</button></div>`;
+    const gaps = lib().visible().filter(g => !g.aiAt && (!g.date || !g.platform || g.hours == null)).length;
+    return `<div class="row wrap" style="gap:8px;margin:4px 0"><button class="btn small" data-action="ginfoall">${K.icon("sync")}Fill missing details with AI${gaps ? ` (${fmt(gaps)} games)` : ""}</button></div>
+      <p class="muted" style="margin:4px 0 12px">You have ${fmt(have)} of ${fmt(all.length)} canon games (${Math.round(100 * have / Math.max(1, all.length))}%), in ${fmt(fr.size)} series. Your Games tab is what counts: IMDb lists are only a source.</p>`
+      + (list.length ? list.slice(0, ui.cLim || 40).map(f => `<section>${K.head(f.name, `${f.have} of ${f.total}`, f.miss.length)}<div class="listcard">${f.miss.map(row).join("")}${f.soon.map(row).join("")}</div></section>`).join("")
+        + (list.length > (ui.cLim || 40) ? `<button class="btn block" data-action="gcanonmore">Show more</button>` : "") : `<p class="muted">You have every canon game${q ? " that matches" : ""}.</p>`);
   }
   function renderMv() {
     const q = G.norm(ui.q);
@@ -153,8 +180,9 @@
   function sheetHtml(g) {
     const t = today(), L = Saga.lang();
     const plays = g.plays.map((d, i) => `<div class="logrow"><span class="grow">${i + 1}. ${esc(K.when(d, L))}</span><button class="btn quiet small" data-action="gunplay" data-i="${i}" aria-label="Remove this playthrough">✕</button></div>`).join("");
-    const facts = [["Release", g.date ? K.when(g.date, L) + (g.date > t ? " (upcoming)" : "") : g.dateText || "Not announced"], ["Platform", g.platform], ["Owned on", g.owned],
-      ["Remake", g.remake ? [g.remake.title, g.remake.platform, g.remake.date ? K.when(g.remake.date, L) : ""].filter(Boolean).join(" · ") : ""],
+    const dl = d => (Saga.lang() === "it" ? K.when(d, "it") : G.longDate(d)); // January 1, 1900
+    const facts = [["Release", g.date ? dl(g.date) + (g.date > t ? " (upcoming)" : "") : g.dateText || "Not announced"], ["Platform", g.platform], ["Owned on", g.owned],
+      ["Remake", g.remake ? [g.remake.title, g.remake.platform, g.remake.date ? dl(g.remake.date) : ""].filter(Boolean).join(" · ") : ""],
       ["IMDb rating", g.imdbR ? `★ ${g.imdbR}` : ""], ["Time to beat", g.hours ? `${g.hours} h${g.hoursRemake ? ` (remake ${g.hoursRemake} h)` : ""}` : ""],
       ["Studio", g.dev || ""], ["Franchise", g.franchise], ["Multiverse", g.multiverse !== g.franchise ? g.multiverse : ""]].filter(x => x[1]);
     const pr = g.price;
@@ -182,6 +210,7 @@
       <div style="margin-top:8px"><button class="sheetbtn" data-action="mlistadd" data-k="game:${esc(g.id)}">${K.icon("plus")}Add to a list</button><button class="sheetbtn" data-action="gsync1">${K.icon("sync")}Sync this game (Steam details, date, store prices)</button>
       <button class="sheetbtn" data-action="gedit">${K.icon("edit")}Edit details</button>
       ${g.steam ? "" : `<button class="sheetbtn" data-action="glink">${K.icon("sync")}Find on Steam (cover, price, date)</button>`}
+      <button class="sheetbtn" data-action="ginfo" data-id="${esc(g.id)}">${K.icon("sync")}Fill missing details with AI (release, platform, remake, HLTB)</button>
       <button class="sheetbtn" data-action="glink">${K.icon("list")}Link: its remake, or the same game twice</button>
       ${g.remake && g.remake.title ? `<button class="sheetbtn" data-action="gunremake">${K.icon("x")}Not a remake: take ${esc(g.remake.title)} off this game</button>` : ""}
       <button class="sheetbtn" data-action="gremove">${K.icon("notcanon")}Remove from your games</button></div>`;
@@ -224,6 +253,16 @@
       case "gstudiosteam": Saga.close(); ui.open = null; ui.res = []; ui.sq = el.dataset.dev; Saga.render(); search(); return true;
       case "gfilter": ui.f = el.dataset.v; ui.lim = 120; Saga.render(); return true;
       case "gview": ui.view = el.dataset.v; Saga.render(); return true;
+      case "ginfo": Saga.gameInfo([el.dataset.id]); return true;
+      case "ginfoall": Saga.gameInfo(lib().visible().filter(g => !g.aiAt && (!g.date || !g.platform || g.hours == null)).map(g => g.id)); return true;
+      case "gcanonmore": ui.cLim = (ui.cLim || 40) + 40; Saga.render(); return true;
+      case "gcanonadd": {
+        const d = el.dataset, y = String(d.y || ""), r = lib().add({ title: d.t, date: y.length >= 7 ? y : "", dateText: y.length === 4 ? y : "", imdb: d.i || null, franchise: d.f, multiverse: d.f, src: "canon" }, "wishlist");
+        if (r && r.game && y.length === 4 && !r.game.date) r.game.date = y + "-12-31";
+        save(); ui.cMemo = null; K.toast(`${d.t}: on your wishlist`); Saga.render(); return true; }
+      case "gcanonno": {
+        const d = el.dataset; Saga.db.setNotCanon({ title: d.t, year: d.y ? parseInt(d.y, 10) : null, medium: "Video Game", imdb: d.i || null, franchise: d.f }, true); Saga.db.flush(); ui.cMemo = null;
+        K.toast(`${d.t} won't count as canon. Undo in Settings.`); Saga.render(); return true; }
       case "gmvsort": ui.mvSort = el.dataset.v; ui.mvLim = 80; Saga.render(); return true;
       case "gmvmore": ui.mvLim = (ui.mvLim || 80) + 80; Saga.render(); return true;
       case "gmore": ui.lim += 120; Saga.render(); return true;

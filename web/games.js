@@ -539,6 +539,63 @@
     return out;
   }
   const gweight = g => (g.rating ? 4 : 0) + g.plays.length * 2 + (g.notes ? 2 : 0) + (GRANK[g.status] || 0) + (g.steam ? 1 : 0) + (g.owned ? 1 : 0) + (g.hours ? 1 : 0);
+  // ---- 0.6.9.7: game details from an AI, with your rules (the same questions your games list answers)
+  const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+  // "January 1, 1900" (also "Jan 1 1900", "1 January 1900", "January 1900", "1900", ISO) → "1900-01-01" / "1900-01" / "1900"
+  function wordDate(v) {
+    const t = String(v == null ? "" : v).trim().toLowerCase().replace(/(\d)(st|nd|rd|th)\b/g, "$1");
+    if (!t || /^(n\/?a|none|no|-|—|unknown|tba|tbd)$/.test(t)) return "";
+    let m = /^(\d{4})-(\d{2})(?:-(\d{2}))?/.exec(t); if (m) return m[3] ? `${m[1]}-${m[2]}-${m[3]}` : `${m[1]}-${m[2]}`;
+    const mon = w => MONTHS.findIndex(x => x.startsWith(w.slice(0, 3))) + 1, p = n => String(n).padStart(2, "0");
+    m = /^([a-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})$/.exec(t); if (m && mon(m[1])) return `${m[3]}-${p(mon(m[1]))}-${p(m[2])}`;
+    m = /^(\d{1,2})\s+([a-z]+)\.?,?\s+(\d{4})$/.exec(t); if (m && mon(m[2])) return `${m[3]}-${p(mon(m[2]))}-${p(m[1])}`;
+    m = /^([a-z]+)\.?,?\s+(\d{4})$/.exec(t); if (m && mon(m[1])) return `${m[2]}-${p(mon(m[1]))}`;
+    m = /^(\d{4})$/.exec(t); if (m) return m[1];
+    return "";
+  }
+  // "1900-01-01" → "January 1, 1900"
+  const longDate = d => { const m = /^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?$/.exec(String(d || "")); if (!m) return String(d || ""); const mo = m[2] ? MONTHS[+m[2] - 1] : ""; const M = mo ? mo[0].toUpperCase() + mo.slice(1) : ""; return m[3] ? `${M} ${+m[3]}, ${m[1]}` : M ? `${M} ${m[1]}` : m[1]; };
+  function infoPrompt(titles) {
+    return `Tell me, for each game below: game Title, OG Release Date, OG best Platform, Remake Name (a remake, re-release or remaster), Remake Release Date, Remake best Platform, HLTB (How Long To Beat, main story, hours).
+Rules:
+- Dates: month in letters, day in number and year (January 1, 1900). The first release anywhere.
+- A remake, re-release or remaster counts only if it covers the same story. If there is none, leave the three Remake fields empty.
+- "Best platform": where the game plays best (for the original, among the platforms it first came out on).
+- If you don't know a value, leave it empty. Don't guess.
+Answer only with a JSON array, one object per game, in this order, with exactly these keys:
+[{"title":"","og_date":"","og_platform":"","remake_name":"","remake_date":"","remake_platform":"","hltb":0}]
+Games:
+${titles.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
+  }
+  function parseInfo(text) {
+    const s = String(text || ""), a = s.indexOf("["), b = s.lastIndexOf("]");
+    if (a < 0 || b < a) throw new Error("the answer has no list of games in it");
+    let arr; try { arr = JSON.parse(s.slice(a, b + 1)); } catch (e) { throw new Error("the answer isn't readable (not JSON)"); }
+    const str = v => (v == null ? "" : String(v).trim()).replace(/^(n\/?a|none|-|—)$/i, "");
+    return (Array.isArray(arr) ? arr : []).filter(x => x && x.title).map(x => ({ title: str(x.title), date: wordDate(x.og_date), platform: str(x.og_platform),
+      remake: str(x.remake_name) ? { title: str(x.remake_name), date: wordDate(x.remake_date), platform: str(x.remake_platform) } : null,
+      hours: parseFloat(String(x.hltb || "").replace(",", ".")) > 0 ? Math.round(parseFloat(String(x.hltb).replace(",", ".")) * 10) / 10 : null }));
+  }
+  // the answers into your games: only what's empty is filled (your list and your own edits win); a remake that's
+  // already there is kept. Returns what changed.
+  function applyInfo(lib, games, rows) {
+    let filled = 0, same = 0;
+    const touched = [];
+    games.forEach((g, i) => {
+      const r = rows.find(x => norm(x.title) === norm(g.title)) || rows[i];
+      if (!r) return;
+      let ch = false;
+      if (!g.date && r.date) { g.date = r.date.length === 4 ? r.date : r.date; g.dateText = ""; ch = true; }
+      if (!g.platform && r.platform) { g.platform = r.platform; ch = true; }
+      if (!(g.remake && g.remake.title) && r.remake && norm(r.remake.title) !== norm(g.title)) { g.remake = r.remake; ch = true; }
+      else if (g.remake && r.remake && norm(g.remake.title) === norm(r.remake.title)) { if (!g.remake.date && r.remake.date) { g.remake.date = r.remake.date; ch = true; } if (!g.remake.platform && r.remake.platform) { g.remake.platform = r.remake.platform; ch = true; } }
+      if (g.hours == null && r.hours) { g.hours = r.hours; ch = true; }
+      g.aiAt = Date.now();
+      if (ch) { filled++; touched.push(g.title); } else same++;
+    });
+    lib._fi = null;
+    return { filled, same, touched };
+  }
   // 0.6.9.6: you say `rem` is a remake of `base`: one game with its remake (title, date, platform, its hours as the
   // remake's), your status, rating, plays, sessions and notes from both. The original's title and date stay.
   function linkRemake(lib, base, rem) {
@@ -718,7 +775,7 @@
       games: lib.visible().map(g => ({ id: g.id, t: g.title, f: g.franchise, m: g.multiverse, done: g.status === "done", date: g.date })) };
   }
 
-  const API = { steamPlay, backlogHours, findDuplicates, mergeGames, linkRemake, mergeInto, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
+  const API = { wordDate, longDate, infoPrompt, parseInfo, applyInfo, steamPlay, backlogHours, findDuplicates, mergeGames, linkRemake, mergeInto, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
     steamSearch, linkSteam, steamPrices, storePrices, steamDates, importRows, fromImdb, storeLinks, indexFor, yearOf, NA };
   if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
   root.GamesCore = API;

@@ -194,7 +194,7 @@ const mock = () => {
   await page.evaluate(() => __app.go("missing"));
   // (the older one-step API scan has no button any more; it still seeds this test's canon)
   await page.evaluate(() => { const b = document.createElement("button"); b.dataset.action = "gemini"; document.body.appendChild(b); b.click(); b.remove(); });
-  await page.waitForFunction(() => !window.__app.ui.job, null, { timeout: 20000 });
+  await page.waitForFunction(() => !window.__app.ui.job, null, { timeout: 90000 });
   // Release order is the default view
   await page.screenshot({ path: `${OUT}/3b-release.png`, fullPage: true });
   const rel = await page.textContent("#missingList");

@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.6.9.6";
+  const VERSION = "0.6.9.7";
   const AUTO_SYNC_HOURS = 12;
   Object.assign(C.PROFILES, (window.CANONSYNC_PRESET || {}).traktProfiles || {});
   const DEFAULT_PROFILE = (window.CANONSYNC_PRESET || {}).traktDefault || "PKCE (your own Trakt app)";
@@ -310,6 +310,10 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.6.9.7", ["Canon for games: Games › Missing lists the canon games you don't have yet, by series, checked against your Games tab (a remake you own counts for its original). One tap puts one on your wishlist; not-out-yet games are listed apart and not counted.",
+      "The AI canon scan also checks the games in your Games tab that aren't on IMDb or Trakt.",
+      "Fill missing details with AI (on a game, or for all in Games › Missing): OG release date, OG best platform, the remake (only one that tells the same story), its date and platform, and HLTB, with your rules. Only empty fields are filled; your list wins.",
+      "Game dates read January 1, 1900."]],
     ["0.6.9.6", ["Universe lists opened from the Games tab are no longer empty: your games are listed again (counted only where the universe has no films or series, and in Doctor Who), in original release order.",
       "Games › Franchises: oldest first by original release date (or biggest first).",
       "A game's page › Link: mark another game as its remake (or its original), or as the same game entered twice.",
@@ -1083,6 +1087,32 @@
     return `Gemini app added ${fmt(added)} new canon entr${added === 1 ? "y" : "ies"}`;
   }
 
+  // 0.6.9.7: game details from an AI with your rules (OG release date and best platform, the remake that tells the
+  // same story, HLTB); only empty fields are filled. Gemini API when there's a key, otherwise the Gemini app.
+  function gameInfoRun(ids) {
+    const list = (ids || []).map(id => games.get(id)).filter(Boolean);
+    if (!list.length) { toast("Every game already has its details"); return; }
+    const viaApp = !db.get("gemini_key");
+    let stopped = false;
+    return runJob(`Game details${viaApp ? " (Gemini app)" : ""}`, async p => {
+      const prov = viaApp ? { label: "Gemini app", call: (prompt, o) => gappAsk(prompt, Object.assign({ note: "Game details: release dates, platforms, remakes, HLTB." }, o)).catch(e => { if (isCancel(e)) stopped = true; throw e; }) }
+        : C.geminiProvider(db, Native.http, db.get("gemini_key"), db.get("gemini_model") || "auto", { search: db.get("gemini_search", "0") === "1" });
+      if (prov.prepare) await prov.prepare();
+      const size = viaApp ? 40 : 25, batches = [];
+      for (let i = 0; i < list.length; i += size) batches.push(list.slice(i, i + size));
+      let filled = 0, same = 0, failed = 0;
+      for (let b = 0; b < batches.length && !stopped && !C.CONFIG.cancelled; b++) {
+        p(b / batches.length, `Game details ${b + 1}/${batches.length}`);
+        const part = batches[b], titles = part.map(g => g.title + (g.date ? ` (${String(g.date).slice(0, 4)}${g.platform ? ", " + g.platform : ""})` : g.platform ? ` (${g.platform})` : ""));
+        try {
+          const text = await prov.call(GC.infoPrompt(titles), { title: "Game details", step: b + 1, steps: batches.length });
+          const r = GC.applyInfo(games, part, GC.parseInfo(text)); filled += r.filled; same += r.same;
+          games.save(); changed("games");
+        } catch (e) { if (stopped || isCancel(e)) break; failed += part.length; logError("game details", e.message); if (batches.length === 1) throw e; }
+      }
+      return `${stopped ? "Stopped. " : ""}${fmt(filled)} games filled in${same ? `, ${fmt(same)} already complete` : ""}${failed ? `, ${fmt(failed)} not answered` : ""}`;
+    });
+  }
   // Runs step 1 or 2 through the API (via "auto") or the Gemini app; an API failure offers the Gemini app for the same step.
   function mvRun(kind, via, only) {
     ui.gemFail = "";
@@ -4994,7 +5024,7 @@
   };
 
   // ------------------------------------------------------------ start
-  const Saga = window.Saga = { http: C.robust(Native.http, { timeout: 30000, tries: 2 }), Native, db, games, books, lib, lang, feat, render, sheet, go, changed,
+  const Saga = window.Saga = { gameInfo: ids => gameInfoRun(ids), http: C.robust(Native.http, { timeout: 30000, tries: 2 }), Native, db, games, books, lib, lang, feat, render, sheet, go, changed,
     close: () => { if (Kit.mods.books && Kit.mods.books.stopScan) Kit.mods.books.stopScan(); closeOverlay(); } };
   Kit.toast = toast; Kit.icon = icon; Kit.sheet = sheet; Kit.close = Saga.close;
   ui.sec = "home"; ui.tab = "library";
@@ -5002,6 +5032,13 @@
   if (startTab) { const t = startTab === "dw" ? "timeline" : startTab === "canon" ? "home" : startTab; if (SECR[t] || Kit.mods[t] || WATCH.some(w => w[0] === t) || t === "watch") { if (WATCH.some(w => w[0] === t)) { ui.sec = "watch"; ui.tab = t; } else ui.sec = t; } }
   render();
   if (["search", "syncnow", "scanbook", "nextep"].includes(startTab)) setTimeout(() => shortcut(startTab), 300);
+  // 0.6.9.7: the AI canon scan also checks the games in your Games tab that it can't know from IMDb or Trakt
+  C.CONFIG.extraSeeds = () => {
+    if (!feat("games")) return [];
+    const known = new Set(db.items(null, ["rated", "watched", "watchlist", "list", "collection"]).filter(r => r.medium === "Video Game").flatMap(r => [r.imdb, r.norm].filter(Boolean)));
+    return games.visible().filter(g => g.title && !(g.imdb && known.has(g.imdb)) && !known.has(C.norm(g.title)))
+      .map(g => { const y = parseInt(String(g.date || "").slice(0, 4), 10) || null; return { key: `game|${C.norm(g.title)}|${y || ""}`, title: g.title, year: y, medium: "Video Game", norm: C.norm(g.title) }; });
+  };
   migrate().catch(e => console.error(e));
   // 0.6.9.6: settings kept with the rest (sections, language, look); on the website, the keys the phone sent
   try { if (window.__sagaWeb) keysIn(Native.load("keys.json")); if (prefsIn()) render(); } catch (e) { logError("settings", e.message); }
