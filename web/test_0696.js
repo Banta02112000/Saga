@@ -1,0 +1,23 @@
+// 0.6.9.6: games linked by hand (a remake, the same game twice); Games › Franchises by original release date;
+// dropped shows out of Upcoming. Made-up data. Run: node test_0696.js
+const assert = require("assert");
+const G = require("./games.js");
+const L = new G.Games();
+const og = L.add({ title: "Old Quest", date: "1998-03-01", platform: "PS1", franchise: "Quest" }, "done").game; og.rating = 8;
+const rm = L.add({ title: "Old Quest Remake", date: "2023-05-05", platform: "PC", steam: 123, hours: 30, franchise: "Quest" }, "playing").game; rm.plays = []; rm.notes = "great";
+G.linkRemake(L, og, rm);
+assert.ok(!L.games.includes(rm) && og.remake.title === "Old Quest Remake" && og.remake.date === "2023-05-05" && og.hoursRemake === 30 && og.steam === 123 && og.rating === 8 && og.status === "done" && og.notes === "great", JSON.stringify(og));
+console.log("ok  a remake linked by hand: one game, the remake's title, date, hours and Steam id, your progress from both");
+const a = L.add({ title: "Twice Game", date: "2010-01-01", platform: "X360" }, "backlog").game;
+const b = L.add({ title: "Twice Game (PC)", date: "2010-02-02", platform: "PC" }, "done").game; b.rating = 9; b.plays = ["2020-01-01"];
+const k = G.mergeInto(L, a, b);
+assert.ok(k === a && L.games.includes(a) && !L.games.includes(b) && a.title === "Twice Game" && a.platform === "X360" && a.status === "done" && a.rating === 9 && a.plays[0] === "2020-01-01", JSON.stringify(a));
+console.log("ok  the same game twice, merged into the one you opened (its title and platform kept)");
+const M = new G.Games();
+M.add({ title: "B Late", date: "2005-01-01", franchise: "Late", multiverse: "Late" }, "backlog");
+M.add({ title: "A Early", date: "1987-01-01", franchise: "Early", multiverse: "Early" }, "backlog");
+M.add({ title: "C Big 1", date: "1995-01-01", franchise: "Big", multiverse: "Big" }, "backlog"); M.add({ title: "C Big 2", date: "1996-01-01", franchise: "Big", multiverse: "Big" }, "backlog"); M.add({ title: "C Big 3", date: "1997-01-01", franchise: "Big", multiverse: "Big" }, "backlog");
+assert.deepStrictEqual(M.multiverses().map(m => m.name), ["Early", "Big", "Late"]);
+assert.deepStrictEqual(M.multiverses("size").map(m => m.name)[0], "Big");
+console.log("ok  Games › Franchises: oldest original release first, or biggest first");
+console.log("0.6.9.6 TESTS PASSED");

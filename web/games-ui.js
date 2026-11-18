@@ -108,10 +108,11 @@
   }
   function renderMv() {
     const q = G.norm(ui.q);
-    const mvs = lib().multiverses().filter(m => !q || G.norm(m.name).includes(q) || m.franchises.some(f => G.norm(f.name).includes(q)));
-    return mvs.slice(0, 80).map(m => `<section>
+    const mvs = lib().multiverses(ui.mvSort || "date").filter(m => !q || G.norm(m.name).includes(q) || m.franchises.some(f => G.norm(f.name).includes(q)));
+    const chip = (v, l) => `<button class="chip" data-action="gmvsort" data-v="${v}" aria-pressed="${(ui.mvSort || "date") === v}">${l}</button>`;
+    return `<div class="chips" style="margin-bottom:10px">${chip("date", "Oldest first (original release)")}${chip("size", "Biggest first")}</div>` + mvs.slice(0, ui.mvLim || 80).map(m => `<section>
       <div class="sechead"><h2>${esc(m.name)}</h2><span class="count">${m.done}/${m.total}</span></div>
-      ${m.franchises.map(fr => `${m.franchises.length > 1 || fr.name !== m.name ? `<div class="small muted" style="margin:0 0 8px">${esc(fr.name)}</div>` : ""}${K.rail(fr.games.map(g => tileOf(g)))}`).join('<div style="height:12px"></div>')}</section>`).join("") || `<p class="muted">Nothing matches.</p>`;
+      ${m.franchises.map(fr => `${m.franchises.length > 1 || fr.name !== m.name ? `<div class="small muted" style="margin:0 0 8px">${esc(fr.name)}</div>` : ""}${K.rail(fr.games.map(g => tileOf(g)))}`).join('<div style="height:12px"></div>')}</section>`).join("") + (mvs.length > (ui.mvLim || 80) ? `<button class="btn block" data-action="gmvmore">Show more</button>` : "") + (mvs.length ? "" : `<p class="muted">Nothing matches.</p>`);
   }
   function renderSearch() {
     const lim = ui.res || [];
@@ -181,6 +182,8 @@
       <div style="margin-top:8px"><button class="sheetbtn" data-action="mlistadd" data-k="game:${esc(g.id)}">${K.icon("plus")}Add to a list</button><button class="sheetbtn" data-action="gsync1">${K.icon("sync")}Sync this game (Steam details, date, store prices)</button>
       <button class="sheetbtn" data-action="gedit">${K.icon("edit")}Edit details</button>
       ${g.steam ? "" : `<button class="sheetbtn" data-action="glink">${K.icon("sync")}Find on Steam (cover, price, date)</button>`}
+      <button class="sheetbtn" data-action="glink">${K.icon("list")}Link: its remake, or the same game twice</button>
+      ${g.remake && g.remake.title ? `<button class="sheetbtn" data-action="gunremake">${K.icon("x")}Not a remake: take ${esc(g.remake.title)} off this game</button>` : ""}
       <button class="sheetbtn" data-action="gremove">${K.icon("notcanon")}Remove from your games</button></div>`;
   }
   function open(id) { const g = lib().get(id); if (!g) return; ui.open = id; Saga.sheet(sheetHtml(g), "gsheet", id); }
@@ -208,10 +211,21 @@
     const reopen = () => { save(); if (g) open(g.id); Saga.render(); };
     switch (a) {
       case "gopen": open(el.dataset.id); return true;
+      // 0.6.9.6: link two games by hand: a remake, or the same game entered twice
+      case "glink": if (!g) return true; ui.linkFor = g.id; ui.lq = ""; Saga.sheet(linkHtml(g), "glinksheet"); return true;
+      case "glinkdo": {
+        const base = L.get(ui.linkFor), other = L.get(el.dataset.id);
+        if (!base || !other) return true;
+        const how = el.dataset.how;
+        const keep = how === "remake" ? G.linkRemake(L, base, other) : how === "original" ? G.linkRemake(L, other, base) : G.mergeInto(L, base, other);
+        save(); K.toast(how === "same" ? `${other.title} merged into ${base.title}` : `${keep.title}: remake ${keep.remake.title}`); open(keep.id); Saga.render(); return true; }
+      case "gunremake": if (g) { const r = g.remake; g.remake = null; g.hoursRemake = null; save(); K.toast(`${r && r.title} is no longer this game's remake`); open(g.id); } return true;
       case "gstudio": Saga.sheet(studioHtml(el.dataset.dev)); return true;
       case "gstudiosteam": Saga.close(); ui.open = null; ui.res = []; ui.sq = el.dataset.dev; Saga.render(); search(); return true;
       case "gfilter": ui.f = el.dataset.v; ui.lim = 120; Saga.render(); return true;
       case "gview": ui.view = el.dataset.v; Saga.render(); return true;
+      case "gmvsort": ui.mvSort = el.dataset.v; ui.mvLim = 80; Saga.render(); return true;
+      case "gmvmore": ui.mvLim = (ui.mvLim || 80) + 80; Saga.render(); return true;
       case "gmore": ui.lim += 120; Saga.render(); return true;
       case "gadd": ui.res = []; ui.sq = ""; Saga.render(); setTimeout(() => { const i = document.querySelector("[data-gsq]"); if (i) i.focus(); }, 30); return true;
       case "gsearch": { const i = document.querySelector("[data-gsq]"); ui.sq = i ? i.value : ui.sq; search(); return true; }
@@ -294,7 +308,22 @@
     if (el.dataset.gtarget && g) { const v = parseFloat(String(el.value).replace(",", ".")); g.target = isFinite(v) ? v : null; save(); return true; }
     return false;
   }
-  function input(el) { if (el.dataset.gq) { ui.q = el.value; ui.lim = 120; return "grid"; } if (el.dataset.gsq) { ui.sq = el.value; } return false; }
+  function linkHtml(g) {
+    return `<div class="kicker">Link to ${esc(g.title)}</div><h3 style="margin:4px 0 8px">Its remake, or the same game</h3>
+      <p class="small muted">Remake: the two become one game, with the other as its remake (your plays, rating and notes from both). Same game: the other is merged into this one.</p>
+      <input type="search" data-glq="1" placeholder="Find the other game" autocomplete="off" style="width:100%;margin:6px 0"><div id="glinkList">${linkList(g, "")}</div>`;
+  }
+  function linkList(g, q) {
+    const L = lib(), n = G.norm(q), fr = G.norm(g.franchise || g.multiverse || ""), base = G.norm(g.title).split(" ")[0] || "";
+    const pool = L.visible().filter(x => x !== g);
+    const hits = (n ? pool.filter(x => G.norm(x.title).includes(n)) : pool.filter(x => (fr && (G.norm(x.franchise) === fr || G.norm(x.multiverse) === fr)) || (base.length > 3 && G.norm(x.title).startsWith(base))))
+      .sort((a, b) => String(a.date || "9999").localeCompare(String(b.date || "9999"))).slice(0, 40);
+    return hits.length ? `<div class="listcard">${hits.map(x => `<div class="item" style="flex-wrap:wrap;gap:6px"><div class="grow" style="min-width:160px"><b class="ell" style="display:block">${esc(x.title)}</b><div class="small muted">${esc([String(x.date || "").slice(0, 4), x.platform].filter(Boolean).join(" · "))}</div></div>
+      <button class="btn small" data-action="glinkdo" data-how="remake" data-id="${esc(x.id)}">Its remake</button><button class="btn quiet small" data-action="glinkdo" data-how="original" data-id="${esc(x.id)}">Its original</button><button class="btn quiet small" data-action="glinkdo" data-how="same" data-id="${esc(x.id)}">Same game</button></div>`).join("")}</div>`
+      : `<p class="small muted">${n ? "No game matches." : "Type part of the other game's title."}</p>`;
+  }
+  function input(el) {
+    if (el.dataset.glq) { const g = lib().get(ui.linkFor), box = document.getElementById("glinkList"); if (g && box) box.innerHTML = linkList(g, el.value); return false; } if (el.dataset.gq) { ui.q = el.value; ui.lim = 120; return "grid"; } if (el.dataset.gsq) { ui.sq = el.value; } return false; }
   function enter(el) { if (el.dataset.gsq) { ui.sq = el.value; search(); return true; } return false; }
   K.mods.games = { title: "Games", render, act, change, input, enter, open, ui, posterOf, tileOf };
 })();

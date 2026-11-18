@@ -2564,8 +2564,11 @@ fragment T on MovieOrShowOrSeasonOrEpisode {
   function upcomingEpisodes(db, today = new Date().toISOString().slice(0, 10)) {
     const out = [];
     const hidden = db.upHidden();
+    let dr = { ids: [], names: [] }; try { dr = JSON.parse(db.get("shows_dropped", "") || "{}") || dr; } catch (e) { /* none */ }
+    const drIds = new Set(dr.ids || []), drNames = new Set(dr.names || []);
     for (const [k, v] of db.tmdbCache) {
       if (!k.startsWith("tv:") || !v || hidden[`show|${k}`]) continue;
+      if (drIds.has(k) || (v.imdb && drIds.has(v.imdb)) || drNames.has(norm(v.name || ""))) continue; // 0.6.9.6: a show you dropped
       for (const ep of (v.eps && v.eps.length ? v.eps : (v.next ? [v.next] : []))) {
         if (!ep.date || ep.date < today) continue;
         out.push({ key: `e|${k}|${ep.s}|${ep.e}`, hideKey: `show|${k}`, poster: v.poster || null, kind: "episode", show: v.name, s: ep.s, e: ep.e, name: ep.name, date: ep.date,

@@ -540,3 +540,6 @@ D.update({"Music": "Musica", "Overview": "Panoramica", "Top": "Classifiche", "Re
 "Sync this title (rating, watched, episodes, details)": "Sincronizza questo titolo (voto, visto, episodi, dettagli)"})
 P += [(rf"Saga (\S+) is ready: it starts next time you open Saga", "Saga $1 è pronta: parte la prossima volta che apri Saga"), (rf"{N} not out yet", "$1 non ancora usciti"),
   (r"Doctor Who: (\S+) stories done(.*)", "Doctor Who: $1 storie fatte$2"), (rf"{N} scrobbles since {N}", "$1 ascolti dal $2")]
+D.update({"Oldest first (original release)": "Prima i più vecchi (uscita originale)", "Biggest first": "Prima i più grandi", "Link: its remake, or the same game twice": "Collega: il suo remake, o lo stesso gioco due volte",
+"Its remake": "Il suo remake", "Its original": "Il suo originale", "Same game": "Stesso gioco", "Find the other game": "Trova l'altro gioco", "Its remake, or the same game": "Il suo remake, o lo stesso gioco",
+"Send my keys and sign-ins to my website": "Invia le mie chiavi e gli accessi al mio sito"})

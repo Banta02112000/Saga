@@ -1133,7 +1133,16 @@ window.BANTA_IT = {
 "Update by itself": "Aggiornati da solo",
 "Go back to the built-in screens": "Torna alle schermate incorporate",
 "Not out yet": "Non ancora uscito",
-"Sync this title (rating, watched, episodes, details)": "Sincronizza questo titolo (voto, visto, episodi, dettagli)"
+"Sync this title (rating, watched, episodes, details)": "Sincronizza questo titolo (voto, visto, episodi, dettagli)",
+"Oldest first (original release)": "Prima i più vecchi (uscita originale)",
+"Biggest first": "Prima i più grandi",
+"Link: its remake, or the same game twice": "Collega: il suo remake, o lo stesso gioco due volte",
+"Its remake": "Il suo remake",
+"Its original": "Il suo originale",
+"Same game": "Stesso gioco",
+"Find the other game": "Trova l'altro gioco",
+"Its remake, or the same game": "Il suo remake, o lo stesso gioco",
+"Send my keys and sign-ins to my website": "Invia le mie chiavi e gli accessi al mio sito"
 };
 window.BANTA_IT_PAT = [
 [

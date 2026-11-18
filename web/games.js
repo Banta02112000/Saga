@@ -118,7 +118,8 @@
       return c;
     }
     // Multiverse → franchise → games, release order, with progress.
-    multiverses() {
+    // 0.6.9.6: order "date" (default): series by the original release date of their first game; "size": biggest first
+    multiverses(order = "date") {
       const m = new Map();
       for (const g of this.visible()) {
         const mv = g.multiverse || g.franchise || "Other", fr = g.franchise || mv;
@@ -127,9 +128,13 @@
         if (!x.franchises.has(fr)) x.franchises.set(fr, []);
         x.franchises.get(fr).push(g); x.total++; if (g.status === "done") x.done++;
       }
-      return [...m.values()].map(x => ({ name: x.name, total: x.total, done: x.done,
-        franchises: [...x.franchises.entries()].map(([name, gs]) => ({ name, games: gs.sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999")) })) }))
-        .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+      const first = gs => gs.reduce((d, g) => (g.date && g.date < d ? g.date : d), "9999");
+      const out = [...m.values()].map(x => {
+        const franchises = [...x.franchises.entries()].map(([name, gs]) => ({ name, games: gs.sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999")) }))
+          .sort((a, b) => first(a.games).localeCompare(first(b.games)) || a.name.localeCompare(b.name));
+        return { name: x.name, total: x.total, done: x.done, first: franchises.length ? first(franchises.flatMap(f => f.games)) : "9999", franchises };
+      });
+      return out.sort((a, b) => order === "size" ? b.total - a.total || a.name.localeCompare(b.name) : a.first.localeCompare(b.first) || a.name.localeCompare(b.name));
     }
     // 0.6.6: what you're playing, then the next game of each franchise you're going through (the first one, by release
     // date, after the last you finished or are playing: released, not finished or dropped), the franchises you played
@@ -534,6 +539,33 @@
     return out;
   }
   const gweight = g => (g.rating ? 4 : 0) + g.plays.length * 2 + (g.notes ? 2 : 0) + (GRANK[g.status] || 0) + (g.steam ? 1 : 0) + (g.owned ? 1 : 0) + (g.hours ? 1 : 0);
+  // 0.6.9.6: you say `rem` is a remake of `base`: one game with its remake (title, date, platform, its hours as the
+  // remake's), your status, rating, plays, sessions and notes from both. The original's title and date stay.
+  function linkRemake(lib, base, rem) {
+    if (!base || !rem || base === rem) return base;
+    base.remake = { title: rem.title, date: rem.date || "", platform: rem.platform || "" };
+    if (rem.hours != null && base.hoursRemake == null) base.hoursRemake = rem.hours;
+    if ((GRANK[rem.status] || 0) > (GRANK[base.status] || 0)) base.status = rem.status;
+    if (!base.rating && rem.rating) base.rating = rem.rating;
+    base.plays = [...new Set((base.plays || []).concat(rem.plays || []))].sort();
+    base.sessions = (base.sessions || []).concat(rem.sessions || []);
+    if (rem.notes && !String(base.notes || "").includes(rem.notes)) base.notes = base.notes ? `${base.notes}\n${rem.notes}` : rem.notes;
+    for (const f of ["steam", "itad", "owned", "franchise", "multiverse", "dev", "price", "deal", "subs", "cover"]) if ((base[f] === null || base[f] === undefined || base[f] === "") && rem[f] != null && rem[f] !== "") base[f] = rem[f];
+    base.next = base.next || rem.next;
+    lib.games = lib.games.filter(g => g !== rem); lib._fi = null;
+    return base;
+  }
+  // the same game entered twice, by your say-so: this one stays, the other's progress comes in
+  function mergeInto(lib, keep, drop) {
+    if (!keep || !drop || keep === drop) return keep;
+    const t = keep.title, d = keep.date, p = keep.platform;
+    const out = mergeGames(lib, keep, drop);
+    if (out !== keep) { // mergeGames keeps the busier one: put this one's identity back and move the rest over
+      Object.assign(keep, Object.assign({}, out, { id: keep.id, title: t, date: d || out.date, platform: p || out.platform }));
+      lib.games = lib.games.filter(g => g !== out); if (!lib.games.includes(keep)) lib.games.push(keep); lib._fi = null;
+    }
+    return keep;
+  }
   function mergeGames(lib, a, b) {
     const [keep, drop] = gweight(a) > gweight(b) || (gweight(a) === gweight(b) && (a.added || 0) <= (b.added || 0)) ? [a, b] : [b, a];
     if ((GRANK[drop.status] || 0) > (GRANK[keep.status] || 0)) keep.status = drop.status;
@@ -686,7 +718,7 @@
       games: lib.visible().map(g => ({ id: g.id, t: g.title, f: g.franchise, m: g.multiverse, done: g.status === "done", date: g.date })) };
   }
 
-  const API = { steamPlay, backlogHours, findDuplicates, mergeGames, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
+  const API = { steamPlay, backlogHours, findDuplicates, mergeGames, linkRemake, mergeInto, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
     steamSearch, linkSteam, steamPrices, storePrices, steamDates, importRows, fromImdb, storeLinks, indexFor, yearOf, NA };
   if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
   root.GamesCore = API;

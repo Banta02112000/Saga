@@ -288,7 +288,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.6.9.5", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.6.9.6", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();
@@ -498,9 +498,9 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     for (let i = 0; i < 60 && !/Films/.test(document.querySelector("#view").textContent); i++) await new Promise(r => setTimeout(r, 50)); // 0.6.2: redrawn once the new canon check is in
     const t1 = document.querySelector("#view").textContent;
     const imgs = document.querySelectorAll("#view .uposter").length;
-    return { ok: /Universe/.test(t1) && /Alien/.test(t1) && !/Alien: Isolation/.test(t1) && imgs >= 3, n: __app.universeEntries("Alien").length, gid: g.id, ov: document.querySelector("#overlay").innerHTML.length, t: t1.slice(0, 300), sec: __app.ui.sec };
+    return { ok: /Universe/.test(t1) && /Alien: Isolation/.test(t1) && /Games/.test(t1) && /\b1 of 3\b/.test(t1) && imgs >= 4, n: __app.universeEntries("Alien").length, gid: g.id, ov: document.querySelector("#overlay").innerHTML.length, t: t1.slice(0, 300), sec: __app.ui.sec };
   });
-  ok(uv.ok && uv.n === 3, "universe dashboard: films with posters; games stay in the Games tab (0.6.9.5): " + JSON.stringify(uv));
+  ok(uv.ok && uv.n === 4, "universe dashboard: films and your games with posters; games listed but not counted where there are films (0.6.9.6): " + JSON.stringify(uv));
   await pg.click('[data-action="uedit"]');
   await pg.click('[data-action="utier"][data-k^="canon:"]');
   const tierT = await A(() => document.querySelector("#view").textContent);
@@ -514,7 +514,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   ok(after[0] === before[1] && after[1] === before[0] && await A(() => __app.ui.u.mode === "custom"), "moving an entry makes your own order: " + JSON.stringify([before, after]));
   await pg.click('[data-action="umode"][data-v="release"]');
   const rel = await A(() => [...document.querySelectorAll("#view .listcard .item b.grow")].map(b => b.textContent));
-  ok(rel[0] === "Alien" && rel[rel.length - 1] === "Prometheus", "release order: " + rel);
+  ok(rel[0] === "Alien" && rel.indexOf("Alien: Isolation") === rel.length - 1, "release order by original release date puts the 2014 game last: " + rel);
   const rl = await A(() => {
     const r1 = __app.applyRule({ media: ["game"], status: ["want"], maxHours: 12, ownedOnly: false, sort: "short" });
     const r2 = __app.applyRule({ minRating: 9 });
@@ -818,6 +818,17 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     document.querySelector("#overlay").innerHTML = "";
     __app.go("games"); press("gview", { v: "stats" }); out.backlog = /Backlog/.test(document.querySelector("#view").textContent) && /h to beat/.test(document.querySelector("#view").textContent);
     press("gview", { v: "grid" });
+    // 0.6.9.6: settings that travel with the settings file (sections, language, look), keys only when asked; dropped
+    // shows out of Upcoming
+    { const db = __app.db; __app.prefsOut(); const before = db.get("prefs_features");
+      db.set("prefs_features", JSON.stringify(Object.assign(JSON.parse(before || "{}"), { music: 0 }))); db.set("look_saga_accent", "teal");
+      const ch = __app.prefsIn();
+      out.prefs = ch && !BantaShell.feature("music") && document.documentElement.dataset.accent === "teal";
+      db.set("prefs_features", before); db.set("look_saga_accent", "-"); __app.prefsIn();
+      out.prefs = out.prefs && BantaShell.feature("music") !== false && !document.documentElement.dataset.accent;
+      db.set("lastfm_key", "abc123"); const kt = __app.keysText(); const ki = __app.keysIn(JSON.stringify({ steam_key: "zz9", plain_value: "x" })); out.keysD = [/lastfm_key/.test(kt), /claude_key/.test(kt), ki, db.get("steam_key"), db.get("plain_value")]; out.keys = /lastfm_key/.test(kt) && !/claude_key/.test(kt) && ki === 1 && db.get("steam_key") === "zz9" && !db.get("plain_value");
+      const dropped = __app.lib.add({ type: "show", title: "Dropped Made Up", year: 2020, imdb: "tt0555555" }, "watching").item; dropped.status = "dropped";
+      out.dropped = __app.notDropped([{ show: "Dropped Made Up", imdb: "tt0555555" }, { show: "Kept Show", imdb: "tt0555556" }]).length === 1; __app.lib.remove(dropped.id); }
     // 0.6.9.5: the Music section: empty, then with Last.fm numbers
     { __app.go("music"); const e0 = document.querySelector("#view").textContent;
       const now = Math.floor(Date.now() / 1000);
@@ -857,6 +868,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     out.fixd = JSON.stringify(fx);
     return out;
   });
+  ok(n69.prefs && n69.keys && n69.dropped, "settings travel (sections, look), keys on request, dropped shows out of Upcoming: " + JSON.stringify([n69.prefs, n69.keys, n69.dropped, n69.keysD]));
   ok(n69.music, "Music section: connect card, then Last.fm numbers, bars and top lists: " + n69.musicD);
   ok(n69.share, "sharing chosen per person and part: " + n69.shareD);
   ok(n69.dwPrev && n69.dwDone, "Doctor Who list from a note: checked, then imported, with a copy first: " + n69.dwD);

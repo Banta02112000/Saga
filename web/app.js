@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.6.9.5";
+  const VERSION = "0.6.9.6";
   const AUTO_SYNC_HOURS = 12;
   Object.assign(C.PROFILES, (window.CANONSYNC_PRESET || {}).traktProfiles || {});
   const DEFAULT_PROFILE = (window.CANONSYNC_PRESET || {}).traktDefault || "PKCE (your own Trakt app)";
@@ -300,14 +300,21 @@
   const THEMES = [["night", "Night", "#0B0A10", "#F5F1E8"], ["amoled", "Black", "#000", "#F5F1E8"], ["slate", "Slate", "#10151C", "#EEF3F8"], ["sepia", "Sepia", "#1E1913", "#F3E9DA"], ["light", "Light", "#F5F2EC", "#1B1720"]];
   const ACCENTS = [["", "Each tab its own colour"], ["amber", "Amber"], ["teal", "Teal"], ["rose", "Rose"], ["violet", "Violet"], ["green", "Green"], ["blue", "Blue"]];
   const lsGet = k => { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } };
-  function setLook(k, v) {
+  function setLook(k, v, fromSync) {
     try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch (e) { /* fine */ }
+    // 0.6.9.6: the look goes with your settings to the website (and back)
+    if (!fromSync && typeof db !== "undefined" && db) { db.set("look_" + k, v || "-"); }
     const map = { saga_theme: "theme", saga_accent: "accent", saga_text: "text" }, de = document.documentElement;
     if (v && !(k === "saga_theme" && v === "night")) de.dataset[map[k]] = v; else delete de.dataset[map[k]];
     if (Native.native && window.Android && Android.setBars) try { Android.setBars(getComputedStyle(de).getPropertyValue("--night").trim() || "#0B0A10", de.dataset.theme === "light"); } catch (e) { /* older app */ }
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.6.9.6", ["Universe lists opened from the Games tab are no longer empty: your games are listed again (counted only where the universe has no films or series, and in Doctor Who), in original release order.",
+      "Games › Franchises: oldest first by original release date (or biggest first).",
+      "A game's page › Link: mark another game as its remake (or its original), or as the same game entered twice.",
+      "Settings travel with your Saga website: sections on or off, language and look go both ways; your keys and sign-ins too if you switch it on (Settings › Accounts and sync).",
+      "Shows you dropped are out of Upcoming, the calendar and the episode alerts."]],
     ["0.6.9.5", ["Updates without installing: Saga downloads new screens and features by itself (checked against Saga's own signing key) and uses them the next time you open it (Settings › About). Only changes to the Android part still need an APK. This version is the first that can do it.",
       "Music: a new section with your listening from Last.fm (full history and play counts from any app that scrobbles) and Spotify (top artists and tracks, last 50 plays).",
       "Sync this title (on a film or series): your rating, viewings, episodes, episode ratings and watchlist from Trakt (no sign-in needed, your public profile is enough), and your newest IMDb ratings.",
@@ -1247,9 +1254,16 @@
       <section>${cw.length ? cw.map(cwRow).join("") : `<p class="muted">Nothing to catch up on. Sync Trakt and tap Refresh shows if this looks wrong.</p>`}</section>`;
   }
 
+  // 0.6.9.6: episodes of shows you dropped don't belong in Upcoming (matched by IMDb id, TMDB id or name)
+  function notDropped(eps) {
+    const dr = lib.all().filter(it => it.type === "show" && it.status === "dropped");
+    if (!dr.length) return eps;
+    const ids = new Set(dr.flatMap(it => [it.imdb, it.tmdb ? "tv:" + it.tmdb : null].filter(Boolean))), names = new Set(dr.map(it => L.norm(it.title)));
+    return eps.filter(e => !(ids.has(e.imdb) || ids.has(String(e.hideKey || "").replace(/^show\|/, "")) || names.has(L.norm(e.show || ""))));
+  }
   function renderUpcoming() {
     const today = new Date().toISOString().slice(0, 10);
-    const eps = C.upcomingEpisodes(db, today);
+    const eps = notDropped(C.upcomingEpisodes(db, today));
     const rel = C.upcomingEvents(db, status(), today).filter(e => e.kind === "canon");
     const f = ui.upFilter || "all";
     if (f === "towatch") return renderToWatch();
@@ -1294,7 +1308,7 @@
     const hideNames = db.get("spoiler_hide", "1") === "1"; // 0.6.9: no episode names you'd rather not see
     for (const it of lib.all()) if (it.type === "show" && it.status !== "dropped" && it.status !== "watchlist" && it.epl) for (const e of it.epl) if (e[2]) add(e[2], `${it.title} S${e[0]} E${e[1]}`, hideNames ? "" : e[3] || "");
     const libShows = new Set(lib.all().map(it => it.imdb).filter(Boolean));
-    for (const e of C.upcomingEpisodes(db, today)) if (!libShows.has(e.imdb)) add(e.date, `${e.show} S${e.s} E${e.e}`, hideNames ? "" : e.name || "");
+    for (const e of notDropped(C.upcomingEpisodes(db, today))) if (!libShows.has(e.imdb)) add(e.date, `${e.show} S${e.s} E${e.e}`, hideNames ? "" : e.name || "");
     for (const c of C.releaseList(status(), today).upcoming) add(c.date, c.title, c.franchise);
     if (secOn("games")) for (const g of games.upcoming(today)) add(g.date, `${g.title} (game)`, g.franchise || "");
     if (secOn("books")) for (const b of books.books) if (b.status === "want" && b.published) add(String(b.published).slice(0, 10), `${b.title} (book)`, (b.authors || []).join(", "));
@@ -1406,7 +1420,7 @@
         <label class="switch"><input type="checkbox" data-setting="web_sync_auto" ${db.get("web_sync_auto", "1") === "1" ? "checked" : ""}><span>Sync with the website by itself<small class="muted" style="display:block">After each sync, when you open the app, and a little after you change something.</small></span></label>
         <button class="btn" data-action="websync" ${db.get("web_sync_url") ? "" : "disabled"}>${icon("sync")}Sync with the website now</button>
         ${window.__sagaWeb || db.get("web_sync_url") ? `<button class="btn small" data-action="webadmin">${icon("box")}Website status (owner)</button>` : ""}
-        ${window.__sagaWeb || db.get("web_sync_url") ? `${shareHtml()}
+        ${window.__sagaWeb || db.get("web_sync_url") ? `${window.__sagaWeb ? "" : `<label class="switch"><input type="checkbox" data-action="webkeys" ${KEYS_OUT() ? "checked" : ""}><span>Send my keys and sign-ins to my website<small class="muted" style="display:block">So the website can sync Trakt, Steam, Music and the rest by itself. They're kept in your account's files on the Pi (not encrypted there). Sections, language and look always go with your settings.</small></span></label>`}${shareHtml()}
         <button class="btn small" data-action="peoplenow">Refresh friends</button>` : ""}
         ${calUrl() ? `<div class="card" style="padding:10px"><b>Your calendar</b><p class="small muted" style="margin:4px 0">Episodes, releases, games and books you're waiting for. In Google Calendar: Other calendars › + › From URL, and paste this address (keep it private: anyone with it can read the dates). It updates after each sync.</p>
           <div class="row wrap"><code class="small" style="word-break:break-all">${esc(calUrl())}</code></div><div class="row wrap"><button class="btn small" data-action="copyval" data-text="${esc(calUrl())}">Copy</button><button class="btn small quiet" data-action="calnew">New address</button></div></div>`
@@ -2075,6 +2089,9 @@
   let libJobDirty = false;
   const libPending = () => !!libTimer || libBusy || libJobDirty;
   function libSave() {
+    // 0.6.9.6: shows you dropped, for the background's episode alerts too (they don't read the library)
+    try { const dr = lib.all().filter(it => it.type === "show" && it.status === "dropped"); const v = JSON.stringify({ ids: dr.flatMap(it => [it.imdb, it.tmdb ? "tv:" + it.tmdb : null].filter(Boolean)), names: dr.map(it => C.norm(it.title)) });
+      if (v !== db.get("shows_dropped", "")) db.set("shows_dropped", v); } catch (e) { /* next save */ }
     if (C.BUSY.on && Native.parts) { libJobDirty = true; libMirror(); return; } // saved once when the job ends
     if (!libTimer) libTimer = setTimeout(libWrite, Math.max(800, (C.BUSY.on && Native.parts ? 25000 : 4000) - (Date.now() - libLast)));
     libMirror();
@@ -3111,7 +3128,7 @@
       if (x) out.push({ d: x[2], html: Kit.tile({ title: it.title, img: it.poster, kind: "show", badge: dayLabel(x[2], today), badgeAcc: x[2] === today, attrs: `data-action="libopen" data-id="${esc(it.id)}"` }, it.title, `S${x[0]} E${x[1]}`) });
     }
     const libShows = new Set(lib.all().map(it => it.imdb).filter(Boolean));
-    for (const e of C.upcomingEpisodes(db, today)) if (e.date <= until && !libShows.has(e.imdb) && !out.some(o => o.t === e.show)) out.push({ d: e.date, t: e.show, html: Kit.tile({ title: e.show, kind: "show", badge: dayLabel(e.date, today), attrs: `data-action="sheet" data-sid="${sid(Object.assign({ kind: "episode" }, e), "up")}"` }, e.show, `S${e.s} E${e.e}`) });
+    for (const e of notDropped(C.upcomingEpisodes(db, today))) if (e.date <= until && !libShows.has(e.imdb) && !out.some(o => o.t === e.show)) out.push({ d: e.date, t: e.show, html: Kit.tile({ title: e.show, kind: "show", badge: dayLabel(e.date, today), attrs: `data-action="sheet" data-sid="${sid(Object.assign({ kind: "episode" }, e), "up")}"` }, e.show, `S${e.s} E${e.e}`) });
     for (const c of C.releaseList(status(), today).upcoming.filter(c => c.date && c.date <= until).slice(0, 10)) out.push({ d: c.date, html: Kit.tile({ title: c.title, key: "canon:" + canonKey(c), img: cImg(c), kind: c.medium === "TV Series" ? "show" : "movie", badge: dayLabel(c.date, today), attrs: `data-action="sheet" data-sid="${sid(c, "canon")}"` }, c.title, c.franchise) });
     if (secOn("games")) for (const g of games.upcoming(today).filter(g => g.date <= until)) out.push({ d: g.date, html: Kit.mods.games.tileOf(g) });
     return out.sort((a, b) => a.d.localeCompare(b.d)).slice(0, 20);
@@ -3136,8 +3153,9 @@
     const MED = c => c.medium === "TV Series" ? "show" : c.medium === "Video Game" ? "game" : "movie";
     for (const c of status()) if (C.norm(c.franchise) === n && MED(c) !== "game") out.push({ key: "canon:" + canonKey(c), title: c.title, medium: MED(c), date: c.date || (c.year ? c.year + "-07-01" : ""), done: !!c.have && c.state !== "listed",
       img: cImg(c), attrs: `data-action="sheet" data-sid="${sid(c, "canon")}"`, sub: [c.year, c.medium].filter(Boolean).join(" · "), canon: c });
-    // 0.6.9.5: games count in the Games tab and in Doctor Who, not in other universes
-    if (secOn("games") && /doctorwho|whoniverse/.test(n)) for (const g of games.visible()) if (C.norm(g.multiverse) === n || C.norm(g.franchise) === n) out.push({ key: "game:" + g.id, title: g.title, medium: "game", date: g.date || "", done: g.status === "done",
+    // 0.6.9.6: your games are listed (a universe opened from the Games tab was empty in 0.6.9.5); they count toward
+    // completion only where the universe has no films or series, or in Doctor Who (see renderMv)
+    if (secOn("games")) for (const g of games.visible()) if (C.norm(g.multiverse) === n || C.norm(g.franchise) === n) out.push({ key: "game:" + g.id, title: g.title, medium: "game", date: g.date || "", done: g.status === "done",
       img: g.cover || (g.steam ? GC.COVER(g.steam) : ""), attrs: `data-action="gopen" data-id="${esc(g.id)}"`, sub: [G_YEAR(g), g.platform].filter(Boolean).join(" · ") });
     if (secOn("books")) for (const b of books.books) if (b.series && (C.norm(b.series).includes(n) || n.includes(C.norm(b.series)))) out.push({ key: "book:" + b.id, title: b.title, medium: "book", date: String(b.published || "").slice(0, 10), done: b.status === "read",
       img: (b.cover || "").replace(/^http:/, "https:"), attrs: `data-action="bopen" data-id="${esc(b.id)}"`, sub: [(b.authors || [])[0], b.seriesNum ? `#${b.seriesNum}` : ""].filter(Boolean).join(" · ") });
@@ -3171,10 +3189,11 @@
     const today = new Date().toISOString().slice(0, 10);
     all.forEach(e => { e.tier = tiers[e.key] || ""; e.soon = !e.done && (e.canon ? !!e.canon.unreleased : !e.date || e.date > today); });
     // 0.6.9.5: what isn't out yet is listed, not counted
-    const counted = all.filter(e => e.tier !== "notcanon" && !e.soon), soon = all.filter(e => e.soon && e.tier !== "notcanon").length;
+    const gamesCount = /doctor ?who|whoniverse/i.test(name) || !all.some(e => e.medium === "movie" || e.medium === "show");
+    const counted = all.filter(e => e.tier !== "notcanon" && !e.soon && (gamesCount || e.medium !== "game")), soon = all.filter(e => e.soon && e.tier !== "notcanon").length;
     // completion per medium
     const MEDS = [["movie", "Films"], ["show", "Series"], ["game", "Games"], ["book", "Books"]];
-    const bars = MEDS.map(([m, l]) => { const xs = counted.filter(e => e.medium === m); return xs.length ? { l, done: xs.filter(e => e.done).length, n: xs.length } : null; }).filter(Boolean);
+    const bars = MEDS.map(([m, l]) => { const xs = all.filter(e => e.medium === m && e.tier !== "notcanon" && !e.soon); return xs.length ? { l, done: xs.filter(e => e.done).length, n: xs.length } : null; }).filter(Boolean);
     const ess = counted.filter(e => e.tier === "essential"), done = counted.filter(e => e.done).length;
     let list = universeOrdered(name, u.mode, all);
     if (u.tier === "essential") list = list.filter(e => e.tier === "essential");
@@ -3463,11 +3482,35 @@
   let detailsRunning = false;
   // ---- 0.5.9: two-way sync with the Saga website (site/server.js). Each file the phone or the website changed since
   // they last agreed is sent; the server merges it entry by entry (site/merge.js) and both keep the result.
-  const WEB_FILES = ["canonsync.json", "library.json", "games.json", "books.json", "dw.json", "music.json"];
+  const WEB_FILES = ["canonsync.json", "library.json", "games.json", "books.json", "dw.json", "music.json", "keys.json"];
   const fileStamp = t => (t ? t.length + ":" + t.slice(-24) : "");
   let webSyncing = false, webSyncT = null;
   // its own small file, so keeping track doesn't itself change the synced files
   const WS = { get: () => { try { return JSON.parse(Native.load("web_sync.json") || "{}") || {}; } catch (e) { return {}; } }, set: o => Native.save("web_sync.json", JSON.stringify(Object.assign(WS.get(), o))) };
+  // 0.6.9.6: settings that live outside the settings file (sections on or off, language, look) go into it, so they
+  // reach the website with everything else and come back; and, if you say so, your keys and sign-ins too.
+  const LOOK_KEYS = ["saga_theme", "saga_accent", "saga_text"];
+  function prefsOut() {
+    try { const f = JSON.stringify(SH.readJson("features.json") || {}); if (f !== db.get("prefs_features", "")) { db.set("prefs_features", f); db.flush(); } } catch (e) { /* next time */ }
+  }
+  function prefsIn() {
+    let changedAny = false;
+    try {
+      const want = db.get("prefs_features", "");
+      if (!want) prefsOut();
+      else if (want !== JSON.stringify(SH.readJson("features.json") || {})) { SH.write("features.json", want); changedAny = true; try { BantaShell.applyFeatures && BantaShell.applyFeatures(); } catch (e) { /* older shell */ } }
+      for (const k of LOOK_KEYS) { const v = db.get("look_" + k, ""); if (!v) continue; const val = v === "-" ? "" : v; if (val !== lsGet(k)) { setLook(k, val, true); changedAny = true; } }
+    } catch (e) { logError("settings", e.message); }
+    return changedAny;
+  }
+  // the keys file for the website: only when "Send my keys and sign-ins to my website" is on
+  const KEYS_OUT = () => db.get("web_keys", "0") === "1";
+  function keysText() { const k = Object.fromEntries(Object.entries(Object.assign(Object.fromEntries(Object.entries(db.settings).filter(([n]) => C.SECRET_RX.test(n))), db.secretsOn() ? db.secretsAll() : {})).filter(([n, v]) => v && n !== "backup_secrets")); return Object.keys(k).length ? JSON.stringify(k, Object.keys(k).sort()) : ""; }
+  function keysIn(text) {
+    let k = {}; try { k = JSON.parse(text || "{}") || {}; } catch (e) { return 0; }
+    let n = 0; for (const [name, v] of Object.entries(k)) if (C.SECRET_RX.test(name) && typeof v === "string" && v && db.get(name, "") !== v) { db.set(name, v); n++; }
+    if (n) db.flush(); return n;
+  }
   // 0.6.9.2: the website's address as typed, made usable: no "https://" → added; a trailing slash dropped
   function webBase() {
     let u = String(db.get("web_sync_url", "")).trim().replace(/\/+$/, "");
@@ -3588,6 +3631,7 @@
     const http = C.robust(Native.http, { timeout: 120000, tries: 2 });
     let sent = 0, got = 0;
     try {
+      prefsOut();
       saveAllNow(); // everything written first
       const m = await http("GET", base + "/api/sync/manifest", { headers: H });
       if (m.status === 401) throw new Error("the website asked for the sync key (Settings › Accounts and sync › Saga website)");
@@ -3596,7 +3640,9 @@
       const last = WS.get().state || {};
       const changedHere = [];
       for (const n of WEB_FILES) {
-        const local = Native.load(n) || "";
+        // 0.6.9.6: keys.json is made here when you send your keys (from the phone's encrypted store, never a file here)
+        if (n === "keys.json" && !KEYS_OUT()) continue;
+        const local = n === "keys.json" ? keysText() : Native.load(n) || "";
         const st = last[n] || {}, srv = man[n] && man[n].sha256;
         if (local && fileStamp(local) === st.local && (!srv || srv === st.server)) continue;
         if (!local && !srv) continue;
@@ -3606,12 +3652,12 @@
         const j = JSON.parse(r.body);
         sent++;
         if (j.text !== local) { applyWebFile(n, j.text); got++; changedHere.push(n); }
-        last[n] = { local: fileStamp(Native.load(n) || j.text), server: j.sha256 }; // what's on the phone now, as the phone wrote it
+        last[n] = { local: fileStamp((n === "keys.json" ? keysText() : Native.load(n)) || j.text), server: j.sha256 }; // what's on the phone now, as the phone wrote it
         WS.set({ state: last });
       }
       const msg = !sent ? "nothing to do" : `${sent} file${sent === 1 ? "" : "s"} compared${got ? `, changes from the website in ${changedHere.map(n => n.replace(".json", "")).join(", ")}` : ""}`;
       WS.set({ at: Date.now(), msg });
-      if (got) { invalidate(); render(); }
+      if (got) { prefsIn(); invalidate(); render(); }
       if (loud) toast("Website: " + msg);
       return msg;
     } catch (e) {
@@ -3635,7 +3681,9 @@
     else if (n === "books.json") books.fromJSON(d);
     else if (n === "dw.json") { try { Kit.mods.timeline.reset(); } catch (e) { /* not loaded */ } }
     else if (n === "music.json") { try { Kit.mods.music.reset(); } catch (e) { /* not loaded */ } }
+    else if (n === "keys.json") keysIn(text);
     else return true;
+    if (n === "canonsync.json") prefsIn();
     invalidate();
     // shown when you're not typing and nothing is running
     clearTimeout(liveT);
@@ -3652,6 +3700,7 @@
     else if (n === "books.json") { books.fromJSON(d); Native.save(n, text); }
     else if (n === "dw.json") { Native.save(n, text); try { Kit.mods.timeline.reset(); } catch (e) { /* not loaded */ } }
     else if (n === "music.json") { Native.save(n, text); try { Kit.mods.music.reset(); } catch (e) { /* not loaded */ } }
+    else if (n === "keys.json") keysIn(text);
   }
   // 0.5.7: what follows a sync runs one thing after another, after the sync's own save, instead of all at once
   let afterRunning = false;
@@ -4607,6 +4656,7 @@
       case "itadout": db.set("itad_token", ""); db.flush(); toast("Signed out of IsThereAnyDeal"); render(); break;
       case "itadnow": runJob("IsThereAnyDeal", async () => itadRefresh(Native.http, true)); break;
       case "itadpaste": { const u = prompt("Paste the address the browser showed after approving (it starts with " + itadRedirect() + ")"); if (u) itadFinish(u); break; }
+      case "webkeys": db.set("web_keys", el.checked ? "1" : "0"); db.flush(); if (el.checked) syncWithWebServer(true); return;
       case "shareon": { const st = ui.share || {}; st.on = el.checked; saveShare(st); return; }
       case "sharepart": { const st = ui.share || {}; st.to = st.to || Object.fromEntries((st.people || []).map(n => [n, { lib: true, games: true, books: true, dw: false }]));
         const v = st.to[el.dataset.p] = st.to[el.dataset.p] || {}; v[el.dataset.k] = !v[el.dataset.k]; saveShare(st); return; }
@@ -4877,9 +4927,9 @@
     if (el.dataset && el.dataset.libnotes) { const it = lib.get(ui.libOpen); if (it) { it.notes = el.value.trim(); libTouch(); } return; }
     if (el.dataset && el.dataset.accent) { setLook("saga_accent", el.value); return; }
     if (el.dataset && el.dataset.textsize) { setLook("saga_text", el.checked ? "large" : ""); return; }
-    if (el.dataset && el.dataset.lang) { BantaShell.setLang(el.value); toast(el.value === "it" ? "Italiano attivo" : "English on"); render(); return; }
+    if (el.dataset && el.dataset.lang) { BantaShell.setLang(el.value); prefsOut(); toast(el.value === "it" ? "Italiano attivo" : "English on"); render(); return; }
     if (el.dataset && el.dataset.feature) {
-      BantaShell.setFeature(el.dataset.feature, el.checked);
+      BantaShell.setFeature(el.dataset.feature, el.checked); prefsOut();
       db.set("features_seen", "1");
       if (el.dataset.feature === "streamAlerts") { db.set("stream_alerts", el.checked ? "1" : "0"); db.flush(); }
       toast(`${FEATURES.find(f => f[0] === el.dataset.feature)[1]}: ${el.checked ? "on" : "off"}`);
@@ -4953,6 +5003,8 @@
   render();
   if (["search", "syncnow", "scanbook", "nextep"].includes(startTab)) setTimeout(() => shortcut(startTab), 300);
   migrate().catch(e => console.error(e));
+  // 0.6.9.6: settings kept with the rest (sections, language, look); on the website, the keys the phone sent
+  try { if (window.__sagaWeb) keysIn(Native.load("keys.json")); if (prefsIn()) render(); } catch (e) { logError("settings", e.message); }
   try { const fx = fixListedWatched(); if (fx && (fx.films || fx.games)) { render(); setTimeout(() => toast(`${fmt(fx.films)} titles and ${fmt(fx.games)} games were only on a list, not rated: back to To watch / Wishlist`), 1200); } } catch (e) { logError("fixlisted", e.message); }
   applyPending();
   setTimeout(() => window.__sharePoll(), 400);
@@ -4973,5 +5025,5 @@
   const last = parseFloat(db.get("last_sync", "0")) || 0;
   const hasSources = db.get("username") || db.get("imdb_user") || db.get("canon_urls") || db.get("imdb_lists");
   if (db.get("auto_sync") === "1" && hasSources && Date.now() / 1000 - last > AUTO_SYNC_HOURS * 3600) { db.set("sync_open", "0"); doSync(); db.set("sync_open", "1"); }
-  window.__app = { fixListedWatched, webApi, webWhy, openLib, wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
+  window.__app = { fixListedWatched, webApi, webWhy, prefsIn, prefsOut, keysIn, keysText, notDropped, openLib, wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
 })();

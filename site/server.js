@@ -28,7 +28,7 @@ const ICONS = Object.fromEntries(["icon-192.png", "icon-512.png"].filter(n => fs
 const KEEP_DAYS = 7, MAX_BODY = 200 * 1024 * 1024;
 fs.mkdirSync(path.join(DATA, ".daily"), { recursive: true });
 fs.mkdirSync(path.join(DATA, ".sync"), { recursive: true });
-const SYNC_FILES = ["canonsync.json", "library.json", "games.json", "books.json", "dw.json", "music.json"];
+const SYNC_FILES = ["canonsync.json", "library.json", "games.json", "books.json", "dw.json", "music.json", "keys.json"];
 
 // ---- sign-in: a password (scrypt), a sync key for the phone app, a secret for session cookies (data/auth.json)
 const AUTH_FILE = path.join(DATA, "auth.json");
