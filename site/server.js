@@ -134,6 +134,29 @@ function writeAtomic(dir, name, buf) {
 }
 
 // ---- a .zip export opened: text entries come back as text (the same shape the phone app gives)
+// 0.6.9: when each person last used the website or synced (kept in <data>/.seen.json, written at most once a minute)
+const SEEN_FILE = path.join(DATA, ".seen.json");
+let SEEN = (() => { try { return JSON.parse(fs.readFileSync(SEEN_FILE, "utf8")); } catch (e) { return {}; } })(), seenWrite = 0;
+function seen(name, p) {
+  if (!name) return;
+  const e = SEEN[name] || (SEEN[name] = {}); e.at = Date.now(); if (/^\/api\/sync\//.test(p)) e.sync = Date.now();
+  if (Date.now() - seenWrite > 60000) { seenWrite = Date.now(); try { fs.writeFileSync(SEEN_FILE, JSON.stringify(SEEN)); } catch (err) { /* read-only disk */ } }
+}
+// 0.6.9: what a person who shares did lately, for their friends: watched, finished, read (newest first)
+function activityOf(d) {
+  const read = n => { try { return JSON.parse(fs.readFileSync(path.join(d, n), "utf8")); } catch (e) { return null; } };
+  const out = [], L = read("library.json") || {}, G = read("games.json") || {}, B = read("books.json") || {};
+  for (const i of Object.values(L.items || {})) {
+    const w = (i.watches || []).filter(Boolean).sort().pop();
+    if (w) out.push({ kind: i.type === "show" ? "finished" : "watched", type: i.type, title: i.title, year: i.year || null, tmdb: i.tmdb || null, imdb: i.imdb || null, date: String(w).slice(0, 10), rating: i.rating || 0 });
+    const eps = Object.entries(i.eps || {}).filter(([, v]) => typeof v === "string").sort((a, b) => a[1].localeCompare(b[1]));
+    if (i.type === "show" && eps.length) { const [k, v] = eps[eps.length - 1]; out.push({ kind: "episode", type: "show", title: i.title, year: i.year || null, tmdb: i.tmdb || null, imdb: i.imdb || null, date: v.slice(0, 10), ep: k }); }
+  }
+  for (const g of (G.games || [])) { const pl = (g.plays || []).slice().sort().pop(); if (pl && !g.hidden) out.push({ kind: "played", type: "game", title: g.title, date: String(pl).slice(0, 10), rating: g.rating || 0 }); }
+  for (const b of (B.books || [])) if (b.finished) out.push({ kind: "read", type: "book", title: b.title, date: new Date(b.finished).toISOString().slice(0, 10), rating: b.rating || 0 });
+  const seenK = new Set();
+  return out.filter(x => /^\d{4}-\d\d-\d\d$/.test(x.date)).sort((a, b) => b.date.localeCompare(a.date)).filter(x => { const k = x.kind + x.title; if (seenK.has(k)) return false; seenK.add(k); return true; }).slice(0, 40);
+}
 // 0.6.5: a ZIP of files (deflated), for "Download a backup"
 const CRC = (() => { const t = new Int32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c; } return t; })();
 const crc32 = b => { let c = -1; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 0xff] ^ (c >>> 8); return (c ^ -1) >>> 0; };
@@ -244,6 +267,17 @@ const handler = isPublic => async (req, res) => {
     if (p === "/manifest.json") return send(res, 200, MANIFEST, "application/manifest+json");
     if (p === "/sw.js") { res.writeHead(200, { "Content-Type": TYPES[".js"], "Cache-Control": "no-cache", "Service-Worker-Allowed": "/" }); return res.end(SW); }
     if (ICONS[p.slice(1)]) { res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "max-age=604800" }); return res.end(ICONS[p.slice(1)]); }
+    // 0.6.9: your calendar for Google Calendar: /cal/<random code>.ics (a code of its own, not your sync key)
+    if (/^\/cal\/[A-Za-z0-9_-]{20,}\.ics$/.test(p) && req.method === "GET") {
+      const code = p.slice(5, -4); let who = null;
+      if (AUTH) for (const [n, u] of Object.entries(AUTH.users)) if (u.cal && eqSafe(code, u.cal)) who = n;
+      const ip = clientIp(req);
+      if (who === null) { if (limited(ip)) return send(res, 429, "Too many tries", "text/plain"); failed(ip); return send(res, 404, "Not found", "text/plain"); }
+      const f = path.join(dirOf(who === AUTH.owner ? "" : who), "calendar.ics");
+      if (!fs.existsSync(f)) return send(res, 404, "No calendar yet: sync the app once", "text/plain");
+      res.writeHead(200, { "Content-Type": "text/calendar; charset=utf-8", "Cache-Control": "no-cache" });
+      return res.end(fs.readFileSync(f));
+    }
     // 0.6.2: Jellyfin and Plex say what was watched: POST /api/webhook/jellyfin?key=<sync key> (or Authorization: Bearer <sync key>)
     if (p.startsWith("/api/webhook/")) {
       const kind = p.slice(13);
@@ -268,12 +302,22 @@ const handler = isPublic => async (req, res) => {
       return send(res, 200, JSON.stringify({ ok: true, changed: true, title: out.title, what: out.what }));
     }
     const user = whoIs(req, isPublic);
+    if (user !== null && user !== undefined) seen(user || (AUTH && AUTH.owner) || "", p);
     if (user === null) {
       if (p.startsWith("/api/")) return send(res, 401, '{"error":"sign in"}');
       const next = p.slice(1).replace(/[^a-z0-9/_.-]/gi, "");
       res.writeHead(302, { Location: next && next !== "index.html" ? `login?next=${encodeURIComponent(next)}` : "login" }); return res.end();
     }
     const DIR = dirOf(user);
+    // 0.6.9: the phone sends the calendar file after each sync; the answer is the address to subscribe to
+    if (p === "/api/calendar" && req.method === "POST" && AUTH) {
+      let j = {}; try { j = JSON.parse((await readBody(req, 4 * 1048576)).toString("utf8")); } catch (e) { return send(res, 400, '{"error":"not JSON"}'); }
+      if (!/^BEGIN:VCALENDAR/.test(String(j.text || ""))) return send(res, 400, '{"error":"not a calendar"}');
+      writeAtomic(DIR, "calendar.ics", Buffer.from(String(j.text)));
+      const a = loadAuth(), me = user || a.owner;
+      if (a && a.users[me] && (!a.users[me].cal || j.renew)) { a.users[me].cal = crypto.randomBytes(18).toString("base64url"); saveAuth(a); AUTH = a; }
+      return send(res, 200, JSON.stringify({ path: `cal/${(AUTH.users[me] || {}).cal}.ics` }));
+    }
     // 0.6.5: updates for the phone app, and a backup of your files
     if (p === "/api/apk") return send(res, 200, JSON.stringify(apksFor(user)));
     if (p === "/download") {
@@ -311,12 +355,43 @@ const handler = isPublic => async (req, res) => {
         const d = dirOf(n === AUTH.owner ? "" : n), sh = read(d, "share.json");
         if (!sh || !sh.on) continue;
         const L = read(d, "library.json") || {}, G = read(d, "games.json") || {}, B = read(d, "books.json") || {};
-        out.push({ name: n,
+        out.push({ name: n, recent: activityOf(d),
           lib: Object.values(L.items || {}).map(i => ({ type: i.type, title: i.title, year: i.year || null, imdb: i.imdb || null, tmdb: i.tmdb || null, status: i.status, rating: i.rating || 0, poster: i.poster || "" })),
           games: (G.games || []).filter(g => !g.hidden).map(g => ({ title: g.title, date: g.date || "", platform: g.platform || "", status: g.status, rating: g.rating || 0 })),
           books: (B.books || []).map(b => ({ title: b.title, authors: (b.authors || []).slice(0, 2), status: b.status, rating: b.rating || 0 })) });
       }
       return send(res, 200, JSON.stringify({ me, people: out }));
+    }
+    // 0.6.9: send a title to someone (only to people who share, and only if you share too); your inbox
+    const shares = n => { try { return !!JSON.parse(fs.readFileSync(path.join(dirOf(n === AUTH.owner ? "" : n), "share.json"), "utf8")).on; } catch (e) { return false; } };
+    if (p === "/api/send" && req.method === "POST" && AUTH) {
+      let j = {}; try { j = JSON.parse((await readBody(req, 65536)).toString("utf8")); } catch (e) { return send(res, 400, '{"error":"not JSON"}'); }
+      const me = user || AUTH.owner, to = String(j.to || "").toLowerCase(), it = j.item || {};
+      if (!AUTH.users[to] || to === me) return send(res, 404, '{"error":"no such person"}');
+      if (!shares(me) || !shares(to)) return send(res, 403, '{"error":"both of you need sharing on (Settings › Accounts and sync)"}');
+      if (!it.title || !/^(movie|show|game|book)$/.test(it.type || "")) return send(res, 400, '{"error":"what to send?"}');
+      const d = dirOf(to === AUTH.owner ? "" : to), f = path.join(d, "inbox.json");
+      let box = []; try { box = JSON.parse(fs.readFileSync(f, "utf8")); } catch (e) { box = []; }
+      box.unshift({ id: crypto.randomBytes(6).toString("hex"), from: me, at: Date.now(), note: String(j.note || "").slice(0, 300),
+        item: { type: it.type, title: String(it.title).slice(0, 200), year: +it.year || null, tmdb: +it.tmdb || null, imdb: /^tt\d+$/.test(it.imdb || "") ? it.imdb : null, poster: /^https:\/\/[\w./-]+$/.test(it.poster || "") ? it.poster : "" } });
+      fs.mkdirSync(d, { recursive: true }); writeAtomic(d, "inbox.json", Buffer.from(JSON.stringify(box.slice(0, 100))));
+      return send(res, 200, '{"ok":true}');
+    }
+    if (p === "/api/inbox") {
+      const f = path.join(DIR, "inbox.json"); let box = []; try { box = JSON.parse(fs.readFileSync(f, "utf8")); } catch (e) { box = []; }
+      if (req.method === "POST") { let j = {}; try { j = JSON.parse((await readBody(req, 4096)).toString("utf8")); } catch (e) { /* none */ }
+        box = box.filter(x => x.id !== j.done); writeAtomic(DIR, "inbox.json", Buffer.from(JSON.stringify(box))); }
+      return send(res, 200, JSON.stringify(box));
+    }
+    // 0.6.9: the owner's view of the website: people, last seen, space, backups, updates
+    if (p === "/api/admin") {
+      if (AUTH && (user || AUTH.owner) !== AUTH.owner) return send(res, 403, '{"error":"only the owner"}');
+      const du = d => { let n = 0; try { for (const f of filesUnder(d, rel => /^(users|apk)(\/|$)/.test(rel))) n += f.data.length; } catch (e) { /* none */ } return n; };
+      let disk = null; try { const st = fs.statfsSync(DATA); disk = { free: st.bavail * st.bsize, total: st.blocks * st.bsize }; } catch (e) { /* old Node */ }
+      const daily = path.join(DATA, ".daily"); let lastDaily = null; try { lastDaily = fs.readdirSync(daily).sort().pop() || null; } catch (e) { /* none */ }
+      const people = AUTH ? Object.keys(AUTH.users).map(n => ({ name: n, owner: n === AUTH.owner, at: (SEEN[n] || {}).at || 0, sync: (SEEN[n] || {}).sync || 0, size: du(dirOf(n === AUTH.owner ? "" : n)), shares: shares(n), calendar: !!AUTH.users[n].cal })) : [];
+      return send(res, 200, JSON.stringify({ version: APP_VERSION, uptime: Math.round(process.uptime()), node: process.version, people, disk, lastDaily,
+        autoUpdate: fs.existsSync("/etc/systemd/system/timers.target.wants/saga-update.timer"), apks: fs.existsSync(APK_DIR) ? fs.readdirSync(APK_DIR).filter(n => /\.apk$/i.test(n)) : [] }));
     }
     if (p === "/api/me") return send(res, 200, JSON.stringify({ user: user || null, users: AUTH ? Object.keys(AUTH.users).length : 0 }));
     if (p.startsWith("/api/")) {

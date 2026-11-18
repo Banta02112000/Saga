@@ -73,6 +73,19 @@
     return `<div class="sstrip"><div><b>${s.total}</b><span>games</span></div><div><b>${s.done}</b><span>finished</span></div><div><b>${s.backlogDone}%</b><span>backlog cleared</span></div>
       ${s.playedHours ? `<div><b>${s.playedHours} h</b><span>played</span></div>` : ""}<div><b>${s.avg != null ? "★ " + s.avg : "–"}</b><span>average</span></div><div><b>${s.ownedUnplayed}</b><span>owned, unplayed</span></div></div>`;
   }
+  // 0.6.9: the backlog in hours, at the pace you finish games, and short owned games to finish next
+  const fmt = n => Number(n || 0).toLocaleString(Saga.lang && Saga.lang() === "it" ? "it-IT" : "en-GB");
+  function backlogCard() {
+    const b = G.backlogHours(lib()), steamH = Math.round(lib().visible().reduce((a, g) => a + (g.steamMins || 0), 0) / 60);
+    if (!b.games) return "";
+    const pace = b.years == null ? "Finish a few games with a How Long To Beat time to see how long it would take at your pace."
+      : b.years < 1 ? `At your pace (${fmt(b.paceH)} h of games finished in the last 12 months) that's about ${Math.max(1, Math.round(b.years * 12))} months.`
+      : `At your pace (${fmt(b.paceH)} h of games finished in the last 12 months) that's about ${b.years < 10 ? b.years.toFixed(1) : Math.round(b.years)} years.`;
+    return `<section class="card" style="padding:14px"><div class="kicker">Backlog</div>
+      <p class="small"><b>${fmt(b.hours)} h</b> to beat ${fmt(b.known)} of your ${fmt(b.games)} games still to play (How Long To Beat${b.known < b.games ? `; ${fmt(b.games - b.known)} have no time` : ""}). ${pace}${steamH ? ` Steam counts ${fmt(steamH)} h played in all.` : ""}</p>
+      ${b.quick.length ? `<div class="kicker" style="margin-top:8px">Short ones you own${b.quick.some(g => b.started.has(G.norm(g.franchise))) ? ", series you've started first" : ""}</div>
+        <div class="listcard">${b.quick.map(g => `<div class="item" data-action="gopen" data-id="${esc(g.id)}" role="button"><span class="grow ell">${esc(g.title)}</span><span class="small muted">${g.hours} h${b.started.has(G.norm(g.franchise)) ? " · " + esc(g.franchise) : ""}</span></div>`).join("")}</div>` : ""}</section>`;
+  }
   function renderStats() {
     const s = G.stats(lib()), mx = Math.max(1, ...s.hist), mm = Math.max(1, ...s.months);
     const rows = (list, f) => list.slice(0, 12).map(o => `<div class="item"><span class="grow ell">${esc(o.k)}</span><span class="small muted">${f(o)}</span></div>`).join("");
@@ -80,6 +93,7 @@
       <section class="card" style="padding:14px"><div class="kicker">Status</div>
         <div class="sstrip" style="flex-wrap:wrap">${[["Finished", s.done], ["Playing", s.playing], ["Paused", s.paused], ["Backlog", s.backlog], ["Wishlist", s.wishlist], ["Dropped", s.dropped]].map(([l, n]) => `<div><b>${n}</b><span>${l}</span></div>`).join("")}</div>
         <p class="small">Backlog cleared: <b>${s.backlogDone}%</b> (finished out of finished, playing, paused and backlog) · owned but not played: <b>${s.ownedUnplayed}</b>${s.backlogHours ? ` (about ${s.backlogHours} h to beat them all)` : ""}</p></section>
+      ${backlogCard()}
       <section class="card" style="padding:14px"><div class="kicker">Playtime</div>
         <p class="small">${s.playedHours} h logged in sessions · ${s.plays} playthroughs${s.avgBeat ? ` · ${s.avgBeat} h to beat a finished game, on average` : ""}</p>
         <div class="kicker" style="margin-top:8px">Sessions per month, ${new Date().getFullYear()}</div><div class="months" style="height:80px">${s.months.map(n => `<i style="height:${Math.round((100 * n) / mm)}%" title="${Math.round(n / 60)} h"></i>`).join("")}</div></section>
@@ -159,6 +173,7 @@
         <label class="field"><span>Alert me at or below (€)</span><input type="number" inputmode="decimal" step="0.01" data-gtarget="1" value="${g.target != null ? g.target : ""}" placeholder="any big discount"></label>` : ""}
       ${dealHtml(g)}
       <h4>Prices in other stores</h4>${storesHtml(g)}
+      ${g.steamMins || g.ach ? `<p class="small" style="margin:6px 0">Steam: ${g.steamMins ? `<b>${g.steamMins >= 120 ? Math.round(g.steamMins / 60) + " h" : g.steamMins + " min"}</b> played` : ""}${g.steam2w ? ` (${Math.round(g.steam2w / 6) / 10} h in the last two weeks)` : ""}${g.steamLast ? ` · last played ${esc(g.steamLast)}` : ""}${g.ach && g.ach.total ? ` · achievements <b>${g.ach.got}/${g.ach.total}</b> (${Math.round(100 * g.ach.got / g.ach.total)}%)` : ""}</p>${g.ach && g.ach.total ? `<div class="minibar" style="margin:0 0 8px"><i style="width:${Math.round(100 * g.ach.got / g.ach.total)}%"></i></div>` : ""}` : ""}
       <h4>Details</h4><div class="listcard">${facts.map(([k, v]) => `<div class="row small" style="min-height:38px;border-bottom:1px solid var(--line)" ${k === "Franchise" || k === "Multiverse" ? `data-action="mvopen" data-mv="${esc(v)}" role="button"` : k === "Studio" ? `data-action="gstudio" data-dev="${esc(v)}" role="button"` : ""}><span class="muted" style="width:42%">${esc(k)}</span><span class="grow">${esc(v)}${k === "Franchise" || k === "Multiverse" || k === "Studio" ? ` <span class="muted">›</span>` : ""}</span></div>`).join("")}</div>
       <label class="field" style="margin-top:12px"><span>Notes</span><textarea rows="2" data-gnotes="1" placeholder="Difficulty, mods, who you played with…">${esc(g.notes)}</textarea></label>
       ${relatedHtml(g)}

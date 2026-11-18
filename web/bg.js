@@ -25,9 +25,28 @@
     const { report, notes } = await C.backgroundRun(db, http);
     for (const n of notes) A.notify(n.id, n.title, n.text, n.tab || "home");
     db.flush();
-    return report + await library(db) + releases() + await books() + await games(db);
+    return report + await website(db) + await library(db) + releases() + await books() + await games(db);
   }
 
+  // 0.6.9: your Saga website. If it hasn't answered for 3 hours, a notification (once), and another when it's back.
+  async function website(db, now = Date.now()) {
+    const base = String(db.get("web_sync_url", "")).trim().replace(/\/+$/, "");
+    if (!base || db.get("web_watch", "1") !== "1") return "";
+    let ok = false;
+    try { const r = await Promise.race([http("GET", base + "/api/health", { headers: { Accept: "application/json" } }), new Promise(res => setTimeout(() => res({ status: 0 }), 20000))]); ok = r.status === 200 && /"ok":true/.test(r.body || ""); } catch (e) { ok = false; }
+    const since = +db.get("web_down_since", "0") || 0, told = db.get("web_down_told") === "1";
+    if (ok) {
+      if (told) A.notify(C.hashId("webup"), "Your Saga website is back", base.replace(/^https?:\/\//, ""), "settings");
+      if (since || told) { db.set("web_down_since", ""); db.set("web_down_told", ""); db.flush(); }
+      return "\nOK  website answers";
+    }
+    if (!since) { db.set("web_down_since", String(now)); db.flush(); return "\nFAIL website: no answer (first time)"; }
+    if (!told && now - since >= 3 * 3600e3) {
+      A.notify(C.hashId("webdown"), "Your Saga website isn't answering", `For ${Math.round((now - since) / 3600e3)} hours. Is the Pi on and online? ${base.replace(/^https?:\/\//, "")}`, "settings");
+      db.set("web_down_told", "1"); db.flush();
+    }
+    return `\nFAIL website: no answer for ${Math.round((now - since) / 60000)} min`;
+  }
   // Your library: refresh the episode lists of series you're watching and say when a new one is out
   async function library(db) {
     try {

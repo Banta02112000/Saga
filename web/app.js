@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.6.8";
+  const VERSION = "0.6.9";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -243,6 +243,7 @@
   const pct = f => `${Math.round(f * 100)}%`;
 
   const ICON = {
+    share: '<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.3M8.2 13.2l7.6 4.3"/>',
     x: '<path d="M6 6l12 12M18 6 6 18"/>',
     undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
     home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>',
@@ -299,6 +300,14 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.6.9", ["History (Settings › Backup): before every import, Start over, list removal, merge, going back and the first sync of the day, a copy of what you made yourself is kept (the last 12); go back to any of them.",
+      "Find duplicates (Settings › Tidy up): the same film, series or game entered twice, side by side; merge keeps the further status, your rating, every date, ticked episodes, notes and ids. The same game on two consoles isn't a duplicate.",
+      "Steam (with your Web API key): hours played and last played on each game, achievements, and a game you've played in the last two weeks moves to Playing by itself.",
+      "Games › Stats: your backlog in hours (How Long To Beat), how long it would take at your pace, and short owned games to finish next, series you've started first.",
+      "A calendar address on your Saga website for Google Calendar: episodes, releases, games and books you're waiting for, updated after each sync (no episode names you've hidden).",
+      "Friends: Send to … on a film or series; From friends on Home; what each friend watched, played and read lately.",
+      "Website status for the owner (Settings › Accounts and sync): people and when they last came by, space left on the Pi, the last daily copy, nightly updates.",
+      "A notification when your Saga website hasn't answered for 3 hours, and when it's back."]],
     ["0.6.8", ["Fixed: film, series and game pages could slide sideways (the picture at the top was 2 px too wide); nothing on a screen or a page can scroll sideways any more.",
       "Tapping the title or year under a cover opens it, not only the picture.",
       "Suggestions (For you), what a friend loved and a person's other work open a page with the details, Add to my watchlist and Mark as watched; DLC rows open their Steam page; related anime their MyAnimeList page.",
@@ -664,6 +673,7 @@
                         `<button class="sheetbtn" data-action="trakt" data-k="watchlist">${icon("list")}Add to Trakt watchlist</button>`);
     }
     if (c.sheetKind === "find") {
+      if (people().length) acts.push(sendButtons(Object.assign({ type: c.medium === "TV Series" ? "show" : "movie" }, c.src || {}, { title: c.title, year: c.year })));
       acts.unshift(`<button class="btn primary block" data-action="findadd" data-id="${esc(id)}" data-st="watchlist">${icon("plus")}Add to my watchlist</button>`,
         `<button class="sheetbtn" data-action="findadd" data-id="${esc(id)}" data-st="watched">${icon("check")}Mark as watched</button>`);
     }
@@ -1236,11 +1246,13 @@
   function icsText() {
     const today = TODAY(), until = new Date(Date.now() + 183 * 864e5).toISOString().slice(0, 10), ev = [], seen = new Set();
     const add = (d, title, note) => { const k = d + "|" + title; if (!d || d.length !== 10 || d < today || d > until || seen.has(k)) return; seen.add(k); ev.push([d, title, note || ""]); };
-    for (const it of lib.all()) if (it.type === "show" && it.status !== "dropped" && it.status !== "watchlist" && it.epl) for (const e of it.epl) if (e[2]) add(e[2], `${it.title} S${e[0]} E${e[1]}`, e[3] || "");
+    const hideNames = db.get("spoiler_hide", "1") === "1"; // 0.6.9: no episode names you'd rather not see
+    for (const it of lib.all()) if (it.type === "show" && it.status !== "dropped" && it.status !== "watchlist" && it.epl) for (const e of it.epl) if (e[2]) add(e[2], `${it.title} S${e[0]} E${e[1]}`, hideNames ? "" : e[3] || "");
     const libShows = new Set(lib.all().map(it => it.imdb).filter(Boolean));
-    for (const e of C.upcomingEpisodes(db, today)) if (!libShows.has(e.imdb)) add(e.date, `${e.show} S${e.s} E${e.e}`, e.name || "");
+    for (const e of C.upcomingEpisodes(db, today)) if (!libShows.has(e.imdb)) add(e.date, `${e.show} S${e.s} E${e.e}`, hideNames ? "" : e.name || "");
     for (const c of C.releaseList(status(), today).upcoming) add(c.date, c.title, c.franchise);
     if (secOn("games")) for (const g of games.upcoming(today)) add(g.date, `${g.title} (game)`, g.franchise || "");
+    if (secOn("books")) for (const b of books.books) if (b.status === "want" && b.published) add(String(b.published).slice(0, 10), `${b.title} (book)`, (b.authors || []).join(", "));
     const escI = t => String(t).replace(/([\\;,])/g, "\\$1").replace(/\n/g, " ");
     const next = d => new Date(Date.parse(d + "T12:00:00Z") + 864e5).toISOString().slice(0, 10).replace(/-/g, "");
     const stamp = new Date().toISOString().replace(/[-:]|\.\d+/g, "");
@@ -1332,7 +1344,7 @@
         <h2>Steam</h2>
         ${field("steam_profile", "Steam profile link or custom name", { placeholder: "https://steamcommunity.com/id/yourname", hint: "Your owned games and hours come in at every sync. In Steam › Edit profile › Privacy, My profile and Game details must be Public." })}
         ${field("itad_client_id", "IsThereAnyDeal app client ID (for your waitlist)", { hint: `From isthereanydeal.com › Apps (the same app as the API key). Its redirect URI must be ${itadRedirect()}` })}
-        <div class="row wrap">${db.get("itad_auth") ? `<span class="small muted">Signed in to IsThereAnyDeal: your waitlist ↔ Saga wishlist, and what you own → your ITAD collection, after each sync.</span>
+        <div class="row wrap">${db.get("itad_token") ? `<span class="small muted">Signed in to IsThereAnyDeal: your waitlist ↔ Saga wishlist, and what you own → your ITAD collection, after each sync.</span>
           <button class="btn small" data-action="itadnow">Sync waitlist and prices now</button><button class="btn small quiet" data-action="itadout">Sign out</button>`
           : `<button class="btn small" data-action="itadin" ${db.get("itad_client_id") ? "" : "disabled"}>Sign in to IsThereAnyDeal</button><button class="btn small quiet" data-action="itadpaste">Paste the address by hand</button>`}</div>
         ${field("itad_key", "IsThereAnyDeal API key (optional, for store prices)", { secret: true, hint: "Free at isthereanydeal.com › Settings › API keys. Game pages then compare euro prices across Steam, GOG, Epic, Humble, Fanatical, GamesPlanet and more. Without it, CheapShark's US prices are used." })}
@@ -1348,8 +1360,12 @@
         ${field("web_sync_key", "Sync key", { secret: true, hint: "Printed by  node server.js --set-password  on the server (needed for a public address; through Tailscale it works without one)." })}
         <label class="switch"><input type="checkbox" data-setting="web_sync_auto" ${db.get("web_sync_auto", "1") === "1" ? "checked" : ""}><span>Sync with the website by itself<small class="muted" style="display:block">After each sync, when you open the app, and a little after you change something.</small></span></label>
         <button class="btn" data-action="websync" ${db.get("web_sync_url") ? "" : "disabled"}>${icon("sync")}Sync with the website now</button>
+        ${window.__sagaWeb || db.get("web_sync_url") ? `<button class="btn small" data-action="webadmin">${icon("box")}Website status (owner)</button>` : ""}
         ${window.__sagaWeb || db.get("web_sync_url") ? `<label class="switch"><input type="checkbox" data-action="webshare" ${db.get("web_share") === "1" ? "checked" : ""}><span>Share my films, series, games and books with the other people on this website<small class="muted" style="display:block">They see titles, status and ratings (not notes, diary or keys), and you see theirs if they share too: “You and …” on Home, and their rating on a title.</small></span></label>
         <button class="btn small" data-action="peoplenow">Refresh friends</button>` : ""}
+        ${calUrl() ? `<div class="card" style="padding:10px"><b>Your calendar</b><p class="small muted" style="margin:4px 0">Episodes, releases, games and books you're waiting for. In Google Calendar: Other calendars › + › From URL, and paste this address (keep it private: anyone with it can read the dates). It updates after each sync.</p>
+          <div class="row wrap"><code class="small" style="word-break:break-all">${esc(calUrl())}</code></div><div class="row wrap"><button class="btn small" data-action="copyval" data-text="${esc(calUrl())}">Copy</button><button class="btn small quiet" data-action="calnew">New address</button></div></div>`
+          : (window.__sagaWeb || db.get("web_sync_url")) ? `<button class="btn small" data-action="calnow">${icon("upcoming")}Make a calendar link for Google Calendar</button>` : ""}
         ${window.__sagaWeb ? `<a class="btn" href="api/backup" download>${icon("box")}Download a backup of your files (.zip)</a>`
           : db.get("web_sync_url") ? `<button class="btn" data-action="open" data-url="${esc(db.get("web_sync_url").replace(/\/+$/, "") + "/api/backup")}">${icon("box")}Download the website's copy (.zip)</button>` : ""}
         <p class="small muted" style="margin:0">Phone and website hold the same files, so either one can rebuild the other. For a copy of every account on the Pi (onto a USB stick, say): <code>node server.js --backup /media/usb/saga.zip</code>.</p>
@@ -1359,6 +1375,9 @@
         <h2>More services</h2>
         <p class="small muted" style="margin:0">Synced at every sync, from your public profile (no password). Anime goes to the library, manga and light novels to Books.</p>
         ${field("anilist_user", "AniList username", { placeholder: "yourname" })}
+        ${field("anilist_client_id", "AniList app client ID (to send your changes back)", { hint: `anilist.co › Settings › Developer › Create new client, with the redirect URL ${anilistRedirect()}` })}
+        <div class="row wrap">${db.get("anilist_token") ? `<span class="small muted">Signed in to AniList: what you change in Saga (status, episodes, rating) goes back after each sync.</span><button class="btn small quiet" data-action="alout">Sign out</button>`
+          : `<button class="btn small" data-action="alin" ${db.get("anilist_client_id") && db.get("anilist_user") ? "" : "disabled"}>Sign in to AniList</button><button class="btn small quiet" data-action="alpaste">Paste the address by hand</button>`}</div>
         ${field("mal_user", "MyAnimeList username", { placeholder: "yourname" })}
         ${field("letterboxd_user", "Letterboxd username", { placeholder: "yourname", hint: "Letterboxd's public feed has your latest 50 diary entries; import the Letterboxd export once for everything older." })}
         ${field("goodreads_user", "Goodreads profile number or link", { placeholder: "goodreads.com/user/show/12345-name", hint: "Your read, reading and to-read shelves, if the profile is public." })}
@@ -2508,6 +2527,7 @@
         ${(() => { const x = streamsFor(it); return x ? `<p class="small" style="margin:4px 0 8px">${x.mine ? `On ${esc(shortName(x.o.name))}${x.o.res ? ` in ${esc(x.o.res)}` : ""}, one of your services` : x.o ? `Streaming on ${esc(shortName(x.o.name))}` : `Not in Italy: ${esc(x.vpn.flag)} ${esc(shortName(x.vpn.name))} with a VPN`}</p>` : ""; })()}
         ${it.anime && it.mal ? relHtml(it) : ""}
         ${libExtrasHtml(it)}
+        ${sendButtons(it)}
         ${(() => { const f = friendsOn(it); return f.length ? `<p class="small" style="margin:8px 0">${f.map(x => `<b>${esc(x.name)}</b>: ${esc(LST[x.status] || x.status)}${x.rating ? ` · ★ ${x.rating}` : ""}`).join(" · ")}</p>` : ""; })()}
         ${whyHtml(it)}
         <button class="sheetbtn" data-action="libwhere">${icon("eye")}Where to watch and details</button>
@@ -2972,6 +2992,7 @@
     if (cont.length) parts.push(`<section>${Kit.head("Continue")}${Kit.rail(cont)}</section>`);
     const rec = recentAll(16);
     { const fy = recsHtml(); if (fy) parts.push(fy); }
+    { const ib = inboxHtml(); if (ib) parts.push(ib); }
     { const fr = friendsHtml(); if (fr) parts.push(fr); }
     if (rec.length) parts.push(`<section>${Kit.head("Recently watched, played and read", `<button class="btn quiet small" data-action="recentall">Diary</button>`)}${Kit.rail(rec.map(recentTile))}</section>`);
     if (db.get("home_calendar", "1") === "1") {
@@ -3286,6 +3307,14 @@
           const r = await fn(db.get(k).trim());
           const parts = [];
           if (r.anime.length) { const m = lib.merge(r.anime, true); parts.push(`${fmt(r.anime.length)} titles (${fmt(m.added)} new)`); }
+          // 0.6.9: AniList two-way: what AniList says now, then what changed in Saga since goes back
+          if (name === "AniList") {
+            const alState = Imports.alStateFrom(r.anime);
+            if (db.get("anilist_token")) {
+              try { const pr = await Imports.anilistPush(http, db.get("anilist_token"), lib.all(), alState); if (pr.sent) parts.push(`${fmt(pr.sent)} sent to AniList`); if (pr.failed.length) parts.push(`${pr.failed.length} couldn't be sent (${pr.failed[0]})`); }
+              catch (e) { parts.push(e.message); if (/expired/.test(e.message)) db.set("anilist_token", ""); }
+            }
+          }
           if (r.books.length && secOn("books")) { const m = handOver("books", "", { rows: r.books, kind: name }); parts.push(`${fmt(r.books.length)} books${m && m.added != null ? ` (${fmt(m.added)} new)` : ""}`); }
           out.push(`${name}: ${parts.join(", ") || "nothing on the list"}`);
         } catch (e) { fails.push(e.message); logError("sync", e.message); }
@@ -3299,7 +3328,22 @@
       let steamTxt = "";
       if (db.get("steam_profile")) {
         try { const rows = await Imports.steamLibrary(http, db.get("steam_profile"), db.get("steam_key")); const sr = GC.importRows(games, rows, "Steam library"); db.set("steam_sync_at", String(Date.now()));
-          steamTxt = `Steam library: ${fmt(rows.length)} games found (${fmt(sr.added)} new, ${fmt(rows.length - sr.added)} already in Games)${!db.get("steam_key") && rows.length < 12 ? " — the profile page may show only some games: add a Steam Web API key for all of them" : ""}; `; }
+          steamTxt = `Steam library: ${fmt(rows.length)} games found (${fmt(sr.added)} new, ${fmt(rows.length - sr.added)} already in Games)${!db.get("steam_key") && rows.length < 12 ? " — the profile page may show only some games: add a Steam Web API key for all of them" : ""}; `;
+          // 0.6.9: hours played, last played; with the API key also recently played (→ Playing) and achievements
+          try {
+            let recent = [];
+            if (db.get("steam_key") && rows.steamid) { db.set("steam_id", rows.steamid); recent = await Imports.steamRecent(http, db.get("steam_key"), rows.steamid).catch(() => []); }
+            const sp = GC.steamPlay(games, rows, recent);
+            if (sp.moved.length) steamTxt += `now Playing: ${sp.moved.slice(0, 3).join(", ")}${sp.moved.length > 3 ? "…" : ""}; `;
+            if (db.get("steam_key") && rows.steamid) {
+              const due = games.visible().filter(g => g.steam && g.steamMins > 0 && (!g.achAt || Date.now() - g.achAt > 3 * 864e5))
+                .sort((a, b) => String(b.steamLast || "").localeCompare(String(a.steamLast || ""))).slice(0, 25);
+              let n = 0;
+              for (const g of due) { const ac = await Imports.steamAchievements(http, db.get("steam_key"), rows.steamid, g.steam).catch(() => undefined); if (ac === undefined) continue; g.ach = ac; g.achAt = Date.now(); if (ac) n++; }
+              if (n) steamTxt += `achievements of ${fmt(n)} games; `;
+            }
+            games.save();
+          } catch (e) { steamTxt += `playtime: ${e.message}; `; } }
         catch (e) { steamTxt = `Steam library failed: ${e.message}; `; }
       }
       const linked = await GC.linkSteam(games, http, 15, 900);
@@ -3350,7 +3394,9 @@
   const people = () => { const p = db.cacheGet("people:now"); return (p && p.people) || []; };
   async function peopleRefresh(loud) {
     if (!window.__sagaWeb && !db.get("web_sync_url")) return;
-    try { const r = await webApi("GET", "api/people"); db.cacheSet("people:now", { at: Date.now(), people: r.people || [] }); if (loud) toast(r.people.length ? `${r.people.length} sharing with you` : "Nobody shares with you yet"); render(); }
+    try { const r = await webApi("GET", "api/people"); db.cacheSet("people:now", { at: Date.now(), people: r.people || [] });
+      try { db.cacheSet("inbox:now", { at: Date.now(), items: await webApi("GET", "api/inbox") }); } catch (e) { /* older website */ }
+      if (loud) toast(r.people.length ? `${r.people.length} sharing with you` : "Nobody shares with you yet"); render(); }
     catch (e) { if (loud) toast(`Friends: ${e.message}`); }
   }
   // the same title in a friend's library
@@ -3375,13 +3421,45 @@
     const seen = P.lib.filter(x => x.status === "watched" || x.status === "watching").filter(x => { const it = mine.get(friendKey(x)); return it && (it.status === "watched" || it.status === "watching"); }).length;
     return { match: match == null ? null : Math.max(0, Math.min(100, match)), rated: both.length, seen, bothWant, loved: loved.sort((a, b) => b.rating - a.rating) };
   }
+  // 0.6.9: what friends sent you, and sending a title to them
+  const inbox = () => { const b = db.cacheGet("inbox:now"); return (b && b.items) || []; };
+  function inboxHtml() {
+    const box = inbox(); if (!box.length) return "";
+    return `<section>${Kit.head("From friends")}<div class="listcard">${box.slice(0, 8).map(x => `<div class="item" data-action="inboxopen" data-id="${esc(x.id)}" role="button">
+      <div class="grow" style="min-width:0"><b class="ell">${esc(x.item.title)}</b><div class="small muted ell">${esc([x.from + " sent it", x.item.year, x.item.type === "show" ? "Series" : x.item.type === "movie" ? "Film" : x.item.type === "game" ? "Game" : "Book", x.note ? "“" + x.note + "”" : ""].filter(Boolean).join(" · "))}</div></div>
+      <button class="iconbtn" data-action="inboxdone" data-id="${esc(x.id)}" aria-label="Done with it">${icon("x")}</button></div>`).join("")}</div></section>`;
+  }
+  const sendButtons = x => people().length ? `<div class="row wrap" style="margin:6px 0">${people().map(P => `<button class="btn small quiet" data-action="sendto" data-to="${esc(P.name)}" data-item="${esc(JSON.stringify({ type: x.type, title: x.title, year: x.year || null, tmdb: x.tmdb || null, imdb: x.imdb || null, poster: /^https:/.test(x.poster || "") ? x.poster : "" }))}">${icon("share")}Send to ${esc(P.name)}</button>`).join("")}</div>` : "";
+  const WHEN = d => { try { return new Date(d + "T12:00:00").toLocaleDateString(lang() === "it" ? "it-IT" : "en-GB", { day: "numeric", month: "short" }); } catch (e) { return d; } };
+  const ACT = { watched: "watched", finished: "watched", episode: "watched", played: "finished", read: "read" };
   function friendsHtml() {
     const ps = people(); if (!ps.length) return "";
     return ps.map(P => { const c = friendCompare(P);
       return `<section>${Kit.head(`You and ${esc(P.name)}`)}
         <div class="sstrip"><div><b>${c.match == null ? "–" : c.match + "%"}</b><span>taste match${c.rated ? ` (${c.rated} both rated)` : ""}</span></div><div><b>${fmt(c.seen)}</b><span>both watched</span></div><div><b>${fmt(c.bothWant.length)}</b><span>both want to watch</span></div><div><b>${fmt(P.games.filter(g => g.status === "done").length)}</b><span>games ${esc(P.name)} finished</span></div></div>
+        ${(P.recent || []).length ? `<h4>Lately</h4><div class="listcard">${P.recent.slice(0, 6).map((x, i) => `<div class="item"${x.type === "movie" || x.type === "show" ? ` data-action="actopen" data-p="${esc(P.name)}" data-i="${i}" role="button"` : ""}><div class="grow" style="min-width:0"><b class="ell">${esc(x.title)}</b><div class="small muted ell">${esc([`${P.name} ${ACT[x.kind] || x.kind}${x.kind === "episode" ? " S" + String(x.ep).replace(":", " E") : ""}`, x.rating ? "★ " + x.rating : "", WHEN(x.date)].filter(Boolean).join(" · "))}</div></div></div>`).join("")}</div>` : ""}
         ${c.bothWant.length ? `<h4>You both want to watch</h4><div class="listcard">${c.bothWant.slice(0, 8).map(it => `<div class="item" data-action="libopen" data-id="${esc(it.id)}">${libThumb(it)}<b class="grow ell">${esc(it.title)}</b><span class="small muted">${esc(it.year || "")}</span></div>`).join("")}</div>` : ""}
         ${c.loved.length ? `<h4>${esc(P.name)} loved, you haven't seen</h4><div class="listcard">${c.loved.slice(0, 8).map((x, i) => `<div class="item" data-action="friendopen" data-p="${esc(P.name)}" data-i="${P.lib.indexOf(x)}" role="button"><div class="grow" style="min-width:0"><b class="ell">${esc(x.title)}</b><div class="small muted">${esc([x.year, x.type === "show" ? "Series" : "Film", "★ " + x.rating].filter(Boolean).join(" · "))}</div></div><button class="btn quiet small" data-action="friendadd" data-p="${esc(P.name)}" data-i="${P.lib.indexOf(x)}">${icon("plus")}Add</button></div>`).join("")}</div>` : ""}</section>`; }).join("");
+  }
+  // 0.6.9: the calendar on your Saga website, for Google Calendar (or any calendar app) to subscribe to
+  async function pushCalendar() {
+    if (!window.__sagaWeb && !db.get("web_sync_url")) return;
+    try { const c = icsText(); const r = await webApi("POST", "api/calendar", { text: c.text }); if (r && r.path) { db.set("cal_path", r.path); } } catch (e) { logError("calendar", e.message); }
+  }
+  const calUrl = () => { const base = window.__sagaWeb ? location.origin + location.pathname.replace(/[^/]*$/, "") : String(db.get("web_sync_url", "")).replace(/\/+$/, "") + "/"; return db.get("cal_path") ? base + db.get("cal_path") : ""; };
+  // 0.6.9: the website's owner page: who has an account and when they last came by, space left, backups, updates
+  async function openAdmin() {
+    $("#overlay").innerHTML = `<div class="scrim bottom" data-action="dismiss"><div class="sheet" role="dialog" aria-modal="true"><h3 style="margin:0">Your Saga website</h3><p class="small muted">Asking the website…</p></div></div>`;
+    let a;
+    try { a = await webApi("GET", "api/admin"); } catch (e) { $("#overlay .sheet").innerHTML = `<h3 style="margin:0">Your Saga website</h3><p class="small muted">${/403/.test(e.message) ? "Only the website's owner sees this page." : esc(e.message)}</p>`; return; }
+    const ago = t => !t ? "never" : (() => { const m = Math.round((Date.now() - t) / 60000); return m < 2 ? "just now" : m < 120 ? m + " min ago" : m < 2880 ? Math.round(m / 60) + " h ago" : Math.round(m / 1440) + " days ago"; })();
+    const mb = n => (n / 1048576).toFixed(n < 10485760 ? 1 : 0) + " MB", gb = n => (n / 1073741824).toFixed(1) + " GB";
+    const low = a.disk && a.disk.free < 1073741824;
+    $("#overlay .sheet").innerHTML = `<h3 style="margin:0">Your Saga website</h3><p class="small muted" style="margin:2px 0 10px">Saga ${esc(a.version)} · Node ${esc(a.node)} · running for ${a.uptime > 86400 ? Math.round(a.uptime / 86400) + " days" : Math.round(a.uptime / 3600) + " h"}</p>
+      <div class="sstrip"><div><b>${a.people.length}</b><span>accounts</span></div><div><b${low ? ' style="color:#f0883e"' : ""}>${a.disk ? gb(a.disk.free) : "?"}</b><span>free on the Pi${a.disk ? " of " + gb(a.disk.total) : ""}</span></div><div><b>${a.lastDaily ? esc(a.lastDaily.slice(5)) : "–"}</b><span>last daily copy</span></div><div><b>${a.autoUpdate ? "on" : "off"}</b><span>nightly updates</span></div></div>
+      ${low ? `<p class="small" style="color:#f0883e">Less than 1 GB free on the Pi: when the card is full, saving stops working. Delete old files or move to a bigger card.</p>` : ""}
+      <h4>People</h4><div class="listcard">${a.people.map(p => `<div class="item"><div class="grow" style="min-width:0"><b>${esc(p.name)}</b>${p.owner ? ' <span class="muted small">(owner)</span>' : ""}<div class="small muted">last here ${ago(p.at)} · last phone sync ${ago(p.sync)} · ${mb(p.size)}${p.shares ? " · shares" : ""}${p.calendar ? " · calendar" : ""}</div></div></div>`).join("")}</div>
+      <p class="small muted">App updates on the download page: ${a.apks.length ? esc(a.apks.join(", ")) : "none (copy APKs into /opt/saga/data/apk/)"}.${a.autoUpdate ? "" : " Nightly updates: <code>bash /opt/saga/app/site/auto-update.sh on</code>."}</p>`;
   }
   async function syncWithWebServer(loud) {
     const base = String(db.get("web_sync_url", "")).trim().replace(/\/+$/, "");
@@ -3435,14 +3513,17 @@
   }
   // 0.5.7: what follows a sync runs one thing after another, after the sync's own save, instead of all at once
   let afterRunning = false;
+  // 0.6.9: the ITAD sign-in used to be kept as "itad_auth", which wasn't treated as secret (it went into backups and
+  // the website's copy of settings): moved to a secret name once
+  try { const old = db.get("itad_auth"); if (old) { if (!db.get("itad_token")) db.set("itad_token", old); delete db.settings.itad_auth; delete db.settings.itad_pkce; db.flush(); } } catch (e) { /* nothing to move */ }
   // ---- 0.6.6: IsThereAnyDeal
   async function itadToken() {
-    let t = {}; try { t = JSON.parse(db.get("itad_auth", "{}")) || {}; } catch (e) { t = {}; }
+    let t = {}; try { t = JSON.parse(db.get("itad_token", "{}")) || {}; } catch (e) { t = {}; }
     if (!t.access) return "";
     if (t.until && Date.now() < t.until - 60000) return t.access;
     if (!t.refresh) return "";
     const n = await GC.itadToken(Native.http, { grant_type: "refresh_token", refresh_token: t.refresh, client_id: db.get("itad_client_id") });
-    db.set("itad_auth", JSON.stringify(Object.assign(t, n, { refresh: n.refresh || t.refresh }))); db.flush();
+    db.set("itad_token", JSON.stringify(Object.assign(t, n, { refresh: n.refresh || t.refresh }))); db.flush();
     return n.access;
   }
   async function itadRefresh(http, force) {
@@ -3458,7 +3539,7 @@
       if (feat("priceAlerts")) for (const g of games.visible()) if (g.deal && g.deal.atLow && g.deal.cut > 0 && (g.status === "wishlist" || g.next))
         Native.notify(C.hashId("glow|" + g.id + "|" + g.deal.price), `Lowest price ever: ${g.title}`, `${g.deal.cur === "EUR" ? "€" : g.deal.cur + " "}${(+g.deal.price).toFixed(2)} at ${g.deal.shop} (−${g.deal.cut}%)`, "games");
     }
-    if (db.get("itad_auth")) {
+    if (db.get("itad_token")) {
       try { const tok = await itadToken(); if (tok) { const w = await GC.itadWaitSync(games, http, tok); out.push(`waitlist: ${w.added} in, ${w.pushed} out${w.removedHere + w.removedThere ? `, ${w.removedHere + w.removedThere} removed` : ""}; ${w.owned} to your collection`); } }
       catch (e) { out.push(`waitlist: ${e.message}`); }
     }
@@ -3469,31 +3550,41 @@
     const cid = String(db.get("itad_client_id", "")).trim();
     if (!cid) { toast("Add your IsThereAnyDeal app's client ID first"); return; }
     const verifier = Native.randomUrl(48), state = Native.randomUrl(16);
-    db.set("itad_pkce", JSON.stringify({ verifier, state, redirect: itadRedirect() })); db.flush();
+    db.set("itad_pkce_secret", JSON.stringify({ verifier, state, redirect: itadRedirect() })); db.flush();
     Native.openUrl(GC.itadAuthUrl(cid, itadRedirect(), await Native.sha256url(verifier), state));
     toast("Approve Saga on IsThereAnyDeal; you'll come back here by yourself");
   }
   const itadRedirect = () => `${(Native.linkScheme && Native.linkScheme()) || "bantaapps"}://oauth/itad`;
   // the browser comes back with …://oauth/itad?code=…&state=… (or the address pasted by hand)
   async function itadFinish(url) {
-    let st = {}; try { st = JSON.parse(db.get("itad_pkce", "{}")) || {}; } catch (e) { st = {}; }
+    let st = {}; try { st = JSON.parse(db.get("itad_pkce_secret", "{}")) || {}; } catch (e) { st = {}; }
     const q = new URLSearchParams(String(url).replace(/^[^?]*\?/, "").replace(/#.*/, ""));
     if (q.get("error")) { toast(`IsThereAnyDeal: ${q.get("error_description") || q.get("error")}`); return; }
     if (!q.get("code") || !st.verifier) { toast("That isn't an IsThereAnyDeal sign-in address"); return; }
     if (st.state && q.get("state") !== st.state) { toast("Sign-in didn't match: try again"); return; }
     runJob("IsThereAnyDeal sign-in", async () => {
       const t = await GC.itadToken(Native.http, { grant_type: "authorization_code", code: q.get("code"), redirect_uri: st.redirect || itadRedirect(), client_id: db.get("itad_client_id"), code_verifier: st.verifier });
-      db.set("itad_auth", JSON.stringify(t)); db.set("itad_pkce", ""); db.flush();
+      db.set("itad_token", JSON.stringify(t)); db.set("itad_pkce_secret", ""); db.flush();
       return "Signed in to IsThereAnyDeal. " + await itadRefresh(Native.http, true);
     });
   }
-  window.__oauth = url => { if (/oauth\/itad/.test(url)) itadFinish(url); };
+  window.__oauth = url => { if (/oauth\/itad/.test(url)) itadFinish(url); else if (/oauth\/anilist/.test(url)) anilistFinish(url); };
+  // 0.6.9: AniList sign-in (the token comes back in the address: …://oauth/anilist#access_token=…)
+  const anilistRedirect = () => `${(Native.linkScheme && Native.linkScheme()) || "bantaapps"}://oauth/anilist`;
+  function anilistFinish(url) {
+    const t = Imports.anilistTokenFrom(url);
+    if (!t) { toast("That isn't an AniList sign-in address"); return; }
+    db.set("anilist_token", t.token); db.set("anilist_until", String(t.until)); db.flush();
+    toast("Signed in to AniList: changes go back to it after each sync"); render();
+  }
   window.__oauthPoll = () => { const u = Native.takeOauth(); if (u) window.__oauth(u); };
   setTimeout(() => { try { window.__oauthPoll(); } catch (e) { logError("oauth", e.message); } }, 600);
   async function afterSync() {
     setTimeout(() => checkUpdate(false).catch(() => {}), 5000);
+    setTimeout(() => { if (db.get("cal_path")) pushCalendar(); }, 7000);
     setTimeout(() => recsRefresh(false).catch(() => {}), 9000);
     setTimeout(() => peopleRefresh(false).catch(() => {}), 12000);
+    setTimeout(() => { if (db.get("cal_path")) pushCalendar(); }, 14000);
     if (afterRunning) return;
     afterRunning = true;
     try {
@@ -3821,7 +3912,70 @@
     });
   }
   // Every import keeps a copy of the data from just before it, so the latest one can be undone (Settings › Import).
+  // ---- 0.6.9: history. Before every import, Start over, list removal, merge, restore and the first sync of the day,
+  // a copy of what you made yourself (films and series, games, books, Doctor Who, your lists) is kept: the last 12.
+  // What syncs from IMDb and Trakt isn't in it (a sync brings it back), so each copy stays small.
+  const SNAP_MAX = 12;
+  const snaps = () => { try { return JSON.parse(db.get("snaps", "[]")) || []; } catch (e) { return []; } };
+  const MINE_SETTINGS = /^(lib_lists|my_lists|mylists|u_order|u_tier|recs_hide|pick_hide|lib_rules)/;
+  // a copy can be several MB: it goes to the phone in pieces, written in the background (one huge text would stall the screen)
+  function snapWrite(name, body) {
+    if (Native.parts) { const parts = []; for (let i = 0; i < body.length; i += 150000) parts.push(body.slice(i, i + 150000)); Native.saveParts(name, parts); return true; }
+    return !!Native.save(name, body);
+  }
+  function snapshot(why) {
+    try {
+      const mine = {}; for (const [k, v] of Object.entries(db.toJSON().settings || {})) if (MINE_SETTINGS.test(k)) mine[k] = v;
+      const body = JSON.stringify({ app: "saga-snapshot", v: 1, version: VERSION, at: Date.now(), why, settings: mine, library: lib.toJSON(), games: games.toJSON(), books: books.toJSON(), dw: Kit.mods.timeline.state() });
+      const list = snaps(), n = list.length ? (Math.max(...list.map(x => x.n)) + 1) : 1;
+      if (!snapWrite(`snap_${n}.json`, body)) return false;
+      list.unshift({ n, at: Date.now(), why, films: lib.all().length, games: games.visible().length, books: books.books.length, size: body.length });
+      for (const old of list.slice(SNAP_MAX)) { try { Native.saveLater(`snap_${old.n}.json`, ""); } catch (e) { /* already gone */ } }
+      db.set("snaps", JSON.stringify(list.slice(0, SNAP_MAX))); db.flush();
+      return true;
+    } catch (e) { logError("snapshot", e.message); return false; }
+  }
+  function restoreSnap(n) {
+    const s0 = snaps().find(x => x.n === n), t = s0 && Native.load(`snap_${n}.json`);
+    if (!t) { toast("That copy is no longer on this device"); return; }
+    confirmDialog(`Go back to ${new Date(s0.at).toLocaleString(lang() === "it" ? "it-IT" : "en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}?`,
+      `Your films and series, games, books, Doctor Who and lists go back to how they were ${esc(s0.why)} (${fmt(s0.films)} films and series, ${fmt(s0.games)} games, ${fmt(s0.books)} books). A copy of how things are now is kept first, so you can come back. Synced IMDb and Trakt data and your settings stay as they are.`, "Go back", () => {
+        snapshot("before going back to an earlier copy");
+        try {
+          const j = JSON.parse(t);
+          applyBackup({ library: j.library, games: j.games, books: j.books, dw: j.dw });
+          for (const [k, v] of Object.entries(j.settings || {})) db.set(k, v);
+          db.flush(); invalidate(); render(); toast("Back to the earlier copy");
+        } catch (e) { toast(e.message); }
+      });
+  }
+  function historySection() {
+    const list = snaps();
+    return `<section class="stack" id="history"><h2>History</h2>
+      <p class="small muted" style="margin:0">A copy of what you made yourself is kept before every import, Start over, list removal, merge and the first sync of each day (the last ${SNAP_MAX}). Going back keeps a copy of now first.</p>
+      <div class="listcard">${list.length ? list.map(x => `<div class="item"><div class="grow" style="min-width:0"><b class="ell">${esc(new Date(x.at).toLocaleString(lang() === "it" ? "it-IT" : "en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }))}</b>
+        <div class="small muted ell">${esc(x.why)} · ${fmt(x.films)} films and series · ${fmt(x.games)} games · ${fmt(x.books)} books</div></div><button class="btn small" data-action="snaprestore" data-n="${x.n}">Go back</button></div>`).join("")
+        : `<p class="small muted" style="padding:8px">No copies yet: the first is made before your next import or sync.</p>`}</div>
+      <button class="btn small" data-action="snapnow">${icon("box")}Keep a copy now</button></section>`;
+  }
+  // ---- 0.6.9: duplicates in your films and series and your games: suggested pairs, merged only when you say so
+  const dupSkip = () => { try { return JSON.parse(db.get("dup_skip", "{}")) || {}; } catch (e) { return {}; } };
+  function dupPairs() { const sk = dupSkip(); return { lib: L.findDuplicates(lib, sk), games: feat("games") ? GC.findDuplicates(games, sk) : [] }; }
+  function openDuplicates() {
+    const d = dupPairs(), n = d.lib.length + d.games.length;
+    const side = (x, kind) => kind === "lib" ? `<div class="grow" style="min-width:0"><b class="ell">${esc(x.title)}</b><div class="small muted ell">${esc([x.year, x.type === "show" ? "Series" : "Film", LST[x.status], x.rating ? "★ " + x.rating : "", x.watches.length ? x.watches.length + " watch" + (x.watches.length === 1 ? "" : "es") : "", Object.keys(x.eps || {}).length ? Object.keys(x.eps).length + " episodes ticked" : "", x.imdb || ""].filter(Boolean).join(" · "))}</div></div>`
+      : `<div class="grow" style="min-width:0"><b class="ell">${esc(x.title)}</b><div class="small muted ell">${esc([GC.yearOf(x), x.platform, GC.LABEL[x.status], x.rating ? "★ " + x.rating : "", x.plays.length ? x.plays.length + "× finished" : "", x.owned && !/^n\/a$/i.test(x.owned) ? "owned: " + x.owned : ""].filter(Boolean).join(" · "))}</div></div>`;
+    const rows = (list, kind) => list.slice(0, 80).map((p, i) => `<div class="card" style="margin:8px 0;padding:10px"><div class="small muted" style="margin-bottom:4px">${esc(p.why)}</div>
+      <div class="item" style="margin:0">${side(p.a, kind)}</div><div class="item" style="margin:0">${side(p.b, kind)}</div>
+      <div class="row wrap" style="margin-top:6px"><button class="btn small" data-action="dupmerge" data-kind="${kind}" data-i="${i}">Merge into one</button><button class="btn small quiet" data-action="dupskip" data-kind="${kind}" data-i="${i}">Not the same</button></div></div>`).join("");
+    ui.dups = d;
+    $("#overlay").innerHTML = `<div class="scrim bottom" data-action="dismiss"><div class="sheet" role="dialog" aria-modal="true"><h3 style="margin:0">Duplicates</h3>
+      <p class="small muted">${n ? `${fmt(n)} possible duplicate${n === 1 ? "" : "s"}. Merging keeps one entry with the further status, your rating, every watch or finish date, ticked episodes, notes and ids. A copy is kept first (Settings › History).` : "No duplicates found."}</p>
+      ${n > 1 ? `<button class="btn" data-action="dupall">Merge all ${fmt(n)}</button>` : ""}
+      ${d.lib.length ? `<h4>Films and series · ${fmt(d.lib.length)}</h4>${rows(d.lib, "lib")}` : ""}${d.games.length ? `<h4>Games · ${fmt(d.games.length)}</h4>${rows(d.games, "games")}` : ""}</div></div>`;
+  }
   function keepBeforeImport(what) {
+    snapshot(`before the ${what || "import"}`);
     if (SH.write("before_import.json", bundle(false))) { db.set("import_undo_at", String(Date.now())); db.set("import_undo_what", what || "import"); db.flush(); }
   }
   function undoImport() {
@@ -3880,7 +4034,10 @@
     ["canon", "Canon lists (franchises and their entries)", ""], ["games", "Games", "Your games, playthroughs and sessions."], ["books", "Books and manga", ""],
     ["dw", "Doctor Who progress", "Ticks, ratings, your own entries and order."], ["lists", "Your lists", ""], ["cache", "Look-up cache", "Posters, dates and details: fetched again when needed."]];
   function startOverSection() {
-    return `<section class="stack" id="startover"><h2>Start over</h2>
+    return `<section class="stack" id="tidy"><h2>Tidy up</h2>
+      <p class="small muted" style="margin:0">The same film, series or game entered twice (an import and a sync, another year or spelling): see them side by side and merge.</p>
+      <button class="btn" data-action="dupopen">${icon("list")}Find duplicates</button></section>
+      <section class="stack" id="startover"><h2>Start over</h2>
       <p class="small muted" style="margin:0">Clear the parts you choose and keep the rest (settings, keys and accounts always stay). A copy of everything is kept first: Undo appears for 10 seconds, and Settings › Imports › Undo the last import works afterwards too.</p>
       <div class="card">${WIPE.map(([k, l, h]) => `<label class="switch"><input type="checkbox" data-wipe="${k}"><span>${esc(l)}${h ? `<small class="muted" style="display:block">${esc(h)}</small>` : ""}</span></label>`).join("")}
         <button class="btn" style="margin-top:10px" data-action="wipe">Clear what's ticked</button></div></section>`;
@@ -3904,7 +4061,7 @@
     mirrorNow(); invalidate(); db.flush(true); render();
     toast(`Cleared: ${cats.length} part${cats.length === 1 ? "" : "s"}`, () => { try { applyBackup(readBackup2(before)); db.flush(true); render(); toast("Put back"); } catch (e) { toast(e.message); } });
   }
-  function backupSection() { return backupSection0() + startOverSection(); }
+  function backupSection() { return backupSection0() + historySection() + startOverSection(); }
   function backupSection0() {
     const autos = autoBackups(), uri = db.get("backup_uri"), at = parseFloat(db.get("backup_file_at", "0")) || 0;
     return `<section class="stack" id="backup">
@@ -4084,6 +4241,7 @@
   function doSync(retryOnly = false, fullImdb = false) {
     const only = retryOnly ? new Set(failedLabels()) : null;
     if (!retryOnly && ui.sec !== "sync" && db.get("sync_open", "1") === "1") go("sync");
+    if (!retryOnly && new Date(+db.get("snap_sync_at", "0") || 0).toDateString() !== new Date().toDateString()) { if (snapshot("before the first sync of the day")) db.set("snap_sync_at", String(Date.now())); }
     return runJob(retryOnly ? "Retry" : "Sync", async progress => {
       const http = C.robust(Native.http, { timeout: 30000, tries: 2 });
       const r = await C.syncAll(db, Native.http, (f, t) => progress(f == null ? null : f * 0.7, t), only, { fullImdb });
@@ -4166,6 +4324,27 @@
     switch (a) {
       case "search": openSearch(); break;
       case "person": openPerson(el.dataset.name); break;
+      case "copyval": Native.copy(el.dataset.text || ""); toast("Copied"); break;
+      case "calnow": pushCalendar().then(() => { toast(calUrl() ? "Calendar link ready" : "Couldn't reach the website"); render(); }); break;
+      case "calnew": webApi("POST", "api/calendar", { text: icsText().text, renew: true }).then(r => { db.set("cal_path", r.path); toast("New address: the old one stops working"); render(); }, e => toast(e.message)); break;
+      case "snaprestore": restoreSnap(+el.dataset.n); break;
+      case "sendto": { let item = {}; try { item = JSON.parse(el.dataset.item); } catch (e) { break; }
+        const note = prompt(`A note for ${el.dataset.to}? (optional)`, ""); if (note === null) break;
+        webApi("POST", "api/send", { to: el.dataset.to, item, note }).then(() => toast(`Sent to ${el.dataset.to}`), e => toast(/403/.test(e.message) ? "Both of you need sharing on (Settings › Accounts and sync)" : e.message)); break; }
+      case "inboxopen": { const x = inbox().find(y => y.id === el.dataset.id); if (x && (x.item.type === "movie" || x.item.type === "show")) openTitle(Object.assign({ why: `from ${x.from}${x.note ? ": " + x.note : ""}` }, x.item)); else if (x) toast(`${x.from} sent ${x.item.title}`); break; }
+      case "inboxdone": { const id = el.dataset.id; db.cacheSet("inbox:now", { at: Date.now(), items: inbox().filter(y => y.id !== id) }); render(); webApi("POST", "api/inbox", { done: id }).catch(() => {}); break; }
+      case "actopen": { const P = people().find(p => p.name === el.dataset.p), x = P && (P.recent || [])[+el.dataset.i]; if (x) openTitle(Object.assign({ why: `${P.name} ${ACT[x.kind] || x.kind} it ${WHEN(x.date)}` }, x)); break; }
+      case "webadmin": openAdmin(); break;
+      case "snapnow": toast(snapshot("kept by hand") ? "Copy kept" : "Couldn't keep a copy"); render(); break;
+      case "dupopen": openDuplicates(); break;
+      case "dupmerge": { const P = ui.dups && ui.dups[el.dataset.kind][+el.dataset.i]; if (!P) break; snapshot("before merging duplicates");
+        if (el.dataset.kind === "lib") { L.mergeItems(lib, P.a, P.b); libSave(); } else { GC.mergeGames(games, P.a, P.b); games.save(); }
+        toast("Merged"); openDuplicates(); render(); break; }
+      case "dupskip": { const P = ui.dups && ui.dups[el.dataset.kind][+el.dataset.i]; if (!P) break; const sk = dupSkip(); sk[[P.a.id, P.b.id].sort().join("|")] = 1; db.set("dup_skip", JSON.stringify(sk)); openDuplicates(); break; }
+      case "dupall": { const d = ui.dups; if (!d) break; snapshot("before merging duplicates"); let n = 0;
+        for (const P of d.lib) if (lib.get(P.a.id) && lib.get(P.b.id)) { L.mergeItems(lib, P.a, P.b); n++; }
+        for (const P of d.games) if (games.get(P.a.id) && games.get(P.b.id)) { GC.mergeGames(games, P.a, P.b); n++; }
+        libSave(); games.save(); toast(`${fmt(n)} merged · Settings › History can undo it`); openDuplicates(); render(); break; }
       case "findadd": { const c = sheetItems.get(el.dataset.id); if (!c) break; const x = c.src || {};
         const r = libAdd({ type: c.medium === "TV Series" ? "show" : "movie", title: c.title, year: c.year, tmdb: c.tmdb, imdb: c.imdb, poster: x.poster || "", overview: x.overview || "" }, el.dataset.st);
         closeOverlay(); render(); const it = r && (r.item || r); if (it && it.id) openLib(it.id); break; }
@@ -4190,6 +4369,7 @@
       case "listpurge": { const [src, ...nm] = el.dataset.k.split("|"), name = nm.join("|"), gone = listOnlyItems(src, name);
         const total = syncedLists().find(l => l.source === src && l.name === name);
         confirmDialog(`Switch off “${name || src}”?`, `${gone.length ? `${fmt(gone.length)} title${gone.length === 1 ? "" : "s"} that only this list brought will be removed` : "No titles came only from this list"}. Titles also on another list or in your ratings, and anything you've rated, ticked or written notes on, stay.${total ? ` The list has ${fmt(total.n)} entries.` : ""}`, "Switch off and remove", () => {
+          snapshot(`before removing the titles of “${name || src}”`);
           const before = JSON.stringify(lib.toJSON());
           let st = {}; try { st = JSON.parse(db.get("lib_lists", "{}")) || {}; } catch (e) { st = {}; }
           st[el.dataset.k] = 0; db.set("lib_lists", JSON.stringify(st));
@@ -4207,7 +4387,10 @@
       case "updcheck": checkUpdate(true); break;
       case "recsnow": recsRefresh(true); break;
       case "itadin": itadSignIn(); break;
-      case "itadout": db.set("itad_auth", ""); db.flush(); toast("Signed out of IsThereAnyDeal"); render(); break;
+      case "alin": Native.openUrl(Imports.anilistAuthUrl(db.get("anilist_client_id"))); toast("Approve Saga on AniList; you'll come back here by yourself"); break;
+      case "alout": db.set("anilist_token", ""); db.flush(); toast("Signed out of AniList"); render(); break;
+      case "alpaste": { const u = prompt("Paste the address the browser showed after approving (it starts with " + anilistRedirect() + ")"); if (u) anilistFinish(u); break; }
+      case "itadout": db.set("itad_token", ""); db.flush(); toast("Signed out of IsThereAnyDeal"); render(); break;
       case "itadnow": runJob("IsThereAnyDeal", async () => itadRefresh(Native.http, true)); break;
       case "itadpaste": { const u = prompt("Paste the address the browser showed after approving (it starts with " + itadRedirect() + ")"); if (u) itadFinish(u); break; }
       case "webshare": { const on = el.checked; db.set("web_share", on ? "1" : "0"); webApi("POST", "api/share", { on }).then(() => { toast(on ? "Sharing with the other people on the website" : "Not sharing any more"); peopleRefresh(false); }, e => { toast(e.message); db.set("web_share", on ? "0" : "1"); render(); }); break; }

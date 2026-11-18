@@ -240,7 +240,8 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
       return { tagged, gone, back: !!__app.lib.get(id) && (__app.lib.get(id).tags || []).join() }; });
     ok(rm.tagged === "Heist nights" && rm.gone && rm.back === "Heist nights", "tag, remove, undo: " + JSON.stringify(rm));
     ok(await A(() => { __app.ui.libTag = "Heist nights"; __app.ui.libF = "watching"; __app.go("watch"); __app.render(); const t = document.querySelector("#view").textContent; __app.ui.libTag = ""; return /Heist nights/.test(t) && /Heat/.test(t); }), "a tag filters the library like a list");
-    const ics = await A(() => { const it = __app.lib.all().find(x => x.title === "Severance"); const d = new Date(Date.now() + 5 * 864e5).toISOString().slice(0, 10); it.epl.push([1, 9, d, "Finale; part, one"]); return __app.icsText(); });
+    const ics = await A(() => { const it = __app.lib.all().find(x => x.title === "Severance"); const d = new Date(Date.now() + 5 * 864e5).toISOString().slice(0, 10); it.epl.push([1, 9, d, "Finale; part, one"]); __app.db.set("spoiler_hide", "1"); const hidden = __app.icsText(); __app.db.set("spoiler_hide", "0"); const r = __app.icsText(); __app.db.set("spoiler_hide", "1"); r.hiddenOk = !/Finale/.test(hidden.text) && /SUMMARY:Severance S1 E9/.test(hidden.text); return r; });
+    ok(ics.hiddenOk, "the calendar leaves unwatched episode names out when they're hidden (the default)");
     ok(ics.n >= 1 && /BEGIN:VCALENDAR\r\n/.test(ics.text) && /SUMMARY:Severance S1 E9\r\n/.test(ics.text) && /DESCRIPTION:Finale\\; part\\, one/.test(ics.text) && /DTSTART;VALUE=DATE:\d{8}\r\n/.test(ics.text), "calendar file: " + ics.text.slice(0, 300));
     const fy = await A(() => { const G = [["Crime", 9], ["Crime", 10], ["Crime", 9], ["Crime", 9], ["Romance", 3], ["Romance", 2], ["Romance", 4], ["Romance", 3]];
       G.forEach(([g, r], i) => { const it = __app.lib.add({ type: "movie", title: "Rated " + i, year: 1990 + i, genres: [g] }, "watched").item; it.rating = r; });
@@ -287,7 +288,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.6.8", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.6.9", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();
@@ -712,12 +713,12 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     out.notified = (window.__log || []).some(l => /NOTIFY Lowest price ever: Itad Deal Game/.test(l)) || true;
     // sign-in: the browser comes back to bantaapps://oauth/itad?code=…&state=…
     press("itadin"); await new Promise(r => setTimeout(r, 50));
-    const pk = JSON.parse(__app.db.get("itad_pkce") || "{}");
+    const pk = JSON.parse(__app.db.get("itad_pkce_secret") || "{}");
     out.pkce = pk.verifier === "v".repeat(48) && /oauth\/itad/.test(pk.redirect);
     window.__oauth(`bantaapps://oauth/itad?code=good&state=${pk.state}`);
-    out.signed = await wait(() => /tok1/.test(__app.db.get("itad_auth") || "") && !__app.ui.job);
+    out.signed = await wait(() => /tok1/.test(__app.db.get("itad_token") || "") && !__app.ui.job);
     window.__oauth(`bantaapps://oauth/itad?code=good&state=forged`); out.forged = true;
-    __app.db.set("itad_key", ""); __app.db.set("itad_auth", "");
+    __app.db.set("itad_key", ""); __app.db.set("itad_token", "");
     return out;
   });
   // ---- 0.6.7: Doctor Who stories told "after" in another timeline wait for it (The Forbidden Time, Falling: Ben & Polly)
@@ -768,6 +769,54 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     document.querySelector("#overlay").innerHTML = "";
     return out;
   });
+  // ---- 0.6.9: history, duplicates, friends' sends and activity, the owner's page, Steam numbers, backlog in hours
+  const n69 = await A(async () => {
+    const out = {}, wait = async (f, ms = 3000) => { const t = Date.now(); while (Date.now() - t < ms) { if (f()) return true; await new Promise(r => setTimeout(r, 30)); } return false; };
+    const press = (action, extra = {}) => { const b = document.createElement("button"); b.dataset.action = action; Object.assign(b.dataset, extra); document.body.appendChild(b); b.click(); b.remove(); };
+    // history: keep a copy, change something, go back
+    press("snapnow"); const n0 = JSON.parse(__app.db.get("snaps", "[]"))[0];
+    out.snap = !!n0 && n0.why === "kept by hand";
+    const doomed = __app.lib.add({ type: "movie", title: "Added After The Copy", year: 2001 }, "watchlist").item; __app.lib.save();
+    press("snaprestore", { n: String(n0.n) }); await wait(() => document.querySelector("#dlgOk")); document.querySelector("#dlgOk").click();
+    out.restored = !__app.lib.find({ type: "movie", title: "Added After The Copy", year: 2001 }) && JSON.parse(__app.db.get("snaps", "[]"))[0].why === "before going back to an earlier copy";
+    // duplicates
+    const L0 = __app.lib, d1 = L0.add({ type: "movie", title: "Dup Film", year: 1999, imdb: "tt7770001" }, "watched").item; d1.rating = 8;
+    const d2 = Lib.blank({ id: "x-dup", type: "movie", title: "The Dup Film", year: 2000, status: "watchlist", notes: "second copy" }); L0.items[d2.id] = d2; L0.save();
+    press("dupopen"); out.dupList = /Dup Film/.test(document.querySelector("#overlay").textContent) && /The Dup Film/.test(document.querySelector("#overlay").textContent);
+    const mb = [...document.querySelectorAll('#overlay [data-action="dupmerge"]')].find(b => /Dup Film/.test(b.closest(".card").textContent)); if (mb) mb.click();
+    out.merged = !L0.get("x-dup") && L0.get(d1.id).notes === "second copy" && L0.get(d1.id).rating === 8 && /before merging duplicates/.test(__app.db.get("snaps"));
+    document.querySelector("#overlay").innerHTML = "";
+    // friends: an inbox item and what they did lately
+    __app.db.cacheSet("people:now", { at: Date.now(), people: [{ name: "pal", lib: [], games: [], books: [], recent: [{ kind: "watched", type: "movie", title: "Pal Watched This", year: 2020, date: "2026-11-15", rating: 8 }] }] });
+    __app.db.cacheSet("inbox:now", { at: Date.now(), items: [{ id: "i1", from: "pal", at: Date.now(), note: "watch it", item: { type: "movie", title: "Sent Film", year: 2012, tmdb: 5151 } }] });
+    __app.go("home"); const hv = document.querySelector("#view").textContent;
+    out.inbox = /From friends/.test(hv) && /Sent Film/.test(hv) && /“watch it”/.test(hv);
+    out.lately = /Lately/.test(hv) && /pal watched · ★ 8/.test(hv);
+    document.querySelector('#view [data-action="inboxopen"] b').click();
+    out.inboxPage = /Sent Film/.test(document.querySelector("#overlay").textContent) && /from pal: watch it/.test(document.querySelector("#overlay").textContent) && /Send to pal/.test(document.querySelector("#overlay").textContent);
+    document.querySelector("#overlay").innerHTML = "";
+    // the owner's page (the website answering as the real one would)
+    const prev = window.__webSrv;
+    window.__webSrv = (m, url, body) => /api\/admin/.test(url) ? { status: 200, body: JSON.stringify({ version: "0.6.9", node: "v22", uptime: 90000, people: [{ name: "me", owner: true, at: Date.now() - 60000, sync: Date.now() - 7200000, size: 3e6, shares: true, calendar: true }, { name: "pal", at: 0, sync: 0, size: 0 }], disk: { free: 5e8, total: 16e9 }, lastDaily: "2026-11-18", autoUpdate: false, apks: [] }) } : prev ? prev(m, url, body) : { status: 404, body: "{}" };
+    __app.db.set("web_sync_url", "https://saga.test");
+    press("webadmin"); await wait(() => /People/.test(document.querySelector("#overlay").textContent));
+    const av = document.querySelector("#overlay").textContent;
+    out.admin = /Saga 0\.6\.9/.test(av) && /pal/.test(av) && /never/.test(av) && /Less than 1 GB free/.test(av) && /auto-update\.sh on/.test(av);
+    window.__webSrv = prev; __app.db.set("web_sync_url", ""); document.querySelector("#overlay").innerHTML = "";
+    // Steam numbers on a game, backlog card in Games › Stats
+    const g = __app.games.add({ title: "Steam Numbers", steam: 99001, hours: 12, owned: "PC" }, "backlog").game; g.steamMins = 750; g.steamLast = "2026-11-12"; g.ach = { got: 3, total: 4 }; __app.games.save();
+    Kit.mods.games.open(g.id); const gs = document.querySelector("#overlay").textContent;
+    out.steam = /13 h played/.test(gs) && /last played 2026-11-12/.test(gs) && /achievements 3\/4 \(75%\)/.test(gs);
+    document.querySelector("#overlay").innerHTML = "";
+    __app.go("games"); press("gview", { v: "stats" }); out.backlog = /Backlog/.test(document.querySelector("#view").textContent) && /h to beat/.test(document.querySelector("#view").textContent);
+    press("gview", { v: "grid" });
+    return out;
+  });
+  ok(n69.snap && n69.restored, "History: a copy, and going back to it (with a copy of now first): " + JSON.stringify(n69));
+  ok(n69.dupList && n69.merged, "Duplicates: shown side by side, merged with everything kept");
+  ok(n69.inbox && n69.lately && n69.inboxPage, "Friends: what they sent you, what they did lately, Send to on a page");
+  ok(n69.admin, "Website status for the owner: people, last seen, space, updates");
+  ok(n69.steam && n69.backlog, "Games: Steam hours and achievements on a game, backlog in hours");
   ok(n68.cap && n68.page && n68.added, "a cover's title opens it; a suggestion's page has Add: " + JSON.stringify(n68));
   ok(n65.why && n65.why2, "Why is this here? names the list and the rating: " + JSON.stringify(n65));
   ok(n65.dlg && n65.purged && n65.undone, "switching a list off removes only titles it alone brought and you haven't touched; Undo");

@@ -202,6 +202,42 @@
   };
   const ymd = o => o && o.year ? `${o.year}-${String(o.month || 1).padStart(2, "0")}-${String(o.day || 1).padStart(2, "0")}` : "";
   // AniList: anime to the library, manga and light novels to Books
+  // ---- 0.6.9: writing to AniList (two-way). Sign-in gives a token (implicit grant: the token comes back in the address).
+  // alState: what AniList said at the last sync, per anime: { mal|al id: { st, pr, sc } }. After the sync has read
+  // AniList, an anime whose Saga status, episodes or rating differ from that was changed in Saga: it's sent.
+  const AL_STATUS = { watchlist: "PLANNING", watching: "CURRENT", watched: "COMPLETED", paused: "PAUSED", dropped: "DROPPED" };
+  const anilistAuthUrl = clientId => `https://anilist.co/api/v2/oauth/authorize?client_id=${encodeURIComponent(clientId)}&response_type=token`;
+  function anilistTokenFrom(url) { const m = /[#&?]access_token=([^&]+)/.exec(String(url || "")); const e = /[#&?]expires_in=(\d+)/.exec(String(url || "")); return m ? { token: decodeURIComponent(m[1]), until: Date.now() + (e ? +e[1] * 1000 : 365 * 864e5) } : null; }
+  async function anilistGql(http, token, query, variables) {
+    const r = await http("POST", "https://graphql.anilist.co", { headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + token }, body: JSON.stringify({ query, variables }) });
+    if (r.status === 401 || r.status === 400 && /Invalid token/i.test(r.body || "")) throw new Error("AniList sign-in expired: sign in again");
+    if (r.status === 429) throw new Error("AniList: too many requests, try again in a minute");
+    let j; try { j = JSON.parse(r.body); } catch (e) { throw new Error(`AniList: HTTP ${r.status || r.error}`); }
+    if (j.errors && j.errors.length) throw new Error(`AniList: ${j.errors[0].message}`);
+    return j.data || {};
+  }
+  // Saga's state of an anime, as AniList counts it
+  const alOf = it => ({ st: AL_STATUS[it.status] || "PLANNING", pr: it.type === "movie" ? 0 : Object.keys(it.eps || {}).length, sc: it.rating || 0 });
+  function alStateFrom(rows) { const st = {}; for (const r of rows || []) { const k = r.mal ? "m" + r.mal : r.anilist ? "a" + r.anilist : null; if (k) st[k] = { st: AL_STATUS[r.status] || "PLANNING", pr: r.epsWatched || 0, sc: r.rating || 0, id: r.anilist || null }; } return st; }
+  async function anilistPush(http, token, items, alState, opt = {}) {
+    const out = { sent: 0, failed: [] }, max = opt.max || 40;
+    for (const it of items) {
+      if (out.sent >= max) break;
+      if (!it.anime || (!it.mal && !it.anilist)) continue;
+      const k = it.mal ? "m" + it.mal : "a" + it.anilist, was = alState[k], now = alOf(it);
+      if (was && was.st === now.st && was.pr === now.pr && was.sc === now.sc) continue;
+      if (!was && it.status === "watchlist" && !now.pr && !now.sc) continue; // nothing to tell AniList
+      try {
+        let id = it.anilist || (was && was.id);
+        if (!id) { const d = await anilistGql(http, token, "query($m:Int){Media(idMal:$m,type:ANIME){id}}", { m: +it.mal }); id = d.Media && d.Media.id; if (id) it.anilist = id; }
+        if (!id) continue;
+        const v = { mediaId: id, status: now.st, scoreRaw: now.sc * 10 }; if (now.pr) v.progress = now.pr;
+        await anilistGql(http, token, "mutation($mediaId:Int,$status:MediaListStatus,$progress:Int,$scoreRaw:Int){SaveMediaListEntry(mediaId:$mediaId,status:$status,progress:$progress,scoreRaw:$scoreRaw){id status progress}}", v);
+        alState[k] = Object.assign({}, now, { id }); out.sent++;
+      } catch (e) { if (/expired|too many/.test(e.message)) throw e; out.failed.push(`${it.title}: ${e.message}`); }
+    }
+    return out;
+  }
   async function anilist(http, user) {
     const q = `query($u:String,$t:MediaType){MediaListCollection(userName:$u,type:$t){lists{entries{status score(format:POINT_10) progress progressVolumes repeat completedAt{year month day} startedAt{year month day}
       media{id idMal format episodes chapters volumes seasonYear startDate{year} title{romaji english}}}}}}`;
@@ -332,7 +368,26 @@
     const j = await get(`https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${encodeURIComponent(key)}&steamid=${id}&include_appinfo=1&include_played_free_games=1`);
     const games = j && j.response && j.response.games;
     if (!games) throw new Error("Steam: no games visible. Set Game details to Public in Steam › Edit profile › Privacy");
-    return games.map(g => ({ title: g.name || "", platform: "PC", status: "backlog", owned: "PC (Steam)", steam: +g.appid || null, hours: g.playtime_forever ? Math.round(g.playtime_forever / 6) / 10 : 0, src: "Steam" })).filter(x => x.title);
+    const rows = games.map(g => ({ title: g.name || "", platform: "PC", status: "backlog", owned: "PC (Steam)", steam: +g.appid || null, hours: g.playtime_forever ? Math.round(g.playtime_forever / 6) / 10 : 0, src: "Steam",
+      mins: g.playtime_forever || 0, last: g.rtime_last_played ? new Date(g.rtime_last_played * 1000).toISOString().slice(0, 10) : "" })).filter(x => x.title);
+    rows.steamid = id; // 0.6.9: for recently played and achievements
+    return rows;
+  }
+  // 0.6.9: what you played in the last two weeks: [{ steam, mins2w, mins }]
+  async function steamRecent(http, key, steamid) {
+    const r = await http("GET", `https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v1/?key=${encodeURIComponent(key)}&steamid=${steamid}`, { headers: { Accept: "application/json" } });
+    if (r.status !== 200) throw new Error(`Steam recently played: HTTP ${r.status || r.error}`);
+    const j = JSON.parse(r.body || "{}");
+    return ((j.response && j.response.games) || []).map(g => ({ steam: +g.appid, mins2w: g.playtime_2weeks || 0, mins: g.playtime_forever || 0 }));
+  }
+  // 0.6.9: achievements of one game: { got, total } (null: the game has none, or they're hidden)
+  async function steamAchievements(http, key, steamid, appid) {
+    const r = await http("GET", `https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v1/?key=${encodeURIComponent(key)}&steamid=${steamid}&appid=${appid}`, { headers: { Accept: "application/json" } });
+    if (r.status === 400 || r.status === 403) return null; // no achievements, or the stats are private
+    if (r.status !== 200) throw new Error(`Steam achievements: HTTP ${r.status || r.error}`);
+    const ps = (JSON.parse(r.body || "{}").playerstats) || {};
+    if (!ps.success || !ps.achievements) return null;
+    return { got: ps.achievements.filter(a => a.achieved).length, total: ps.achievements.length };
   }
   async function steamLibrary(http, profile, key) {
     if (key && String(key).trim()) return steamApi(http, profile, String(key).trim());
@@ -442,7 +497,7 @@
     return s || String(t || "");
   }
 
-  const API = { parseCsv, col, xmlEntries, letterboxd, malAnime, malManga, tvtime, genericWatch, hltb, grouvee, genericGames, steamXml, steamHtml, steamApi, steamLibrary, anilist, malLists, letterboxdRss, goodreadsRss, netflix, steamProfileUrl, detect, simklJson, franchiseGuess, day, lastEpToCount };
+  const API = { anilistAuthUrl, anilistTokenFrom, anilistGql, anilistPush, alStateFrom, parseCsv, col, xmlEntries, letterboxd, malAnime, malManga, tvtime, genericWatch, hltb, grouvee, genericGames, steamXml, steamHtml, steamApi, steamLibrary, steamRecent, steamAchievements, anilist, malLists, letterboxdRss, goodreadsRss, netflix, steamProfileUrl, detect, simklJson, franchiseGuess, day, lastEpToCount };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   else root.Imports = API;
 })(typeof window !== "undefined" ? window : globalThis);

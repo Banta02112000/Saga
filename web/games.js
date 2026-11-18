@@ -479,6 +479,73 @@
     }
     return { added, updated };
   }
+  // ---- 0.6.9: Steam's own numbers: minutes played, last played, achievements. A game you played in the last two
+  // weeks that was on your backlog, wishlist or paused moves to Playing (never one you finished or dropped).
+  function steamPlay(lib, rows, recent = [], now = Date.now()) {
+    const bySteam = new Map(lib.games.filter(g => g.steam).map(g => [+g.steam, g]));
+    let updated = 0; const moved = [];
+    for (const r of rows || []) { const g = bySteam.get(+r.steam); if (!g) continue;
+      if (r.mins != null && g.steamMins !== r.mins) { g.steamMins = r.mins; updated++; }
+      if (r.last) g.steamLast = r.last; }
+    for (const r of recent || []) { const g = bySteam.get(+r.steam); if (!g) continue;
+      g.steam2w = r.mins2w; if (r.mins) g.steamMins = r.mins;
+      if (r.mins2w >= 20 && (g.status === "backlog" || g.status === "wishlist" || g.status === "paused")) { setStatus(g, "playing"); moved.push(g.title); }
+    }
+    lib.meta.steamAt = now;
+    return { updated, moved };
+  }
+  // ---- 0.6.9: your backlog in hours (How Long To Beat), the pace you finish games at, and what to finish next
+  function backlogHours(lib, now = Date.now()) {
+    const vis = lib.visible(), t = new Date(now).toISOString().slice(0, 10), yearAgo = new Date(now - 365 * 864e5).toISOString().slice(0, 10);
+    const left = vis.filter(g => g.status === "backlog" || g.status === "playing" || g.status === "paused");
+    const withH = left.filter(g => g.hours > 0), hours = Math.round(withH.reduce((a, g) => a + g.hours, 0));
+    const doneYear = vis.filter(g => g.status === "done" && g.plays.some(d => d >= yearAgo));
+    const paceH = Math.round(doneYear.reduce((a, g) => a + (g.hours || 0), 0)); // hours of games finished in the last 12 months
+    const years = paceH > 0 ? hours / paceH : null;
+    // finish next: owned, released, short, preferring franchises you've started
+    const started = new Set(vis.filter(g => (g.status === "done" || g.status === "playing") && g.franchise).map(g => norm(g.franchise)));
+    const owned = g => g.owned && !NA(g.owned) && !/^no$/i.test(g.owned);
+    const quick = left.filter(g => g.status !== "playing" && owned(g) && g.hours > 0 && (!g.date || g.date <= t))
+      .sort((a, b) => (started.has(norm(b.franchise)) - started.has(norm(a.franchise))) || a.hours - b.hours).slice(0, 8);
+    return { games: left.length, known: withH.length, hours, paceH, doneYear: doneYear.length, years, quick, started };
+  }
+  // ---- 0.6.9: the same game twice. Same Steam app or ITAD id, or the same title (ignoring "The", punctuation and
+  // accents) on the same platform (or one without a platform) within a year: the same game on two consoles is not a
+  // duplicate. `skip` holds pairs you said aren't the same.
+  const GRANK = { wishlist: 0, backlog: 1, paused: 2, dropped: 2, playing: 3, done: 4 };
+  function findDuplicates(lib, skip = {}) {
+    const vis = lib.visible(), seen = new Set(), out = [];
+    const pair = (a, b, why) => { const k = [a.id, b.id].sort().join("|"); if (seen.has(k) || skip[k]) return; seen.add(k); out.push({ a, b, why }); };
+    const by = new Map(), put = (k, g) => { if (!k) return; const x = by.get(k); if (x) x.push(g); else by.set(k, [g]); };
+    const tkey = t => norm(t).replace(/^the\s+/, "").replace(/\s+/g, "");
+    for (const g of vis) { put(g.steam && "s:" + g.steam, g); put(g.itad && "d:" + g.itad, g); put("n:" + tkey(g.title), g); }
+    for (const [k, list] of by) {
+      if (list.length < 2) continue;
+      for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+        const a = list[i], b = list[j];
+        if (k[0] === "n") {
+          if (a.platform && b.platform && norm(a.platform) !== norm(b.platform)) continue;
+          const ya = yearOf(a), yb = yearOf(b); if (ya && yb && Math.abs(ya - yb) > 1) continue;
+          if (a.steam && b.steam && a.steam !== b.steam) continue;
+          pair(a, b, "same title");
+        } else pair(a, b, k[0] === "s" ? "same Steam game" : "same IsThereAnyDeal game");
+      }
+    }
+    return out;
+  }
+  const gweight = g => (g.rating ? 4 : 0) + g.plays.length * 2 + (g.notes ? 2 : 0) + (GRANK[g.status] || 0) + (g.steam ? 1 : 0) + (g.owned ? 1 : 0) + (g.hours ? 1 : 0);
+  function mergeGames(lib, a, b) {
+    const [keep, drop] = gweight(a) > gweight(b) || (gweight(a) === gweight(b) && (a.added || 0) <= (b.added || 0)) ? [a, b] : [b, a];
+    if ((GRANK[drop.status] || 0) > (GRANK[keep.status] || 0)) keep.status = drop.status;
+    if (!keep.rating && drop.rating) keep.rating = drop.rating;
+    keep.plays = [...new Set(keep.plays.concat(drop.plays))].sort();
+    if (drop.notes && !String(keep.notes || "").includes(drop.notes)) keep.notes = keep.notes ? `${keep.notes}\n${drop.notes}` : drop.notes;
+    for (const f of ["steam", "itad", "imdb", "date", "platform", "owned", "hours", "hoursRemake", "imdbR", "franchise", "multiverse", "remake", "dev", "price", "deal", "subs"]) if ((keep[f] === null || keep[f] === undefined || keep[f] === "") && drop[f] != null && drop[f] !== "") keep[f] = drop[f];
+    keep.next = keep.next || drop.next;
+    keep.sessions = (keep.sessions || []).concat(drop.sessions || []);
+    lib.games = lib.games.filter(g => g !== drop); lib._fi = null;
+    return keep;
+  }
   // ---- 0.6.4: a games spreadsheet (.xlsx, or the same columns as .csv), like the All_Games list:
   // Title, OG Release Date, OG Platform, Remake Name, Remake Release Date, Remake Platform, Owned Platform, HLTB,
   // HLTB Bundle, Rating (IMDb), Franchise, Multiverse, Next. Optional: Status, My rating, Notes.
@@ -619,7 +686,7 @@
       games: lib.visible().map(g => ({ id: g.id, t: g.title, f: g.franchise, m: g.multiverse, done: g.status === "done", date: g.date })) };
   }
 
-  const API = { itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
+  const API = { steamPlay, backlogHours, findDuplicates, mergeGames, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
     steamSearch, linkSteam, steamPrices, storePrices, steamDates, importRows, fromImdb, storeLinks, indexFor, yearOf, NA };
   if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
   root.GamesCore = API;

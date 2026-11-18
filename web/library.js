@@ -23,6 +23,49 @@ const epKey = (s, e) => `${s}:${e}`;
   }
   const idFor = o => (o.mal && !o.tmdb ? `mal:${o.type}:${o.mal}` : o.tmdb ? `tm:${o.type}:${o.tmdb}` : o.tvmaze ? `tvm:${o.tvmaze}` : o.imdb ? `im:${o.imdb}` : o.itunes ? `it:${o.itunes}` : `x:${o.type}:${norm(o.title)}|${o.year || ""}`);
 
+  // ---- 0.6.9: the same title twice (an import and a sync, a different year or spelling). A pair is suggested when
+  // both have the same IMDb or TMDB id, or the same title (ignoring "The", punctuation, accents and a trailing
+  // year) within a year of each other. `skip` holds pairs you said aren't the same ("id|id").
+  const loose = t => norm(String(t || "").replace(/\s*\((19|20)\d\d\)\s*$/, "")).replace(/^(the|a|an|il|lo|la|i|gli|le|un|una)\s+/, "").replace(/\s+/g, "");
+  const RANK = { watchlist: 0, paused: 1, watching: 2, dropped: 1, watched: 3 };
+  function findDuplicates(lib, skip = {}) {
+    const all = Object.values(lib.items), seen = new Set(), out = [];
+    const pair = (a, b, why) => { const k = [a.id, b.id].sort().join("|"); if (a === b || seen.has(k) || skip[k]) return; seen.add(k); out.push({ a, b, why }); };
+    const by = new Map(), put = (k, it) => { if (!k) return; const x = by.get(k); if (x) x.push(it); else by.set(k, [it]); };
+    for (const it of all) { put(it.imdb && "i:" + it.imdb, it); put(it.tmdb && `t:${it.type}:${it.tmdb}`, it); put(`n:${it.type}:${loose(it.title)}`, it); }
+    for (const [k, list] of by) {
+      if (list.length < 2) continue;
+      for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+        const a = list[i], b = list[j];
+        if (k[0] === "n") {
+          if (a.imdb && b.imdb && a.imdb !== b.imdb) continue;           // two films with the same name
+          if (a.tmdb && b.tmdb && a.tmdb !== b.tmdb) continue;
+          if (a.year && b.year && Math.abs(a.year - b.year) > 1) continue; // a remake
+          pair(a, b, "same title");
+        } else if (a.type === b.type) pair(a, b, k[0] === "i" ? "same IMDb id" : "same TMDB id");
+      }
+    }
+    return out;
+  }
+  // the one to keep: the one with more of you in it (rating, watches, ticked episodes, notes), then the older one
+  const weight = it => (it.rating ? 4 : 0) + it.watches.length * 2 + Object.keys(it.eps || {}).length + (it.notes ? 2 : 0) + (RANK[it.status] || 0) + (it.imdb ? 1 : 0) + (it.tmdb ? 1 : 0);
+  // keep + drop → one entry: the further status, a rating, every watch date and ticked episode, both notes, every id
+  function mergeItems(lib, a, b) {
+    const [keep, drop] = weight(a) > weight(b) || (weight(a) === weight(b) && (a.added || 0) <= (b.added || 0)) ? [a, b] : [b, a];
+    if ((RANK[drop.status] || 0) > (RANK[keep.status] || 0)) keep.status = drop.status;
+    if (!keep.rating && drop.rating) keep.rating = drop.rating;
+    keep.watches = [...new Set(keep.watches.concat(drop.watches))].sort();
+    for (const [k, v] of Object.entries(drop.eps || {})) if (!keep.eps[k]) keep.eps[k] = v;
+    if (drop.notes && !String(keep.notes || "").includes(drop.notes)) keep.notes = keep.notes ? `${keep.notes}\n${drop.notes}` : drop.notes;
+    for (const f of ["imdb", "tmdb", "tvmaze", "mal", "itunes", "year", "poster", "overview", "runtime", "network", "orig"]) if (!keep[f] && drop[f]) keep[f] = drop[f];
+    if (!keep.genres.length && drop.genres.length) keep.genres = drop.genres;
+    keep.anime = keep.anime || drop.anime;
+    keep.added = Math.min(keep.added || Date.now(), drop.added || Date.now()); keep.updated = Date.now();
+    lib.remove(drop.id);
+    lib.adopted[adoptKey(drop)] = 1; lib.adopted[adoptKey(keep)] = 1;
+    if (typeof lib.afterEps === "function" && keep.type === "show") lib.afterEps(keep);
+    return keep;
+  }
   class Library {
     constructor(persist) {
       this.persist = persist || null;
@@ -598,7 +641,7 @@ const epKey = (s, e) => `${s}:${e}`;
     return out.length ? out.join(", ") : "nothing Trakt needed";
   }
 
-  const API = { animeRelations, animeOne, markBulk, pendingEps, adoptKey, settleShow, searchImdb, searchAnime, fromJikan, animeDetails, traktPush, Library, STATUSES, LABEL, search, details, stale, fromTmdb, fromTvmaze, fromItunes, norm, day, yearOf, epKey, blank, idFor };
+  const API = { findDuplicates, mergeItems, animeRelations, animeOne, markBulk, pendingEps, adoptKey, settleShow, searchImdb, searchAnime, fromJikan, animeDetails, traktPush, Library, STATUSES, LABEL, search, details, stale, fromTmdb, fromTvmaze, fromItunes, norm, day, yearOf, epKey, blank, idFor };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   else root.Lib = API;
 })(typeof window !== "undefined" ? window : globalThis);
