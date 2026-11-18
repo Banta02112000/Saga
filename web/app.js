@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.6.9.8";
+  const VERSION = "0.6.9.9";
   const AUTO_SYNC_HOURS = 12;
   Object.assign(C.PROFILES, (window.CANONSYNC_PRESET || {}).traktProfiles || {});
   const DEFAULT_PROFILE = (window.CANONSYNC_PRESET || {}).traktDefault || "PKCE (your own Trakt app)";
@@ -310,6 +310,10 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.6.9.9", ["Length and cast on every film and series: how long it runs (\"1 h 57 min\", or per episode), who directed or created it, and the main cast with their roles, right under the title. Each episode shows its own length, and its guest cast once you open its season.",
+      "Series show the years they ran: 2010 (began and ended that year), 2010-2020 (ended), 2010- (still running). In your library, the canon and the universe lists.",
+      "Music: listening time this week and in 30 days, plays by weekday and over 12 months, your longest streak and busiest day, artists new to you, the song on repeat, how much is after midnight, your genres, and how much of the month your top 10 artists take. Saga now keeps your newest 10,000 scrobbles for these.",
+      "Phone and website agree better: each keeps its own update state, backups and what's new instead of taking the other's. When the website runs an older Saga, Home says so, and its owner can update it with one tap (the website restarts for a few seconds; a website from before 0.6.9.9 needs update.sh on the Pi once)."]],
     ["0.6.9.8", ["Sync this title on a series now also brings its episodes: the ones you rated on IMDb (a rated episode is a watched one) and their ratings, plus Trakt's watched episodes and episode ratings.",
       "Fixed: with more than 1,000 IMDb ratings, a sync reads only your newest 500, and the episodes among them were skipped, so an episode you'd just rated on IMDb wasn't ticked. They're kept now.",
       "Every entry says where it came from: a title's sheet shows From: IMDb ratings, Trakt watched, an import…; canon entries show the IMDb or Trakt list, TMDB collection or AI scan that found them; a game shows the import it came from and what it's linked to.",
@@ -646,7 +650,26 @@
   }
 
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  // 0.6.9.9: a series as the years it ran: 2010, 2010-2020, 2010- (still running)
+  let endIx = null;
+  function endOf(imdb) {
+    const m = db.itemsMap;
+    if (!endIx || endIx.ver !== m.ver || endIx.m !== m) { endIx = { ver: m.ver, m, ix: new Map() }; for (const r of m.values()) if (r.end && r.imdb) endIx.ix.set(r.imdb, r.end); }
+    return endIx.ix.get(imdb) || null;
+  }
+  function spanOf(x) {
+    if (!x) return "";
+    if (x.watches && x.type) return L.span(x);
+    const y = x.year || (x.date ? +String(x.date).slice(0, 4) : null);
+    if (!y) return "";
+    if (!/Series/i.test(x.medium || "")) return String(y);
+    const it = lib.find({ imdb: x.imdb || null, type: "show", title: x.title, year: y });
+    if (it && it.year) { const sp = L.span(it); if (/-/.test(sp) || it.ended) return sp; }
+    const e = x.end || (x.imdb ? endOf(x.imdb) : null);
+    return e && e > y ? `${y}-${e}` : String(y);
+  }
   function when(c) {
+    if (/Series/i.test(c.medium || "")) { const sp = spanOf(c); if (/-/.test(sp)) return sp; }
     if (c.date) {
       const [y, m, d] = c.date.split("-");
       return d ? `${parseInt(d, 10)} ${MONTHS[parseInt(m, 10) - 1]} ${y}` : `${MONTHS[parseInt(m, 10) - 1]} ${y}`;
@@ -809,7 +832,7 @@
     const el = $("#details");
     if (!el) return;
     if (!inf) { el.innerHTML = `<p class="small muted">${esc(err || "No details found on TMDB.")}</p>`; return; }
-    const facts = [inf.runtime ? `${inf.runtime} min${inf.tv ? " per episode" : ""}` : "", inf.genres.slice(0, 3).join(", "), inf.cert ? `Rated ${inf.cert}` : "",
+    const facts = [inf.runtime ? `${lenTxt(inf.runtime)}${inf.tv ? " per episode" : ""}` : "", inf.genres.slice(0, 3).join(", "), inf.cert ? `Rated ${inf.cert}` : "",
       inf.tv && inf.seasons ? `${inf.seasons} season${inf.seasons === 1 ? "" : "s"}, ${inf.episodes} episodes` : "", inf.tv ? inf.status : "", inf.networks.join(", ")].filter(Boolean);
     const scores = [inf.imdbScore ? `IMDb ${inf.imdbScore}` : "", inf.tmdbScore ? `TMDB ${inf.tmdbScore}` : "", inf.tomato ? `Rotten Tomatoes ${inf.tomato}%` : ""].filter(Boolean);
     const offers = inf.offers.length ? inf.offers.map(o => `<div class="offer${/disney|netflix|prime video/i.test(o.name) && (o.type === "flatrate" || o.type === "ads") ? " pref" : ""}">
@@ -1725,7 +1748,7 @@
     // 0.6.2: grouped by tab; films and series get a one-tap Watched / next episode
     const quick = it => { if (it.type === "show") { const n = lib.nextEp(it); return n && !n.upcoming ? `<button class="btn quiet small" data-action="libnext" data-id="${esc(it.id)}" data-s="${n.s}" data-e="${n.e}">${icon("check")}S${n.s} E${n.e}</button>` : ""; }
       return it.status === "watched" ? "" : `<button class="btn quiet small" data-action="sqwatch" data-id="${esc(it.id)}">${icon("check")}Watched</button>`; };
-    const libRows = mine.map(it => `<div class="item" data-action="libopen" data-id="${esc(it.id)}">${libThumb(it)}<div class="grow" style="min-width:0"><b class="ell">${esc(it.title)}</b><div class="small muted ell">${esc([it.year, it.type === "show" ? "Series" : "Film", LST[it.status]].filter(Boolean).join(" · "))}</div></div>${quick(it)}</div>`).join("");
+    const libRows = mine.map(it => `<div class="item" data-action="libopen" data-id="${esc(it.id)}">${libThumb(it)}<div class="grow" style="min-width:0"><b class="ell">${esc(it.title)}</b><div class="small muted ell">${esc([L.span(it), it.type === "show" ? "Series" : "Film", LST[it.status]].filter(Boolean).join(" · "))}</div></div>${quick(it)}</div>`).join("");
     const LABEL = { canon: "Canon and lists", games: "Games", books: "Books and manga", dw: "Doctor Who" };
     const groups = ["games", "books", "dw", "canon"].map(app => [app, res.map((r, i) => [r, i]).filter(([r]) => r.app === app)]).filter(([, l]) => l.length);
     return (mine.length ? `<div class="kicker" style="margin:6px 0">Films and series · ${mine.length}</div><div class="listcard">${libRows}</div>` : "")
@@ -2236,7 +2259,7 @@
       if (r.kind === "list" && !listOn(r.source, r.list_name)) return { r, base, verdict: `on the list “${r.list_name}”, which isn't switched on for the library`, act: `<button class="btn small" data-action="listlib" data-k="${esc(r.source + "|" + (r.list_name || ""))}" data-on="1">Switch the list on</button>` };
       const o = { type: r.medium === "TV Series" ? "show" : "movie", title: r.title, year: r.year || null, imdb: r.imdb || null, tmdb: r.tmdb ? +r.tmdb : null };
       const it = lib.find(o), key = L.adoptKey(o);
-      if (it) return { r, base, verdict: `in the library as “${it.title}”${it.year ? ` (${it.year})` : ""}: ${LST[it.status] || it.status}${it.rating ? `, ★${it.rating}` : ", no rating"}${it.ratedHere ? " (rated in Saga, so imports don't change it)" : ""}`, act: `<button class="btn quiet small" data-action="libopen" data-id="${esc(it.id)}">Open</button>` };
+      if (it) return { r, base, verdict: `in the library as “${it.title}”${it.year ? ` (${L.span(it)})` : ""}: ${LST[it.status] || it.status}${it.rating ? `, ★${it.rating}` : ", no rating"}${it.ratedHere ? " (rated in Saga, so imports don't change it)" : ""}`, act: `<button class="btn quiet small" data-action="libopen" data-id="${esc(it.id)}">Open</button>` };
       if (lib.adopted[key]) return { r, base, verdict: "you removed it from the library, so syncs leave it out", act: `<button class="btn small" data-action="lookback" data-k="${esc(key)}">Bring back</button>` };
       return { r, base, verdict: db.get("lib_adopt", "1") === "1" ? "not brought in yet" : "not brought in: adding synced titles is off in Settings", act: `<button class="btn small" data-action="lookback" data-k="${esc(key)}">Bring in now</button>` };
     });
@@ -2247,7 +2270,7 @@
     if (!res) return "";
     if (!res.rows.length && !res.libs.length && !res.gms.length) return `<p class="small">No record of “${esc(q)}” from any sync or import. It isn't on IMDb or Trakt under that name, or that list hasn't synced yet.</p>`;
     return `<div class="errlog">${res.rows.map(x => `<div><small>${esc(x.base)}</small><b>${esc(x.r.title)}</b>: ${esc(x.verdict)} ${x.act}</div>`).join("")}
-      ${res.libs.map(it => `<div><small>library only (added in Saga or from ${esc(it.src || "an import")})</small><b>${esc(it.title)}</b>${it.year ? ` (${it.year})` : ""}: ${esc(LST[it.status] || it.status)}${it.rating ? `, ★${it.rating}` : ""} <button class="btn quiet small" data-action="libopen" data-id="${esc(it.id)}">Open</button></div>`).join("")}
+      ${res.libs.map(it => `<div><small>library only (added in Saga or from ${esc(it.src || "an import")})</small><b>${esc(it.title)}</b>${it.year ? ` (${esc(L.span(it))})` : ""}: ${esc(LST[it.status] || it.status)}${it.rating ? `, ★${it.rating}` : ""} <button class="btn quiet small" data-action="libopen" data-id="${esc(it.id)}">Open</button></div>`).join("")}
       ${res.gms.map(g => `<div><small>Games tab</small><b>${esc(g.title)}</b>: ${esc(g.status)}${g.rating ? `, ★${g.rating}` : ""}</div>`).join("")}</div>`;
   }
   function libTotals() {
@@ -2398,7 +2421,7 @@
   const timesTxt = n => (n > 1 ? `${n}×` : "");
   function libSub(it) {
     const bits = [];
-    if (it.year) bits.push(it.year);
+    if (it.year) bits.push(L.span(it));
     bits.push(it.type === "movie" && it.watches.length > 1 ? `Watched ${it.watches.length}×` : LST[it.status]);
     if (it.type === "show" && it.watches.length) bits.push(`${it.watches.length} full run${it.watches.length === 1 ? "" : "s"}`);
     return bits.map(b => `<span>${esc(b)}</span>`).join(" · ");
@@ -2448,7 +2471,7 @@
     const badge = n ? (n.upcoming ? (n.date ? shortDay(n.date).replace(/ \d{4}$/, "") : "Soon") : `S${n.s} E${n.e}`) : s && s.mine ? shortName(s.o.name) : s && s.vpn ? `VPN ${s.vpn.flag}` : "";
     return Kit.tile({ key: "lib:" + it.id, title: it.title, img: it.poster, kind: it.type, badge, badgeAcc: !!(n && !n.upcoming) || !!(s && s.mine), badgeR: it.type === "movie" && it.watches.length > 1 ? `${it.watches.length}×` : it.rating ? `★ ${it.rating / 2}` : "",
       progress: it.type === "show" && it.status === "watching" ? progressOf(it) : null, done: it.status === "watched" || (ui.sel && ui.sel.has(it.id)), attrs: ui.sel ? `data-action="libsel" data-id="${esc(it.id)}" aria-pressed="${ui.sel.has(it.id)}"` : `data-action="libopen" data-id="${esc(it.id)}"` },
-      it.title, [it.year, it.type === "show" ? "Series" : "Film"].filter(Boolean).join(" · "));
+      it.title, [L.span(it), it.type === "show" ? "Series" : "Film"].filter(Boolean).join(" · "));
   }
   function renderAnime() { return renderLibrary(true); }
   function renderLibrary(anime) {
@@ -2512,8 +2535,9 @@
   const libLoading = new Set(), libTried = new Set(); // one automatic lookup per title per session
   async function libDetails(it, force) {
     if (!it || libLoading.has(it.id)) return;
-    if (!force && (libTried.has(it.id) || (it.type === "movie" && it.imdb))) return;
-    if (!force && it.type === "show" && it.epl && Date.now() - (it.epChecked || 0) < 864e5) return;
+    const needCast = !it.castAt && !!db.get("tmdb_key") && !it.mal; // 0.6.9.9: length and cast, once
+    if (!force && (libTried.has(it.id) || (it.type === "movie" && it.imdb && it.runtime && !needCast))) return;
+    if (!force && it.type === "show" && it.epl && !needCast && Date.now() - (it.epChecked || 0) < 864e5) return;
     libLoading.add(it.id); libTried.add(it.id);
     let changed = false;
     try { changed = await L.details(Native.http, it, libOpt()); if (changed) libSave(); }
@@ -2634,13 +2658,36 @@
     return `<h4>Related</h4><div class="listcard">${r.list.map((x, i) => { const have = lib.all().find(y => String(y.mal) === String(x.mal));
       return `<div class="item" ${have ? `data-action="libopen" data-id="${esc(have.id)}"` : `data-action="open" data-url="https://myanimelist.net/anime/${esc(x.mal)}"`} role="button"><div class="grow" style="min-width:0"><b class="ell">${esc(x.title)}</b><div class="small muted">${esc(x.relation)}</div></div>${have ? `<span class="small muted">${esc(L.LABEL[have.status] || "In library")}</span>` : `<button class="btn quiet small" data-action="libreladd" data-i="${i}">${icon("plus")}Add</button>`}</div>`; }).join("")}</div>`;
   }
+  // 0.6.9.9: a length as "1 h 57 min" / "45 min"
+  const lenTxt = m => (!m ? "" : m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ""}` : `${m} min`);
+  // 0.6.9.9: each episode's guest cast, asked of TMDB a season at a time when you open that season (kept for the session)
+  const seasonCast = new Map();
+  function epCastHtml(it, s, e) {
+    const c = seasonCast.get(`${it.tmdb}|${s}`);
+    const g = c && c.eps && c.eps[e];
+    return g && g.length ? `<div class="small muted ell castline">With ${g.map(x => `${esc(x[0])}${x[1] ? ` <span class="role">as ${esc(x[1])}</span>` : ""}`).join(", ")}</div>` : "";
+  }
+  async function loadSeasonCast(it, s) {
+    const key = `${it.tmdb}|${s}`, tk = db.get("tmdb_key");
+    if (!it.tmdb || !tk || seasonCast.has(key)) return;
+    seasonCast.set(key, { busy: true });
+    try {
+      const d = await new C.TMDB(Native.http, tk).get(`/tv/${it.tmdb}/season/${s}`);
+      const eps = {};
+      for (const ep of (d && d.episodes) || []) eps[ep.episode_number] = (ep.guest_stars || []).slice(0, 4).map(g => [g.name || "", g.character || ""]).filter(g => g[0]);
+      seasonCast.set(key, { eps });
+    } catch (e) { seasonCast.set(key, { err: e.message }); return; }
+    if (ui.libOpen === it.id && $(".libsheet")) openLib(it.id);
+  }
   function openLib(id) {
     const it = lib.get(id);
     if (!it) return;
     ui.libOpen = id;
     const show = it.type === "show";
     const n = show ? lib.nextEp(it) : null;
-    const meta = [it.year, it.runtime ? `${it.runtime} min` : "", it.network, (it.genres || []).slice(0, 3).join(", ")].filter(Boolean).map(esc).join(" · ");
+    const meta = [L.span(it), it.runtime ? (show ? `${lenTxt(it.runtime)} per episode` : lenTxt(it.runtime)) : "", it.network, (it.genres || []).slice(0, 3).join(", ")].filter(Boolean).map(esc).join(" · ");
+    // 0.6.9.9: who's in it, always shown when known (each name opens their work, like Cast & crew)
+    const castLine = (it.cast && it.cast.length) || (it.dir && it.dir.length) ? `<div class="small muted castline">${it.dir && it.dir.length ? `${show ? "Created by" : "Directed by"} ${it.dir.map(esc).join(", ")}${it.cast && it.cast.length ? " · " : ""}` : ""}${it.cast && it.cast.length ? `With ${it.cast.map(c => `${esc(c[0])}${c[1] ? ` <span class="role">as ${esc(c[1])}</span>` : ""}`).join(", ")}` : ""}</div>` : "";
     const log = it.watches.map((d, i) => `<div class="logrow"><span class="grow">${show ? `Run ${i + 1}` : `Watch ${i + 1}`} · ${esc(shortDay(d))}</span><button class="btn quiet small" data-action="libunwatch" data-i="${i}" aria-label="Remove this entry">✕</button></div>`).join("");
     let eps = "";
     if (show) {
@@ -2653,11 +2700,12 @@
           const list = by[s].sort((a, b) => a[1] - b[1]);
           const aired = list.filter(x => !x[2] || x[2] <= t), w = list.filter(x => it.eps[L.epKey(s, x[1])]).length, er = it.er || {};
           const open = ui.libSeason === s || (ui.libSeason == null && n && n.s === s);
+          if (open && it.tmdb) setTimeout(() => loadSeasonCast(it, s), 0);
           return `<details class="season"${open ? " open" : ""}><summary data-action="libseasonopen" data-s="${s}"><b class="grow">Season ${s}</b><span class="small muted">${w} of ${list.length}</span></summary>
             <div class="row" style="margin:4px 0 6px"><button class="btn quiet small" data-action="libseason" data-s="${s}" data-on="${w < aired.length ? 1 : 0}">${w < aired.length ? "Mark season watched" : "Unmark season"}</button></div>
             ${list.map(x => { const on = it.eps[L.epKey(s, x[1])], fut = x[2] && x[2] > t; return `<div class="ep${on ? " on" : ""}${fut ? " fut" : ""}">
               <button class="epck" data-action="libep" data-s="${s}" data-e="${x[1]}" ${fut ? "disabled" : ""} aria-pressed="${!!on}" aria-label="Episode ${x[1]} watched">${icon("check")}</button>
-              <div class="grow"><div class="ell"><b>${x[1]}.</b> ${esc(!on && db.get("spoiler_hide", "1") === "1" && !(n && n.s === s && n.e === x[1]) ? `Episode ${x[1]}` : (x[3] || `Episode ${x[1]}`))}</div><div class="small muted">${x[2] ? esc(shortDay(x[2])) : "date not announced"}${on ? ` · watched ${esc(on ? shortDay(on) : "")}` : ""}</div></div>
+              <div class="grow"><div class="ell"><b>${x[1]}.</b> ${esc(!on && db.get("spoiler_hide", "1") === "1" && !(n && n.s === s && n.e === x[1]) ? `Episode ${x[1]}` : (x[3] || `Episode ${x[1]}`))}</div><div class="small muted">${x[2] ? esc(shortDay(x[2])) : "date not announced"}${x[4] || it.runtime ? ` · ${esc(lenTxt(x[4] || it.runtime))}` : ""}${on ? ` · watched ${esc(on ? shortDay(on) : "")}` : ""}</div>${epCastHtml(it, s, x[1])}</div>
               ${!on && !fut ? `<button class="btn quiet small" data-action="libupto" data-s="${s}" data-e="${x[1]}" title="Mark everything up to here">up to here</button>` : ""}
               ${fut ? "" : `<button class="eprate${er[L.epKey(s, x[1])] ? " has" : ""}" data-action="libeprate" data-s="${s}" data-e="${x[1]}" aria-label="Rate episode ${x[1]}">★${er[L.epKey(s, x[1])] ? " " + er[L.epKey(s, x[1])] : ""}</button>`}</div>
               ${ui.epRate === L.epKey(s, x[1]) ? `<div class="eppick">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(v => `<button data-action="libepset" data-s="${s}" data-e="${x[1]}" data-v="${v}" aria-pressed="${er[L.epKey(s, x[1])] === v}">${v}</button>`).join("")}</div>` : ""}`; }).join("")}</details>`;
@@ -2665,7 +2713,7 @@
       }
     }
     const inner = `
-      ${Kit.sheetHero({ title: it.title, img: it.poster, kind: it.type }, `<div class="small muted">${meta}</div>`)}
+      ${Kit.sheetHero({ title: it.title, img: it.poster, kind: it.type }, `<div class="small muted">${meta}</div>${castLine}`)}
       <div class="row"><span class="small muted grow">Your rating</span>${stars(it.rating)}</div>
       <div class="seg2" style="grid-template-columns:repeat(5,1fr);margin:10px 0">${L.STATUSES.map(s => `<button data-action="libst" data-v="${s}" aria-pressed="${it.status === s}">${LST[s]}</button>`).join("")}</div>
       ${n ? `<div class="nextbox"><div class="grow"><div class="kicker">${n.upcoming ? "Next episode airs" : "Next episode"}</div><b>S${n.s} E${n.e}${n.name && !/^episode \d+$/i.test(n.name) ? ` · ${esc(n.name)}` : ""}</b>
@@ -3127,8 +3175,10 @@
   function renderHome() {
     const st = status(), parts = [];
     // 0.5.8: a line when the last sync failed in part or is old, with the way to it
-    { const nv = db.get("upd_ver", ""); if (nv && verNum(nv) > verNum(VERSION) && db.get("upd_hide") !== nv) parts.push(`<div class="nextbox" style="margin-bottom:12px"><div class="grow small"><b>Saga ${esc(nv)} is out</b> (this ${window.__sagaWeb ? "website" : "app"} has ${VERSION}). ${window.__sagaWeb ? "To update the website, on the Pi run <code>bash /opt/saga/app/site/update.sh</code>, or let it update itself every night: <code>bash /opt/saga/app/site/auto-update.sh on</code>."
-        : updateUrl() ? "Get it from your Saga website; your data stays." : "Ask whoever gave you Saga for the new version; your data stays."}</div>${!window.__sagaWeb && updateUrl() ? `<button class="btn small" data-action="updget">Get it</button>` : ""}<button class="iconbtn" data-action="updhide" aria-label="Hide">${icon("x")}</button></div>`); }
+    // 0.6.9.9: the website runs an older Saga than this app: the two show different screens until it updates
+    { const wv = window.__sagaWeb ? "" : WS.get().ver || ""; if (wv && verNum(wv) < verNum(VERSION) && WS.get().hide !== wv) parts.push(`<div class="nextbox" style="margin-bottom:12px"><div class="grow small"><b>Your website runs Saga ${esc(wv)}</b>, this app ${VERSION}: until it's updated, the website shows older screens and may handle your data differently.</div><button class="btn small" data-action="webupdate">Update the website</button><button class="iconbtn" data-action="webupdhide" aria-label="Hide">${icon("x")}</button></div>`); }
+    { const nv = db.get("upd_ver", ""); if (nv && verNum(nv) > verNum(VERSION) && db.get("upd_hide") !== nv) parts.push(`<div class="nextbox" style="margin-bottom:12px"><div class="grow small"><b>Saga ${esc(nv)} is out</b> (this ${window.__sagaWeb ? "website" : "app"} has ${VERSION}). ${window.__sagaWeb ? "Update it now (the website restarts for a few seconds), or on the Pi run <code>bash /opt/saga/app/site/update.sh</code>; to let it update itself every night: <code>bash /opt/saga/app/site/auto-update.sh on</code>."
+        : updateUrl() ? "Get it from your Saga website; your data stays." : "Ask whoever gave you Saga for the new version; your data stays."}</div>${window.__sagaWeb ? `<button class="btn small" data-action="webupdate">Update now</button>` : updateUrl() ? `<button class="btn small" data-action="updget">Get it</button>` : ""}<button class="iconbtn" data-action="updhide" aria-label="Hide">${icon("x")}</button></div>`); }
     { const sick = C.sourceHealth(db);
       if (!ui.job && sick.length) parts.push(`<div class="nextbox warnbox" style="margin-bottom:12px" data-action="go" data-sec="sync" role="button"><div class="grow small"><b>${esc(healthText(sick[0]))}</b>${sick.length > 1 ? ` · and ${sick.length - 1} more` : ""}<div class="muted ell">${esc(sick[0].msg)}</div></div><span class="small">Fix ›</span></div>`); }
     { const last = parseFloat(db.get("last_sync", "0")) || 0, fails = failedLabels(), h = last ? (Date.now() / 1000 - last) / 3600 : null;
@@ -3210,7 +3260,7 @@
     const n = uKey(name), out = [];
     const MED = c => c.medium === "TV Series" ? "show" : c.medium === "Video Game" ? "game" : "movie";
     for (const c of status()) if (C.norm(c.franchise) === n && MED(c) !== "game") out.push({ key: "canon:" + canonKey(c), title: c.title, medium: MED(c), date: c.date || (c.year ? c.year + "-07-01" : ""), done: !!c.have && c.state !== "listed",
-      img: cImg(c), attrs: `data-action="sheet" data-sid="${sid(c, "canon")}"`, sub: [c.year, c.medium].filter(Boolean).join(" · "), canon: c });
+      img: cImg(c), attrs: `data-action="sheet" data-sid="${sid(c, "canon")}"`, sub: [spanOf(c), c.medium].filter(Boolean).join(" · "), canon: c });
     // 0.6.9.6: your games are listed (a universe opened from the Games tab was empty in 0.6.9.5); they count toward
     // completion only where the universe has no films or series, or in Doctor Who (see renderMv)
     if (secOn("games")) for (const g of games.visible()) if (C.norm(g.multiverse) === n || C.norm(g.franchise) === n) out.push({ key: "game:" + g.id, title: g.title, medium: "game", date: g.date || "", done: g.status === "done",
@@ -3595,6 +3645,18 @@
     if (r.status !== 200) throw new Error(webWhy(r));
     return JSON.parse(r.body);
   }
+  // 0.6.9.9: the website's owner updates it from here (it pulls the newest Saga from GitHub and restarts)
+  async function webUpdate() {
+    toast("Asking the website to update…");
+    let r;
+    try { r = await webApi("POST", "api/admin/update", {}); }
+    catch (e) { toast(/404|not found/i.test(e.message) ? "This website is too old to update itself from here: on the Pi run bash /opt/saga/app/site/update.sh (only this once)" : `Couldn't update the website: ${e.message}`); return; }
+    if (!r || !r.ok) { toast(`The website couldn't update: ${(r && r.error) || "no answer"}`); return; }
+    if (!r.restart) { toast(`The website already has the newest Saga on GitHub (${r.to || r.from})`); return; }
+    if (!window.__sagaWeb) WS.set({ ver: r.to || "" }); render();
+    toast(`The website is updating to Saga ${r.to}: back in a few seconds`);
+    if (window.__sagaWeb) setTimeout(() => location.reload(), 8000);
+  }
   const people = () => { const p = db.cacheGet("people:now"); return (p && p.people) || []; };
   async function peopleRefresh(loud) {
     if (!window.__sagaWeb && !db.get("web_sync_url")) return;
@@ -3679,7 +3741,8 @@
       <div class="sstrip"><div><b>${a.people.length}</b><span>accounts</span></div><div><b${low ? ' style="color:#f0883e"' : ""}>${a.disk ? gb(a.disk.free) : "?"}</b><span>free on the Pi${a.disk ? " of " + gb(a.disk.total) : ""}</span></div><div><b>${a.lastDaily ? esc(a.lastDaily.slice(5)) : "–"}</b><span>last daily copy</span></div><div><b>${a.autoUpdate ? "on" : "off"}</b><span>nightly updates</span></div></div>
       ${low ? `<p class="small" style="color:#f0883e">Less than 1 GB free on the Pi: when the card is full, saving stops working. Delete old files or move to a bigger card.</p>` : ""}
       <h4>People</h4><div class="listcard">${a.people.map(p => `<div class="item"><div class="grow" style="min-width:0"><b>${esc(p.name)}</b>${p.owner ? ' <span class="muted small">(owner)</span>' : ""}<div class="small muted">last here ${ago(p.at)} · last phone sync ${ago(p.sync)} · ${mb(p.size)}${p.shares ? " · shares" : ""}${p.calendar ? " · calendar" : ""}</div></div></div>`).join("")}</div>
-      <p class="small muted">App updates on the download page: ${a.apks.length ? esc(a.apks.join(", ")) : "none (copy APKs into /opt/saga/data/apk/)"}.${a.autoUpdate ? "" : " Nightly updates: <code>bash /opt/saga/app/site/auto-update.sh on</code>."}</p>`;
+      <p class="small muted">App updates on the download page: ${a.apks.length ? esc(a.apks.join(", ")) : "none (copy APKs into /opt/saga/data/apk/)"}.${a.autoUpdate ? "" : " Nightly updates: <code>bash /opt/saga/app/site/auto-update.sh on</code>."}</p>
+      <button class="btn small" data-action="webupdate">${icon("sync")}Update the website from GitHub${verNum(a.version) < verNum(VERSION) ? ` (it has ${esc(a.version)}, this ${window.__sagaWeb ? "page" : "app"} ${VERSION})` : ""}</button>`;
   }
   async function syncWithWebServer(loud) {
     const base = webBase();
@@ -3694,7 +3757,10 @@
       const m = await http("GET", base + "/api/sync/manifest", { headers: H });
       if (m.status === 401) throw new Error("the website asked for the sync key (Settings › Accounts and sync › Saga website)");
       if (m.status !== 200) throw new Error(webWhy(m));
-      const man = JSON.parse(m.body).files || {};
+      const mj = JSON.parse(m.body), man = mj.files || {};
+      // 0.6.9.9: which Saga the website runs (older websites only say it at /api/health)
+      { let wv = mj.version || ""; if (!wv && Date.now() - (+WS.get().verAt || 0) > 6 * 3600e3) try { WS.set({ verAt: Date.now() }); const hr = await http("GET", base + "/api/health", { headers: H }); wv = (JSON.parse(hr.body || "{}") || {}).version || ""; } catch (e) { /* unknown */ }
+        if (wv && wv !== WS.get().ver) WS.set({ ver: wv }); }
       const last = WS.get().state || {};
       const changedHere = [];
       for (const n of WEB_FILES) {
@@ -4212,7 +4278,7 @@
   function dupPairs() { const sk = dupSkip(); return { lib: L.findDuplicates(lib, sk), games: feat("games") ? GC.findDuplicates(games, sk) : [] }; }
   function openDuplicates() {
     const d = dupPairs(), n = d.lib.length + d.games.length;
-    const side = (x, kind) => kind === "lib" ? `<div class="grow" style="min-width:0"><b class="ell">${esc(x.title)}</b><div class="small muted ell">${esc([x.year, x.type === "show" ? "Series" : "Film", LST[x.status], x.rating ? "★ " + x.rating : "", x.watches.length ? x.watches.length + " watch" + (x.watches.length === 1 ? "" : "es") : "", Object.keys(x.eps || {}).length ? Object.keys(x.eps).length + " episodes ticked" : "", x.imdb || ""].filter(Boolean).join(" · "))}</div></div>`
+    const side = (x, kind) => kind === "lib" ? `<div class="grow" style="min-width:0"><b class="ell">${esc(x.title)}</b><div class="small muted ell">${esc([L.span(x), x.type === "show" ? "Series" : "Film", LST[x.status], x.rating ? "★ " + x.rating : "", x.watches.length ? x.watches.length + " watch" + (x.watches.length === 1 ? "" : "es") : "", Object.keys(x.eps || {}).length ? Object.keys(x.eps).length + " episodes ticked" : "", x.imdb || ""].filter(Boolean).join(" · "))}</div></div>`
       : `<div class="grow" style="min-width:0"><b class="ell">${esc(x.title)}</b><div class="small muted ell">${esc([GC.yearOf(x), x.platform, GC.LABEL[x.status], x.rating ? "★ " + x.rating : "", x.plays.length ? x.plays.length + "× finished" : "", x.owned && !/^n\/a$/i.test(x.owned) ? "owned: " + x.owned : ""].filter(Boolean).join(" · "))}</div></div>`;
     const rows = (list, kind) => list.slice(0, 80).map((p, i) => `<div class="card" style="margin:8px 0;padding:10px"><div class="small muted" style="margin-bottom:4px">${esc(p.why)}</div>
       <div class="item" style="margin:0">${side(p.a, kind)}</div><div class="item" style="margin:0">${side(p.b, kind)}</div>
@@ -4726,6 +4792,8 @@
       case "rechide": { const h = recsHidden(); h.add(el.dataset.k); db.set("recs_hide", JSON.stringify([...h].slice(-500))); render(); toast("Won't suggest it again", () => { const h2 = recsHidden(); h2.delete(el.dataset.k); db.set("recs_hide", JSON.stringify([...h2])); render(); }); break; }
       case "updget": Native.openUrl(updateUrl()); break;
       case "updhide": db.set("upd_hide", db.get("upd_ver", "")); render(); break;
+      case "webupdhide": WS.set({ hide: WS.get().ver || "" }); render(); break;
+      case "webupdate": webUpdate(); break;
       case "undo": { const f = undoFn; undoFn = null; $("#toast").classList.remove("show"); if (f) { try { f(); } catch (e) { logError("undo", e.message); } } break; }
       case "errcopy": Native.copy(`Saga ${VERSION} error log\n` + errLog().map(x => `${new Date(x.at).toISOString()} [${x.k}] ${x.s || ""} v${x.v}${x.n > 1 ? " x" + x.n : ""}: ${x.m}`).join("\n")); toast("Error log copied"); break;
       case "librandom": { const pool = lib.all().filter(x => x.status === "watchlist"); if (!pool.length) { toast("Your watchlist is empty"); break; } const pick = pool[Math.floor(Math.random() * pool.length)]; openLib(pick.id); toast(`How about ${pick.title}?`); break; }

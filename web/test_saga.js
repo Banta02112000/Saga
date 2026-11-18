@@ -147,6 +147,10 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   await pg.click('[data-action="libaddas"][data-v="watched"]');
   await pg.fill("#libDate", "2021-10-31"); await pg.click('[data-action="libwatch"]');
   ok(/Watch 2/.test(await pg.textContent(".sheet")), "film watched twice");
+  // 0.6.9.9: length and cast under the title
+  await A(() => { const it = __app.lib.get(__app.ui.libOpen); it.runtime = 117; it.cast = [["Ann Example", "Captain"], ["Bo Example", ""]]; it.dir = ["Cy Example"]; it.castAt = Date.now(); __app.openLib(it.id); });
+  { const t = await pg.textContent(".sheet"); ok(/1 h 57 min/.test(t) && /Directed by Cy Example/.test(t) && /With Ann Example as Captain, Bo Example/.test(t), "film: length and cast shown"); }
+  await A(() => { const sh = document.querySelector("#overlay .sheet"); if (sh) sh.scrollTop = 0; }); await pg.waitForTimeout(250); await pg.screenshot({ path: `${OUT}/s-film-top.png` });
   await pg.waitForTimeout(300);
   await pg.screenshot({ path: `${OUT}/s-film.png` });
   await pg.click('.sheet [data-action="librate"][data-v="4"]');
@@ -288,7 +292,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.6.9.8", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.6.9.9", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();

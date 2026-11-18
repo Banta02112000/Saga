@@ -250,6 +250,8 @@
     if (buf) parts.push(buf);
     return parts;
   }
+  // 0.6.9.9: settings kept per device, never taken from the other device's copy (see Store.loadData)
+  const DEVICE_RX = /^(ota_|upd_|seen_version$|auto_backup|backup_file|backup_uri$|cal_path$|notif_asked$|imdb_signed_in$|live_|snap_sync_at$|stage_state$|stage_report$)/;
   class Store {
     constructor(persist) {
       this.persist = persist || null; // {load(): string, save(text), cache?: {load, save}}
@@ -452,6 +454,7 @@
           title, norm: nm, year: y || null, medium: med, rating: it.rating || null, key,
           genres: it.genres || "", runtime: it.runtime || null, rated_at: it.rated_at || null, date: parseDate(it.date),
         };
+        if (it.end && +it.end >= (y || 0)) row.end = +it.end; // 0.6.9.9: a series' last year (IMDb)
         this.itemsMap.set(Store.itemId(row), row);
         n++;
       }
@@ -618,7 +621,12 @@
     // 0.5.9: replaces everything in memory with d (a merged file from the website), keeping the look-up cache
     loadData(d) {
       const sec = this._secLoad ? this._secLoad() : null; if (sec) this._sec = sec;
+      // 0.6.9.9: settings that belong to this device (its update state, backups, sign-ins to sites in its own browser,
+      // what's-new seen) stay as they are when the other device's copy arrives: they were making phone and website disagree
+      const own = Object.fromEntries(Object.entries(this.settings || {}).filter(([k]) => DEVICE_RX.test(k)));
       const keep = this.tmdbCache; this._gen++; this.reset(); this.fromJSON(d);
+      for (const k of Object.keys(this.settings)) if (DEVICE_RX.test(k) && !(k in own)) delete this.settings[k];
+      Object.assign(this.settings, own);
       for (const [k, v] of keep) if (!this.tmdbCache.has(k)) this.tmdbCache.set(k, v);
     }
     reload() {
@@ -1496,7 +1504,7 @@
       const prev = out.get(id) || { imdb: id, title: null, year: null, medium: "Movie" };
       if (title) {
         prev.title = title;
-        if (node.releaseYear && typeof node.releaseYear === "object") prev.year = node.releaseYear.year || prev.year;
+        if (node.releaseYear && typeof node.releaseYear === "object") { prev.year = node.releaseYear.year || prev.year; if (node.releaseYear.endYear) prev.end = node.releaseYear.endYear; }
         if (node.titleType && typeof node.titleType === "object") prev.medium = mediumFromImdb(node.titleType.id);
         const gs = node.titleGenres && node.titleGenres.genres;
         if (Array.isArray(gs)) prev.genres = gs.filter(x => x && x.genre).map(x => x.genre.text).join(", ");
@@ -1537,6 +1545,7 @@
         if (tt && typeof tt === "object" && tt.text) {
           p.t = tt.text;
           if (node.releaseYear && node.releaseYear.year) p.y = node.releaseYear.year;
+          if (node.releaseYear && node.releaseYear.endYear) p.z = node.releaseYear.endYear;
           if (node.titleType && node.titleType.id) p.k = node.titleType.id;
           var gs = node.titleGenres && node.titleGenres.genres;
           if (gs && gs.length) p.g = gs.map(function (x) { return x && x.genre ? x.genre.text : ""; }).filter(Boolean).join(", ");
@@ -1763,7 +1772,7 @@
 
   function fromCompact(x) {
     return {
-      imdb: x.i, title: x.t, year: x.y || null, medium: mediumFromImdb(x.k), rating: x.r || null, genres: x.g || "",
+      imdb: x.i, title: x.t, year: x.y || null, end: x.z || null, medium: mediumFromImdb(x.k), rating: x.r || null, genres: x.g || "",
       runtime: x.m || null, date: x.d ? parseDate({ year: x.d[0], month: x.d[1], day: x.d[2] }) : null,
       ep: x.s || null,
     };
@@ -1892,8 +1901,14 @@
   // address first (caching.graphql.imdb.com), the POST address only if that fails. No page, no hidden browser.
   const GQL_CACHE = "https://caching.graphql.imdb.com/";
   const GQL_HEAD = Object.assign({ "Content-Type": "application/json", Accept: "application/json", Origin: "https://www.imdb.com", Referer: "https://www.imdb.com/" }, IMDB_H);
-  const T_FIELDS = "id titleType{id} titleText{text} originalTitleText{text} releaseYear{year} releaseDate{day month year} runtime{seconds} titleGenres{genres{genre{text}}}";
+  const T_FIELDS = "id titleType{id} titleText{text} originalTitleText{text} releaseYear{year endYear} releaseDate{day month year} runtime{seconds} titleGenres{genres{genre{text}}}";
+  let noEndYear = false;
   async function imdbGql(http, query) {
+    if (noEndYear) query = query.replace(/ endYear/g, "");
+    try { return await imdbGql1(http, query); }
+    catch (e) { if (!noEndYear && /endYear/.test(e.message) && /endYear/.test(query)) { noEndYear = true; return imdbGql1(http, query.replace(/ endYear/g, "")); } throw e; }
+  }
+  async function imdbGql1(http, query) {
     if (gqlBlocked) throw new Error("IMDb API refused earlier in this sync");
     let r = await http("GET", GQL_CACHE + "?query=" + encodeURIComponent(query), { headers: GQL_HEAD, once: true });
     if (r.status !== 200) {
@@ -1910,7 +1925,7 @@
   function gqlTitle(t, extra) {
     if (!t || !TT.test(t.id || "")) return null;
     const gs = ((t.titleGenres || {}).genres) || [], rd = t.releaseDate || {};
-    return Object.assign({ imdb: t.id, title: (t.titleText || {}).text || (t.originalTitleText || {}).text || null, year: (t.releaseYear || {}).year || rd.year || null,
+    return Object.assign({ imdb: t.id, title: (t.titleText || {}).text || (t.originalTitleText || {}).text || null, year: (t.releaseYear || {}).year || rd.year || null, end: (t.releaseYear || {}).endYear || null,
       medium: mediumFromImdb((t.titleType || {}).id), date: rd.year ? parseDate({ year: rd.year, month: rd.month, day: rd.day }) : null,
       runtime: t.runtime && t.runtime.seconds ? Math.round(t.runtime.seconds / 60) : null, genres: gs.filter(x => x.genre).map(x => x.genre.text).join(", ") }, extra || {});
   }
@@ -3848,7 +3863,7 @@ ${blocks.join("\n\n")}`;
     MEDIA, PROFILES, SECRET_RX, norm, parseYear, mediumFromImdb, mediumFromText, ratio, TitleIndex, Store,
     parseCsv, parseImdbText, importImdbCsv, importFranchiseFile, traktEntries, routeTraktFile, storeTrakt, importTraktZip,
     breathe, jsonParts, BUSY: CONFIG_BUSY, consumed, Exclusion, canonStatus, canonStatusAsync, franchiseProgress, isUnreleased, gameCanon, keepImdbEps, canonFrom, upNext, missingCanon, discrepancies, computeStats,
-    recommend, sourceHealth, personWorks, tmdbPosters, VMap, apiTitles, pageOrApi, gqlInfo, imdbReset: () => { gqlBlocked = false; }, imdbGql, gqlList, gqlRatings, imdbUr, authorizeUrl, exchangeCode, Trakt, traktSync, imdbList, imdbRatings, imdbWatchlist, imdbUserId, listIdFrom, walkTitles, browseTitles, pageExtract, pageProbe, probeFor, TMDB, collectionScan, season0Scan,
+    recommend, sourceHealth, personWorks, DEVICE_RX, tmdbPosters, VMap, apiTitles, pageOrApi, gqlInfo, imdbReset: () => { gqlBlocked = false; }, imdbGql, gqlList, gqlRatings, imdbUr, authorizeUrl, exchangeCode, Trakt, traktSync, imdbList, imdbRatings, imdbWatchlist, imdbUserId, listIdFrom, walkTitles, browseTitles, pageExtract, pageProbe, probeFor, TMDB, collectionScan, season0Scan,
     CONFIG, AI_PRESETS, compatProvider, compatScan, localModels, serverBase, traktOne, traktEpRatings, parseLines, parseMvGroup, relevantNames, promptLine, netHint, robust, pool, details, titleInfo, justWatch, pickDates, dateSummary, bestOffer, cachedInfo, enrichInfo, platformRatings, ratingDiffs, withTimeout, watchProgress, continueWatching, testGemini, gemError, fillPosters, posterKey, aiState, resetAi, canonScan, claudeScan, claudeCall, claudeModels, rankClaudeModel, CLAUDE_DEFAULT, upcomingEpisodes, canonKeys, parseJsonArray, multiverseScan, collectionRows, refreshCollections, tvNext, upcomingEvents, computeAlerts, backgroundRun, fmtWhen, hashId, geminiState, resetGemini, mvGroup, mvExpand, multiverses, mvMap, mvAlias, mvPending, mvDone, geminiProvider, vpnOptions, bestVpn, worldFrom, worldCountries, jwQuery, flag: FLAGS, VPN_DEFAULT, manualScan, franchiseBatches, verifyPrompt, parseVerify, newsBatches, newsPrompt, parseCanonRows, franchiseName, releaseList, releaseKey, parseDate, seeds, rankGeminiModel, resolveGeminiModel, syncAll, sleep,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Core;

@@ -52,7 +52,9 @@
     const nowPlaying = got.find(x => x.now) || null;
     const fresh = got.filter(x => x.at && !x.now);
     const seen = new Set(have.map(x => x.at + "|" + x.track));
-    d.recent = fresh.filter(x => !seen.has(x.at + "|" + x.track)).concat(have).sort((a, b) => b.at - a.at).slice(0, 5000);
+    // 0.6.9.9: up to 10,000 kept for the stats; pictures and links only on the newest 300 (they're what takes the room)
+    d.recent = fresh.filter(x => !seen.has(x.at + "|" + x.track)).concat(have).sort((a, b) => b.at - a.at).slice(0, 10000)
+      .map((x, k) => (k < 300 || (!x.img && !x.url) ? x : Object.assign({}, x, { img: "", url: "" })));
     d.now = nowPlaying;
     d.lastfmAt = Date.now();
     return d;
@@ -122,7 +124,43 @@
     const week = Object.entries(artists7).sort((a, b) => b[1] - a[1]);
     const total7 = rec.filter(x => now / 1000 - x.at < 7 * 86400).length;
     const spMins = (d.spRecent || []).reduce((a, x) => a + (x.ms || 0), 0) / 60000;
-    return { days: days.map(x => [x, perDay[x]]), hours, streak, week: week.slice(0, 5), total7, avgDay: Math.round(days.reduce((a, x) => a + perDay[x], 0) / 30), spMins: Math.round(spMins) };
+    // 0.6.9.9: more numbers. Over the scrobbles Saga keeps (up to 10,000): weekdays, months, the busiest day, the
+    // longest streak, artists new to you in the last 30 days, the song you repeated most, how much you listen at night.
+    const sec = now / 1000, in30 = rec.filter(x => sec - x.at < 30 * 86400);
+    const weekday = Array(7).fill(0), byDay = {}, byMonth = {}, firstSeen = {};
+    for (const x of rec) {
+      const dt = new Date(x.at * 1000); weekday[(dt.getDay() + 6) % 7]++;
+      const dd = dayOf(x.at); byDay[dd] = (byDay[dd] || 0) + 1;
+      const mm = dd.slice(0, 7); byMonth[mm] = (byMonth[mm] || 0) + 1;
+      const a = String(x.artist || "").toLowerCase(); if (a && (!firstSeen[a] || x.at < firstSeen[a].at)) firstSeen[a] = { at: x.at, name: x.artist };
+    }
+    const months = [];
+    for (let k = 11; k >= 0; k--) { const dt = new Date(now); dt.setUTCDate(1); dt.setUTCMonth(dt.getUTCMonth() - k); const m = dt.toISOString().slice(0, 7); months.push([m, byMonth[m] || 0]); }
+    const busiest = Object.entries(byDay).sort((a, b) => b[1] - a[1])[0] || null;
+    const allDays = Object.keys(byDay).sort(); let longest = 0, run = 0, prevD = null;
+    for (const dd of allDays) { run = prevD && (Date.parse(dd) - Date.parse(prevD)) === 864e5 ? run + 1 : 1; longest = Math.max(longest, run); prevD = dd; }
+    const oldest = rec.length ? rec[rec.length - 1].at : 0, fullWindow = oldest && sec - oldest > 30 * 86400; // only if history reaches back past 30 days
+    const newArtists = fullWindow ? Object.values(firstSeen).filter(f => sec - f.at < 30 * 86400).sort((a, b) => b.at - a.at).map(f => f.name) : [];
+    const rep = {}; for (const x of in30) { const k = `${x.track}\u0000${x.artist}`; rep[k] = (rep[k] || 0) + 1; }
+    const topRep = Object.entries(rep).sort((a, b) => b[1] - a[1])[0];
+    const art30 = {}; for (const x of in30) art30[x.artist] = (art30[x.artist] || 0) + 1;
+    const night = in30.filter(x => new Date(x.at * 1000).getHours() < 5).length;
+    const uniq = list => new Set(list.map(x => String(x.artist || "").toLowerCase())).size;
+    // minutes: Spotify's lengths where known, otherwise 3.5 minutes a play (an estimate, said so on screen)
+    const lens = {}; for (const x of (d.spRecent || []).concat(...Object.values(d.spTop || {}).map(t => t.tracks || []))) if (x.ms) lens[`${x.track || x.name}\u0000${String(x.artist || "").split(",")[0]}`.toLowerCase()] = x.ms / 60000;
+    const minsOf = list => Math.round(list.reduce((a, x) => a + (lens[`${x.track}\u0000${x.artist}`.toLowerCase()] || 3.5), 0));
+    const in7 = rec.filter(x => sec - x.at < 7 * 86400);
+    // genres from Spotify's top artists (weighted by rank), and how much of the month your top 10 artists take
+    const genres = {}; for (const [rg, w] of [["short_term", 3], ["medium_term", 2], ["long_term", 1]]) ((d.spTop || {})[rg] || { artists: [] }).artists.forEach((a, k) => (a.genres || []).forEach(g => { genres[g] = (genres[g] || 0) + w * (50 - k); }));
+    const m1 = ((d.top || {})["1month"] || { artists: [] }).artists, m1tot = m1.reduce((a, x) => a + x.plays, 0);
+    const i = d.info || {}, life = i.since ? Math.max(1, (sec - i.since) / 86400) : 0;
+    return { days: days.map(x => [x, perDay[x]]), hours, streak, week: week.slice(0, 5), total7, avgDay: Math.round(days.reduce((a, x) => a + perDay[x], 0) / 30), spMins: Math.round(spMins),
+      weekday, months, busiest, longest, newArtists, topRepeat: topRep ? { track: topRep[0].split("\u0000")[0], artist: topRep[0].split("\u0000")[1], plays: topRep[1] } : null,
+      top30: Object.entries(art30).sort((a, b) => b[1] - a[1]).slice(0, 10), nightPct: in30.length ? Math.round((night / in30.length) * 100) : 0,
+      artists7: uniq(in7), artists30: uniq(in30), mins7: minsOf(in7), mins30: minsOf(in30), plays30: in30.length,
+      genres: Object.entries(genres).sort((a, b) => b[1] - a[1]).slice(0, 8).map(g => g[0]),
+      top10Share: m1tot && i.playcount ? Math.round((m1.slice(0, 10).reduce((a, x) => a + x.plays, 0) / m1tot) * 100) : 0,
+      lifeAvg: life ? Math.round((i.playcount || 0) / life) : 0, kept: rec.length, keptFrom: oldest };
   }
 
   const MusicCore = { lastfmSync, spotifyAuthUrl, spotifyToken, spotifyFresh, spotifySync, stats, PERIODS, SP_RANGES, lfmTrack };
@@ -180,13 +218,24 @@
       <div class="row" style="justify-content:space-between;margin:6px 0"><span class="small muted">${d.lastfmAt || d.spotifyAt ? `Synced ${ago(Math.max(d.lastfmAt || 0, d.spotifyAt || 0) / 1000)}` : "Not synced yet"}</span>
       <button class="btn small" data-action="musync" ${ui.busy ? "disabled" : ""}>${ui.busy ? "Syncing…" : "Sync music"}</button></div>${body}`;
   }
+  const WD = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], MO = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const hm = m => (m >= 60 ? `${fmt(Math.floor(m / 60))} h${m % 60 ? ` ${m % 60} m` : ""}` : `${m} m`);
   function renderOverview(d) {
     const st = stats(d), i = d.info, wk = st.week[0];
     const n = d.now;
     return `${n ? `<div class="nextbox" style="margin:8px 0"><div class="grow"><div class="kicker">Playing now</div><b>${esc(n.track)}</b><div class="small muted">${esc(n.artist)}${n.album ? " · " + esc(n.album) : ""}</div></div></div>` : ""}
       ${i ? `<div class="sstrip"><div><b>${fmt(i.playcount)}</b><span>scrobbles${i.since ? ` since ${new Date(i.since * 1000).getFullYear()}` : ""}</span></div><div><b>${fmt(i.artists)}</b><span>artists</span></div><div><b>${fmt(i.tracks)}</b><span>tracks</span></div><div><b>${fmt(st.total7)}</b><span>this week</span></div></div>` : ""}
       ${i ? `<div class="sstrip"><div><b>${fmt(st.avgDay)}</b><span>a day (30 days)</span></div><div><b>${fmt(st.streak)}</b><span>day streak</span></div><div><b class="ell">${wk ? esc(wk[0]) : "–"}</b><span>top artist this week${wk ? ` (${wk[1]})` : ""}</span></div></div>` : ""}
-      ${(d.recent || []).length ? `${K.head("Last 30 days")}${bars(st.days.map(([x, v]) => [x.slice(8), v]), 5)}${K.head("By hour (30 days)")}${bars(st.hours.map((v, h) => [String(h), v]), 3)}` : ""}
+      ${(d.recent || []).length ? `<div class="sstrip"><div><b>${hm(st.mins7)}</b><span>listened this week*</span></div><div><b>${hm(st.mins30)}</b><span>in 30 days*</span></div><div><b>${fmt(st.artists30)}</b><span>artists in 30 days</span></div>${st.lifeAvg ? `<div><b>${fmt(st.lifeAvg)}</b><span>a day, all time</span></div>` : ""}</div>
+        <div class="sstrip"><div><b>${fmt(st.longest)}</b><span>longest streak (days)</span></div>${st.busiest ? `<div><b>${fmt(st.busiest[1])}</b><span>busiest day: ${esc(K.when(Date.parse(st.busiest[0]), S().lang()))}</span></div>` : ""}<div><b>${st.nightPct}%</b><span>after midnight (30 days)</span></div>${st.top10Share ? `<div><b>${st.top10Share}%</b><span>of this month is your top 10 artists</span></div>` : ""}</div>
+        ${st.topRepeat && st.topRepeat.plays > 2 ? `<p class="small" style="margin:6px 0">On repeat: <b>${esc(st.topRepeat.track)}</b> by ${esc(st.topRepeat.artist)}, ${fmt(st.topRepeat.plays)} plays in 30 days</p>` : ""}
+        ${K.head("Last 30 days")}${bars(st.days.map(([x, v]) => [x.slice(8), v]), 5)}${K.head("By hour (30 days)")}${bars(st.hours.map((v, h) => [String(h), v]), 3)}
+        ${K.head("By weekday")}${bars(st.weekday.map((v, k) => [WD[k], v]), 1)}
+        ${K.head("Last 12 months")}${bars(st.months.map(([m, v]) => [MO[+m.slice(5) - 1], v]), 2)}
+        ${st.top30.length ? `${K.head("Top artists, 30 days")}<div class="listcard">${st.top30.slice(0, 5).map(([a, v], k) => row({ name: a }, k, `${fmt(v)} plays`)).join("")}</div>` : ""}
+        ${st.newArtists.length ? `${K.head("New to you, last 30 days")}<p class="small">${st.newArtists.slice(0, 12).map(esc).join(" · ")}${st.newArtists.length > 12 ? ` and ${fmt(st.newArtists.length - 12)} more` : ""}</p>` : ""}
+        <p class="small muted">* Minutes use Spotify's song lengths where Saga knows them, 3.5 minutes a play otherwise. Weekdays, months, streaks and new artists count the ${fmt(st.kept)} newest scrobbles Saga keeps${st.keptFrom ? ` (since ${esc(K.when(st.keptFrom * 1000, S().lang()))})` : ""}.</p>` : ""}
+      ${st.genres.length ? `${K.head("Your genres (Spotify)")}<p class="small">${st.genres.map(esc).join(" · ")}</p>` : ""}
       ${d.spMe ? `${K.head(`Spotify${d.spMe.name ? " · " + d.spMe.name : ""}`)}<p class="small muted" style="margin:0 0 6px">${d.spRecent && d.spRecent.length ? `${fmt(d.spRecent.length)} recent plays, ${fmt(st.spMins)} minutes` : "No recent plays"}</p>
         ${(d.spTop && d.spTop.short_term && d.spTop.short_term.artists.length) ? `<div class="listcard">${d.spTop.short_term.artists.slice(0, 5).map((x, k) => row(x, k, esc(x.genres.join(", ") || "Top artist, last 4 weeks"), x.img)).join("")}</div>` : ""}` : ""}
       ${d.top && d.top["7day"] && d.top["7day"].tracks.length ? `${K.head("Top tracks this week")}<div class="listcard">${d.top["7day"].tracks.slice(0, 5).map((x, k) => row(x, k, `${esc(x.artist)} · ${fmt(x.plays)} plays`, x.img)).join("")}</div>` : ""}`;

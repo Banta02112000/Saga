@@ -35,7 +35,7 @@ import java.util.zip.ZipInputStream;
 
 public class Bridge {
     static final int PICK = 4242;
-    static final String UA = "Saga/0.6.9.8 (Android)";
+    static final String UA = "Saga/0.6.9.9 (Android)";
     final Context ctx;
     final MainActivity act;       // null when running inside the background job
     final SyncJobService job;     // null in the app
@@ -1184,7 +1184,7 @@ public class Bridge {
 
     @JavascriptInterface
     public String version() {
-        return "0.6.9.8";
+        return "0.6.9.9";
     }
 
     // ---------- background sync & notifications ----------

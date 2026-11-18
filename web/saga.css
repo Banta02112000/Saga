@@ -358,3 +358,8 @@ body[data-sec="music"] { --acc: #1db954; }
   .rail { grid-auto-columns: 150px; }
   .listcard:has(> .item:nth-child(6)) { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); column-gap: 16px; }
 }
+
+/* 0.6.9.9: cast lines */
+.castline{margin-top:3px;line-height:1.35}
+.castline .role{opacity:.7}
+.ep .castline{margin-top:1px}

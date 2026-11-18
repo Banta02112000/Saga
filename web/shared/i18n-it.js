@@ -91,13 +91,13 @@ window.BANTA_IT = {
 "Add": "Aggiungi",
 "Yes": "Sì",
 "No": "No",
-"Mon": "lun",
-"Tue": "mar",
-"Wed": "mer",
-"Thu": "gio",
-"Fri": "ven",
-"Sat": "sab",
-"Sun": "dom",
+"Mon": "Lun",
+"Tue": "Mar",
+"Wed": "Mer",
+"Thu": "Gio",
+"Fri": "Ven",
+"Sat": "Sab",
+"Sun": "Dom",
 "days": "giorni",
 "pages": "pagine",
 "games": "giochi",
@@ -1160,7 +1160,27 @@ window.BANTA_IT = {
 "AI scan": "scansione AI",
 "your file": "il tuo file",
 "your canon list": "la tua lista canon",
-"your sessions": "le tue sessioni"
+"your sessions": "le tue sessioni",
+"Update the website": "Aggiorna il sito",
+"Update now": "Aggiorna ora",
+"Asking the website to update…": "Chiedo al sito di aggiornarsi…",
+"On repeat:": "In loop:",
+"By weekday": "Per giorno della settimana",
+"Last 12 months": "Ultimi 12 mesi",
+"Top artists, 30 days": "Artisti più ascoltati, 30 giorni",
+"New to you, last 30 days": "Nuovi per te, ultimi 30 giorni",
+"Your genres (Spotify)": "I tuoi generi (Spotify)",
+"listened this week*": "ascoltato questa settimana*",
+"in 30 days*": "in 30 giorni*",
+"artists in 30 days": "artisti in 30 giorni",
+"a day, all time": "al giorno, da sempre",
+"longest streak (days)": "serie più lunga (giorni)",
+"after midnight (30 days)": "dopo mezzanotte (30 giorni)",
+"of this month is your top 10 artists": "di questo mese sono i tuoi 10 artisti preferiti",
+"Directed by": "Regia di",
+"Created by": "Creata da",
+"With": "Con",
+"per episode": "a episodio"
 };
 window.BANTA_IT_PAT = [
 [
@@ -2118,5 +2138,25 @@ window.BANTA_IT_PAT = [
 [
 "(\\d[\\d,.]*) h played",
 "$1 h giocate"
+],
+[
+"(\\d[\\d,.]*) h (\\d[\\d,.]*) min per episode",
+"$1 h $2 min a episodio"
+],
+[
+"(\\d[\\d,.]*) min per episode",
+"$1 min a episodio"
+],
+[
+"(\\d[\\d,.]*) h per episode",
+"$1 h a episodio"
+],
+[
+"busiest day: (.+)",
+"giorno più intenso: $1"
+],
+[
+"Your website runs Saga (.+)",
+"Il tuo sito usa Saga $1"
 ]
 ];

@@ -429,6 +429,20 @@ const handler = isPublic => async (req, res) => {
       return send(res, 200, JSON.stringify({ version: APP_VERSION, uptime: Math.round(process.uptime()), node: process.version, people, disk, lastDaily,
         autoUpdate: fs.existsSync("/etc/systemd/system/timers.target.wants/saga-update.timer"), apks: fs.existsSync(APK_DIR) ? fs.readdirSync(APK_DIR).filter(n => /\.apk$/i.test(n)) : [] }));
     }
+    // 0.6.9.9: the owner updates the website from the app (Settings › Your Saga website), so the website runs the same
+    // version as the phone: git pull from GitHub, then this server stops and systemd starts the new one (Restart=always)
+    if (p === "/api/admin/update" && req.method === "POST") {
+      if (AUTH && (user || AUTH.owner) !== AUTH.owner) return send(res, 403, '{"error":"only the owner"}');
+      const root = path.resolve(__dirname, "..");
+      if (!fs.existsSync(path.join(root, ".git"))) return send(res, 200, JSON.stringify({ ok: false, error: "this website wasn't installed with git: update it with site/update.sh" }));
+      return require("child_process").execFile("git", ["pull", "--ff-only"], { cwd: root, timeout: 120000 }, (err, out, errOut) => {
+        if (err) return send(res, 200, JSON.stringify({ ok: false, error: String(errOut || err.message).trim().slice(0, 400) }));
+        let v = ""; try { v = (/const VERSION = "([\d.]+)"/.exec(fs.readFileSync(path.join(WEB, "app.js"), "utf8")) || [])[1] || ""; } catch (e) { /* none */ }
+        const same = /Already up to date/i.test(out);
+        send(res, 200, JSON.stringify({ ok: true, from: APP_VERSION, to: v || APP_VERSION, restart: !same, log: String(out).trim().slice(-400) }));
+        if (!same) setTimeout(() => process.exit(0), 800);
+      });
+    }
     if (p === "/api/me") return send(res, 200, JSON.stringify({ user: user || null, users: AUTH ? Object.keys(AUTH.users).length : 0 }));
     if (p.startsWith("/api/")) {
       if (p === "/api/all" && req.method === "GET") {
@@ -445,7 +459,7 @@ const handler = isPublic => async (req, res) => {
       if (p === "/api/sync/manifest" && req.method === "GET") {
         const files = {};
         for (const n of SYNC_FILES) { const f = path.join(DIR, n); if (fs.existsSync(f)) { const t = fs.readFileSync(f, "utf8"); const st = fs.statSync(f); files[n] = { mtime: st.mtimeMs, size: st.size, sha256: sha(t) }; } }
-        return send(res, 200, JSON.stringify({ files, serverTime: Date.now() }));
+        return send(res, 200, JSON.stringify({ files, serverTime: Date.now(), version: APP_VERSION }));
       }
       if (p.startsWith("/api/sync/file/") && req.method === "POST") {
         const n = safe(p.slice(15));

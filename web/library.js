@@ -57,7 +57,7 @@ const epKey = (s, e) => `${s}:${e}`;
     keep.watches = [...new Set(keep.watches.concat(drop.watches))].sort();
     for (const [k, v] of Object.entries(drop.eps || {})) if (!keep.eps[k]) keep.eps[k] = v;
     if (drop.notes && !String(keep.notes || "").includes(drop.notes)) keep.notes = keep.notes ? `${keep.notes}\n${drop.notes}` : drop.notes;
-    for (const f of ["imdb", "tmdb", "tvmaze", "mal", "itunes", "year", "poster", "overview", "runtime", "network", "orig"]) if (!keep[f] && drop[f]) keep[f] = drop[f];
+    for (const f of ["imdb", "tmdb", "tvmaze", "mal", "itunes", "year", "poster", "overview", "runtime", "network", "orig", "endYear", "cast", "dir"]) if (!keep[f] && drop[f]) keep[f] = drop[f];
     if (!keep.genres.length && drop.genres.length) keep.genres = drop.genres;
     keep.anime = keep.anime || drop.anime;
     keep.added = Math.min(keep.added || Date.now(), drop.added || Date.now()); keep.updated = Date.now();
@@ -377,7 +377,7 @@ const epKey = (s, e) => `${s}:${e}`;
   function fromTvmaze(s) {
     return { type: "show", tvmaze: s.id, title: s.name || "", year: yearOf(s.premiered), poster: (s.image && (s.image.medium || s.image.original)) || "",
       overview: stripTags(s.summary), genres: s.genres || [], network: (s.network && s.network.name) || (s.webChannel && s.webChannel.name) || "",
-      imdb: (s.externals && s.externals.imdb) || null, ended: /ended/i.test(s.status || ""), runtime: s.runtime || s.averageRuntime || null, src: "tvmaze", anime: (s.genres || []).includes("Anime") };
+      imdb: (s.externals && s.externals.imdb) || null, ended: /ended/i.test(s.status || ""), runtime: s.runtime || s.averageRuntime || null, endYear: /ended/i.test(s.status || "") ? yearOf(s.ended) : null, src: "tvmaze", anime: (s.genres || []).includes("Anime") };
   }
   function fromItunes(r) {
     return { type: "movie", itunes: r.trackId, title: r.trackName || "", year: yearOf(r.releaseDate), poster: String(r.artworkUrl100 || "").replace("100x100", "300x300"),
@@ -388,7 +388,7 @@ const epKey = (s, e) => `${s}:${e}`;
     const t = d.title_english || d.title || "";
     return { type: d.type === "Movie" ? "movie" : "show", title: t, orig: d.title && d.title !== t ? d.title : (d.title_japanese || ""), year: d.year || yearOf((d.aired || {}).from),
       poster: ((d.images || {}).jpg || {}).large_image_url || ((d.images || {}).jpg || {}).image_url || "", overview: d.synopsis || "", genres: (d.genres || []).map(g => g.name),
-      mal: d.mal_id, anime: true, ended: /finished/i.test(d.status || ""), episodes: d.episodes || null, runtime: parseInt(d.duration, 10) || null, network: (d.studios || []).map(x => x.name).slice(0, 2).join(", "), src: "myanimelist" };
+      mal: d.mal_id, anime: true, ended: /finished/i.test(d.status || ""), endYear: /finished/i.test(d.status || "") ? yearOf((d.aired || {}).to) : null, episodes: d.episodes || null, runtime: parseInt(d.duration, 10) || null, network: (d.studios || []).map(x => x.name).slice(0, 2).join(", "), src: "myanimelist" };
   }
   async function searchAnime(http, q) {
     const j = await getJson(http, `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(String(q).trim())}&limit=24&sfw=true`);
@@ -408,7 +408,7 @@ const epKey = (s, e) => `${s}:${e}`;
   async function animeDetails(http, it, sleep = ms => new Promise(r => setTimeout(r, ms))) {
     let changed = false;
     const d = await getJson(http, `https://api.jikan.moe/v4/anime/${it.mal}`);
-    if (d && d.data) { const f = fromJikan(d.data); for (const k of ["poster", "overview", "runtime", "network"]) if (!it[k] && f[k]) { it[k] = f[k]; changed = true; } if (it.ended !== f.ended) { it.ended = f.ended; changed = true; } it.episodes = f.episodes; }
+    if (d && d.data) { const f = fromJikan(d.data); for (const k of ["poster", "overview", "runtime", "network", "endYear"]) if (!it[k] && f[k]) { it[k] = f[k]; changed = true; } if (it.ended !== f.ended) { it.ended = f.ended; changed = true; } it.episodes = f.episodes; }
     if (it.type !== "show") return changed;
     const eps = [];
     for (let page = 1; page <= 30; page++) {
@@ -504,6 +504,18 @@ const epKey = (s, e) => `${s}:${e}`;
     return out.map((x, i) => [x, i]).sort((a, b) => score(a[0]) - score(b[0]) || a[1] - b[1]).map(a => a[0]).slice(0, 40);
   }
 
+  // 0.6.9.9: the main cast as [name, character], at most 6 (a series' cast is ordered by episodes played)
+  const castOf = list => (list || []).slice(0, 6).map(c => [c.name || "", c.character || ((c.roles || [])[0] || {}).character || ""]).filter(c => c[0]);
+  // 0.6.9.9: release years: "2010" (a film, or a series that began and ended that year), "2010-2020" (ended),
+  // "2010-" (still running). A series whose end isn't known yet shows its first year.
+  function lastAired(it) { let y = 0; for (const x of it.epl || []) if (x[2] && x[2] <= today()) y = Math.max(y, +x[2].slice(0, 4)); return y || null; }
+  function span(it) {
+    const y = it.year || (it.date ? +String(it.date).slice(0, 4) : null);
+    if (!y) return "";
+    if (it.type !== "show") return String(y);
+    if (it.ended) { const end = it.endYear || lastAired(it); return end && end > y ? `${y}-${end}` : String(y); }
+    return it.epl && it.epl.length ? `${y}-` : String(y);
+  }
   // Fills in details and, for series, the episode list. Returns true when something changed.
   async function details(http, it, opt = {}) {
     const lang = opt.lang === "it" ? "it-IT" : "en-US";
@@ -515,21 +527,31 @@ const epKey = (s, e) => `${s}:${e}`;
     }
     const set = (k, v) => { if (v != null && v !== "" && !(Array.isArray(v) && !v.length) && JSON.stringify(it[k]) !== JSON.stringify(v)) { it[k] = v; changed = true; } };
     let viaTmdb = false;
+    // 0.6.9.9: a title known only by its IMDb id gets its TMDB id, so it has a length and a cast too
+    if (!it.tmdb && it.imdb && opt.tmdbKey && tmdbUp()) { try {
+      const f = await tmdbGet(http, opt.tmdbKey, `/find/${it.imdb}`, { external_source: "imdb_id" });
+      const hit = f && ((it.type === "show" ? f.tv_results : f.movie_results) || [])[0];
+      if (hit) set("tmdb", hit.id);
+    } catch (e) { if (!tmdbFailed(e)) throw e; } }
     if (it.tmdb && opt.tmdbKey && tmdbUp()) { try {
       if (it.type === "movie") {
-        const d = await tmdbGet(http, opt.tmdbKey, `/movie/${it.tmdb}`, { language: lang });
-        if (d) { set("imdb", d.imdb_id || null); set("runtime", d.runtime || null); set("genres", (d.genres || []).map(g => g.name)); if (!it.overview) set("overview", d.overview); if (!it.poster && d.poster_path) set("poster", TMDB_IMG + d.poster_path); }
+        const d = await tmdbGet(http, opt.tmdbKey, `/movie/${it.tmdb}`, { language: lang, append_to_response: "credits" });
+        if (d) { set("imdb", d.imdb_id || null); set("runtime", d.runtime || null); set("genres", (d.genres || []).map(g => g.name)); if (!it.overview) set("overview", d.overview); if (!it.poster && d.poster_path) set("poster", TMDB_IMG + d.poster_path);
+          set("cast", castOf((d.credits || {}).cast)); set("dir", ((d.credits || {}).crew || []).filter(x => x.job === "Director").map(x => x.name).slice(0, 2)); it.castAt = Date.now(); }
       } else {
-        const d = await tmdbGet(http, opt.tmdbKey, `/tv/${it.tmdb}`, { language: lang, append_to_response: "external_ids" });
+        const d = await tmdbGet(http, opt.tmdbKey, `/tv/${it.tmdb}`, { language: lang, append_to_response: "external_ids,aggregate_credits" });
         if (d) {
           set("imdb", (d.external_ids && d.external_ids.imdb_id) || null); set("genres", (d.genres || []).map(g => g.name)); set("ended", /ended|cancel/i.test(d.status || ""));
+          set("endYear", /ended|cancel/i.test(d.status || "") ? yearOf(d.last_air_date) : null); if (!it.year) set("year", yearOf(d.first_air_date));
+          set("runtime", (d.episode_run_time || [])[0] || (d.last_episode_to_air || {}).runtime || it.runtime || null);
+          set("cast", castOf((d.aggregate_credits || {}).cast)); set("dir", (d.created_by || []).map(x => x.name).slice(0, 2)); it.castAt = Date.now();
           set("network", ((d.networks || [])[0] || {}).name || ""); if (!it.overview) set("overview", d.overview);
           if ((d.original_language === "ja" || (d.origin_country || []).includes("JP")) && (d.genres || []).some(g => g.id === 16)) set("anime", true);
           const eps = [];
           const seasons = (d.seasons || []).filter(s => s.season_number > 0 && s.episode_count > 0).slice(0, 40);
           for (const s of seasons) {
             const sd = await tmdbGet(http, opt.tmdbKey, `/tv/${it.tmdb}/season/${s.season_number}`, { language: lang });
-            for (const e of (sd && sd.episodes) || []) eps.push([e.season_number || s.season_number, e.episode_number, e.air_date || "", e.name || ""]);
+            for (const e of (sd && sd.episodes) || []) eps.push([e.season_number || s.season_number, e.episode_number, e.air_date || "", e.name || "", e.runtime || 0]);
           }
           if (eps.length) { it.epl = eps; it.epChecked = Date.now(); changed = true; }
         }
@@ -542,14 +564,15 @@ const epKey = (s, e) => `${s}:${e}`;
       if (!tvm && it.imdb) { const s = await getJson(http, `https://api.tvmaze.com/lookup/shows?imdb=${it.imdb}`); if (s) { tvm = s.id; set("tvmaze", tvm); } }
       if (!tvm) { const j = await getJson(http, `https://api.tvmaze.com/singlesearch/shows?q=${encodeURIComponent(it.title)}`); if (j && (!it.year || !yearOf(j.premiered) || Math.abs(yearOf(j.premiered) - it.year) <= 1)) { tvm = j.id; set("tvmaze", tvm); } }
       if (tvm) {
-        const s = await getJson(http, `https://api.tvmaze.com/shows/${tvm}?embed=episodes`);
+        const s = await getJson(http, `https://api.tvmaze.com/shows/${tvm}?embed[]=episodes&embed[]=cast`);
         if (s) {
           const f = fromTvmaze(s);
           for (const k of ["imdb", "network", "runtime", "genres", "poster"]) if (!it[k] || (Array.isArray(it[k]) && !it[k].length)) set(k, f[k]);
-          set("ended", f.ended);
+          set("ended", f.ended); set("endYear", f.endYear);
+          if (!it.cast || !it.cast.length) { set("cast", ((s._embedded && s._embedded.cast) || []).slice(0, 6).map(c => [(c.person || {}).name || "", (c.character || {}).name || ""]).filter(c => c[0])); it.castAt = Date.now(); }
           if (f.anime) set("anime", true);
           if (!it.overview) set("overview", f.overview);
-          const eps = ((s._embedded && s._embedded.episodes) || []).filter(e => e.season > 0 && e.number != null).map(e => [e.season, e.number, e.airdate || "", e.name || ""]);
+          const eps = ((s._embedded && s._embedded.episodes) || []).filter(e => e.season > 0 && e.number != null).map(e => [e.season, e.number, e.airdate || "", e.name || "", e.runtime || 0]);
           if (eps.length) { it.epl = eps; it.epChecked = Date.now(); changed = true; }
         }
       }
@@ -643,7 +666,7 @@ const epKey = (s, e) => `${s}:${e}`;
     return out.length ? out.join(", ") : "nothing Trakt needed";
   }
 
-  const API = { findDuplicates, mergeItems, animeRelations, animeOne, markBulk, pendingEps, adoptKey, settleShow, searchImdb, searchAnime, fromJikan, animeDetails, traktPush, Library, STATUSES, LABEL, search, details, stale, fromTmdb, fromTvmaze, fromItunes, norm, day, yearOf, epKey, blank, idFor };
+  const API = { span, castOf, lastAired, findDuplicates, mergeItems, animeRelations, animeOne, markBulk, pendingEps, adoptKey, settleShow, searchImdb, searchAnime, fromJikan, animeDetails, traktPush, Library, STATUSES, LABEL, search, details, stale, fromTmdb, fromTvmaze, fromItunes, norm, day, yearOf, epKey, blank, idFor };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   else root.Lib = API;
 })(typeof window !== "undefined" ? window : globalThis);
