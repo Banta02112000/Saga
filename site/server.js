@@ -142,9 +142,19 @@ function seen(name, p) {
   const e = SEEN[name] || (SEEN[name] = {}); e.at = Date.now(); if (/^\/api\/sync\//.test(p)) e.sync = Date.now();
   if (Date.now() - seenWrite > 60000) { seenWrite = Date.now(); try { fs.writeFileSync(SEEN_FILE, JSON.stringify(SEEN)); } catch (err) { /* read-only disk */ } }
 }
+// 0.6.9.4: a JSON file read once and kept until it changes (friends' pages read whole libraries: on a Pi that's slow)
+const jsonMemo = new Map();
+function readJson(f) {
+  let st; try { st = fs.statSync(f); } catch (e) { jsonMemo.delete(f); return null; }
+  const m = jsonMemo.get(f), stamp = st.mtimeMs + ":" + st.size;
+  if (m && m.stamp === stamp) return m.v;
+  let v = null; try { v = JSON.parse(fs.readFileSync(f, "utf8")); } catch (e) { v = null; }
+  jsonMemo.set(f, { stamp, v }); if (jsonMemo.size > 60) jsonMemo.delete(jsonMemo.keys().next().value);
+  return v;
+}
 // 0.6.9: what a person who shares did lately, for their friends: watched, finished, read (newest first)
 function activityOf(d) {
-  const read = n => { try { return JSON.parse(fs.readFileSync(path.join(d, n), "utf8")); } catch (e) { return null; } };
+  const read = n => readJson(path.join(d, n));
   const out = [], L = read("library.json") || {}, G = read("games.json") || {}, B = read("books.json") || {};
   for (const i of Object.values(L.items || {})) {
     const w = (i.watches || []).filter(Boolean).sort().pop();
@@ -349,7 +359,7 @@ const handler = isPublic => async (req, res) => {
     }
     if (p === "/api/people" && AUTH) {
       const me = user || AUTH.owner, out = [];
-      const read = (d, n) => { try { return JSON.parse(fs.readFileSync(path.join(d, n), "utf8")); } catch (e) { return null; } };
+      const read = (d, n) => readJson(path.join(d, n));
       for (const n of Object.keys(AUTH.users)) {
         if (n === me) continue;
         const d = dirOf(n === AUTH.owner ? "" : n), sh = read(d, "share.json");
@@ -437,14 +447,15 @@ const handler = isPublic => async (req, res) => {
               return send(res, 409, JSON.stringify({ error: "changed elsewhere", text: cur, sha256: remember(DIR + "|" + n, cur) }));
             }
           }
-          writeAtomic(DIR, n, body);
+          const fn = path.join(DIR, n), same = SYNC_FILES.includes(n) && fs.existsSync(fn) && fs.readFileSync(fn).equals(body);
+          if (!same) writeAtomic(DIR, n, body);
           const h = remember(DIR + "|" + n, body.toString("utf8"));
-          if (SYNC_FILES.includes(n)) announce(DIR, [n], String(req.headers["x-tab"] || "web"));
+          if (SYNC_FILES.includes(n) && !same) announce(DIR, [n], String(req.headers["x-tab"] || "web")); // 0.6.9.4: nothing changed, nobody told
           return send(res, 200, JSON.stringify({ sha256: h }));
         }
         if (req.method === "POST") { daily(DIR, n); fs.appendFileSync(path.join(DIR, n), await readBody(req)); return send(res, 200, "{}"); }
         if (req.method === "DELETE") { daily(DIR, n); fs.rmSync(path.join(DIR, n), { force: true }); return send(res, 200, "{}"); }
-        if (req.method === "GET") { const f = path.join(DIR, n); return send(res, 200, fs.existsSync(f) ? fs.readFileSync(f) : "", "text/plain; charset=utf-8"); }
+        if (req.method === "GET") { const f = path.join(DIR, n), t = fs.existsSync(f) ? fs.readFileSync(f) : Buffer.from(""); if (SYNC_FILES.includes(n)) res.setHeader("X-Sha", remember(DIR + "|" + n, t.toString("utf8"))); return send(res, 200, t, "text/plain; charset=utf-8"); }
       }
       if (p === "/api/http" && req.method === "POST") return send(res, 200, JSON.stringify(await passOn(JSON.parse((await readBody(req, 50 * 1024 * 1024)).toString("utf8")))));
       if (p === "/api/unzip" && req.method === "POST") { try { return send(res, 200, JSON.stringify(unzip(await readBody(req)))); } catch (e) { return send(res, 200, JSON.stringify({ error: e.message })); } }

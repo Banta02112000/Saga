@@ -407,7 +407,7 @@ const mock = () => {
   await page.click('[data-action=copydiag]');
 
   // Import a Trakt ZIP through the picker
-  await page.evaluate(() => { window.__nextPick = [{ name: "trakt-export-banta2000.zip", zip: {
+  await page.evaluate(() => { window.__nextPick = [{ name: "trakt-export.zip", zip: {
     "watched-history-27.json": JSON.stringify([{ type: "movie", movie: { title: "Alien", year: 1979, ids: { imdb: "tt0078748" } } }]) } }]; });
   await page.evaluate(() => (__app.ui.setGroup = "*", __app.go("settings")));
   await page.click('[data-action=import][data-kind=trakt]');

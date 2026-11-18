@@ -270,7 +270,7 @@ tools/aapt2 dump badging out/CanonSync.apk
 if [ "$EDITION" = blank ]; then
   # nothing of Banta's may be inside the shareable APK
   rm -rf out/check && mkdir out/check && (cd out/check && unzip -q ../CanonSync.apk)
-  if grep -rlE "$LEAKS" out/check; then echo "PERSONAL DATA FOUND IN BLANK BUILD"; exit 1; fi
+  if grep -rliE "$LEAKS" out/check; then echo "PERSONAL DATA FOUND IN BLANK BUILD"; exit 1; fi
   if find out/check -name mine.js -o -name gc-mine.js -o -name dw-mine.js | grep -q .; then echo "PERSONAL DATA FOUND IN BLANK BUILD (mine files)"; exit 1; fi
   rm -rf out/check; echo "blank build: no personal data found"
 fi

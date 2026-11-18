@@ -4,7 +4,7 @@
    (a browser can't call Trakt, TMDB or IMDb directly). Loaded before everything else by the server. */
 (function () {
   "use strict";
-  var files = {}, shas = {}, queue = {}, unsent = 0, seq = 0, results = {}, bodies = {}, reloadWanted = false;
+  var files = {}, shas = {}, queue = {}, unsent = 0, seq = 0, results = {}, bodies = {}, reloadWanted = false, pend = {}, stale = {};
   var TAB = Math.random().toString(36).slice(2);
   var api = function (p) { return "api/" + p; };
   // ---- every file, once, before the app starts (one request)
@@ -17,8 +17,25 @@
     else window.__sagaServerError = "The Saga server answered " + x.status;
   } catch (e) { window.__sagaServerError = "Can't reach the Saga server: " + e.message; }
   var stampOf = function (t) { t = t || ""; return t.length + ":" + t.slice(-16); };
+  // 0.6.9.4: a file changed on the server (the phone synced, another page saved, a webhook): its new text is handed to
+  // the open page, which shows it in place. The page used to reload itself each time, which looked like it refreshing on
+  // its own (and two open pages could set each other off).
+  function live(name, text) {
+    files[name] = text;
+    if (window.__sagaLive) { try { if (window.__sagaLive(name, text) !== false) return; } catch (e) { console.error(e); } }
+    reloadWanted = true; if (unsent === 0) setTimeout(function () { if (unsent === 0) location.reload(); }, 600);
+  }
+  function fetchLive(name) {
+    if (pend[name]) { stale[name] = true; return; } // ours first: the server merges and sends back the result
+    fetch(api("file/" + encodeURIComponent(name)), { headers: { "X-Tab": TAB } }).then(function (r) {
+      if (r.status === 401) { location.href = "login"; return null; }
+      if (!r.ok) return null;
+      var h = r.headers.get("X-Sha");
+      return r.text().then(function (t) { if (pend[name]) { stale[name] = true; return; } if (h) shas[name] = h; if (t !== files[name]) live(name, t); });
+    }).catch(function () { /* next change */ });
+  }
   function send(name, method, text) {
-    unsent++;
+    unsent++; pend[name] = (pend[name] || 0) + 1;
     var prev = queue[name] || Promise.resolve();
     var p = prev.then(function () {
       var h = { "Content-Type": "text/plain; charset=utf-8", "X-Tab": TAB };
@@ -31,11 +48,11 @@
           return r.json().then(function (j) {
             if (j && j.sha256) shas[name] = j.sha256;
             // changes from the phone were folded in on the server: show them
-            if (j && j.merged) { files[name] = j.text; reloadWanted = true; }
+            if (j && j.merged) live(name, j.text);
           }, function () {});
         })
         .catch(function (e) { console.error("Saga: couldn't save " + name, e); window.__sagaSaveError = name + ": " + e.message; });
-    }).then(function () { unsent--; if (unsent === 0 && reloadWanted) location.reload(); });
+    }).then(function () { unsent--; pend[name]--; if (!pend[name] && stale[name]) { stale[name] = false; fetchLive(name); } if (unsent === 0 && reloadWanted) location.reload(); });
     queue[name] = p;
     return p;
   }
@@ -44,7 +61,7 @@
   // the phone (or another page) changed a file on the server: reload to show it, once nothing of ours is unsaved
   try {
     var es = new EventSource(api("events"));
-    es.onmessage = function (ev) { try { var m = JSON.parse(ev.data); if (m.from === TAB) return; reloadWanted = true; if (unsent === 0) setTimeout(function () { if (unsent === 0) location.reload(); }, 600); } catch (e) { /* ignore */ } };
+    es.onmessage = function (ev) { try { var m = JSON.parse(ev.data); if (m.from === TAB) return; (m.files || []).forEach(fetchLive); } catch (e) { /* ignore */ } };
   } catch (e) { /* no live updates */ }
   window.addEventListener("beforeunload", function (e) { if (unsent > 0) { e.preventDefault(); e.returnValue = "Still saving"; } });
   var later = function (fn) { setTimeout(fn, 0); };

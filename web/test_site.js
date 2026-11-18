@@ -58,6 +58,18 @@ const ok = (c, m) => { if (!c) { console.error("FAIL: " + m); process.exit(1); }
     const pr = await (await api("/api/file/library.json", { method: "PUT", headers: H({ "X-Base-Sha": curSha }), body: JSON.stringify(stale) })).json();
     const after = JSON.parse(fs.readFileSync(path.join(data, "library.json"), "utf8"));
     ok(pr.merged && after.items.p2 && (after.items[fid].tags || []).includes("web tag"), "an older page's save is merged with the phone's newer changes");
+    // ---- 0.6.9.4: the open page shows a phone sync in place, without reloading itself
+    { await pg.reload(); await pg.waitForFunction(() => window.__app, null, { timeout: 15000 });
+      await pg.evaluate(() => { window.__notReloaded = 1; }); let navs = 0; pg.on("framenavigated", () => navs++);
+      await new Promise(r => setTimeout(r, 800));
+      const now = JSON.parse(fs.readFileSync(path.join(data, "library.json"), "utf8")); now.items.live1 = { id: "live1", type: "movie", title: "Live From Phone", year: 2020, watches: [], eps: {}, status: "watchlist", tags: [] };
+      await api("/api/sync/file/library.json", { method: "POST", headers: H(), body: JSON.stringify(now) });
+      const shown = await pg.waitForFunction(() => window.__app && __app.lib.all().some(x => x.title === "Live From Phone"), null, { timeout: 8000 }).then(() => true, () => false);
+      await new Promise(r => setTimeout(r, 1500));
+      ok(shown && navs === 0 && await pg.evaluate(() => window.__notReloaded === 1), `a phone sync shows on the open page without reloading it (reloads: ${navs})`);
+      // the same file saved again unchanged: nobody is told
+      const before = navs; await api("/api/file/library.json", { method: "PUT", headers: H(), body: fs.readFileSync(path.join(data, "library.json")) });
+      await new Promise(r => setTimeout(r, 1200)); ok(navs === before, "an unchanged save doesn't disturb open pages"); }
     // ---- signing in: the public entrance is shut without a password, then needs it
     const pub = port + 2;
     const g = await fetch(`http://127.0.0.1:${pub}/`, { redirect: "manual" });

@@ -42,6 +42,9 @@ def clean_text(rel, s):
         s = s[:a] + json.dumps(d, ensure_ascii=False, separators=(',', ':')) + s[z + 1:]
     for k in sorted(RED, key=len, reverse=True):
         s = s.replace(k, RED[k])
+    # names in any letter case (a username written in lower case is still the username)
+    for k in RED:
+        if re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{5,}', k): s = re.sub(re.escape(k), RED[k], s, flags=re.I)
     return s
 
 n = 0
@@ -67,13 +70,15 @@ for root, dirs, files in os.walk(EX):
 # nothing personal may be left
 bad = []
 needles = list(RED.keys())
-rx = re.compile(pats) if pats else None
+rx = re.compile(pats, re.I) if pats else None
+lower = [k.lower() for k in needles if re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{5,}', k)]
 for root, dirs, files in os.walk(out):
     dirs[:] = [d for d in dirs if d != '.git']
     for f in files:
         p = os.path.join(root, f)
         try: t = open(p, encoding='utf-8').read()
         except Exception: continue
-        if any(k in t for k in needles) or (rx and rx.search(t)): bad.append(os.path.relpath(p, out))
+        tl = t.lower()
+        if any(k in t for k in needles) or any(k in tl for k in lower) or (rx and rx.search(t)): bad.append(os.path.relpath(p, out))
 if bad: sys.exit('PERSONAL DATA LEFT IN THE PUBLIC COPY: ' + ', '.join(bad))
 print(f'exported {n} files to {out}: no personal data found')

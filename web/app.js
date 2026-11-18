@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.6.9.3";
+  const VERSION = "0.6.9.4";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -300,6 +300,7 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.6.9.4", ["Your Saga website no longer reloads itself: when the phone syncs or another page saves, the changes appear in place (two open pages used to keep setting each other off). A save that changes nothing no longer disturbs open pages.", "Import: an IMDb list file you pick goes into the library as To watch (it used to stay out unless the list's name looked like a watchlist), and the games in an IMDb file go to Games straight away.", "Every import format is now checked together in one test: IMDb ratings, watchlist and lists, Trakt, Letterboxd, MyAnimeList, Simkl, Netflix, TV Time, your own CSV, Goodreads, Steam, HowLongToBeat, Grouvee, Backloggd.", "The website reads friends' libraries once until they change, instead of on every visit."]],
     ["0.6.9.3", ["Doctor Who › Import my list from a note: your list as you keep it in Samsung Notes (Share › Text file, or copy and paste). Check first shows what changes; a rating in the note wins, an empty () leaves Saga's mark alone; a copy is kept first.", "Doctor Who › Put back the built-in marks: the marks your copy of Saga came with, only where a story has none now."]],
     ["0.6.9.2", ["Your Saga website: the address works typed without https://, and a failed sync says why (an address ending in :8443 works only with Tailscale on; a name the phone can't find means Funnel is off; a refused sync key).", "Your own AI server: an address typed without http:// (like 100.116.92.58:3000) works.", "The error log no longer fills up with tiny screen hitches: only real pauses are written."]],
     ["0.6.9.1", ["Only a rating means watched or finished. An IMDb list or watchlist file brought in through Import used to mark every title on it as watched (and its games as finished): now an unrated title goes to To watch (a game to the Wishlist), and titles and games marked only because of an earlier import are put back once, with a copy kept first. Anything you rated, ticked, dated or wrote a note on stays as it is.", "Any other CSV: a title counts as watched only with a rating, a watched status or a watched date.", "A film rated on IMDb is dated the day you rated it, not the day it came out."]],
@@ -1811,17 +1812,34 @@
         let n = 0;
         if (kind === "trakt") n = C.importTraktZip(db, f.zip);
         else if (kind === "refract") n = C.importRefract(db, f.zip, f.zipOther || []).total;
-        else if (kind === "imdb") n = C.importImdbCsv(db, f.name, f.text, "auto");
+        else if (kind === "imdb") {
+          n = C.importImdbCsv(db, f.name, f.text, "auto");
+          listPicked(f.name);
+        }
         else n = C.importFranchiseFile(db, f.name, f.text);
         lines.push(`${f.name}: ${fmt(n)} records (${kind === "file" ? "franchise mapping" : kind})`);
       } catch (e) { lines.push(`${f.name}: ${e.message}`); }
     }
-    if (canonFiles.length) { libAdopt(); invalidate(); }
+    if (canonFiles.length) {
+      libAdopt(); invalidate();
+      // 0.6.9.4: games in an IMDb file go to Games here too (rated: finished; listed: wishlist), as after a sync
+      if (feat("games")) { const im = gamesFromImdb(); if (im.added || im.rated) { games.save(); changed("games"); lines.push(`Games from IMDb: ${fmt(im.added)} new, ${fmt(im.rated)} rated`); } }
+    }
     db.set("hub_last", `Last import ${new Date().toLocaleDateString()}: ${lines.join(" · ")}`);
     db.flush();
     return lines;
   }
   // Before anything is written: what each file is, how many entries, and how many are already in Saga
+  // 0.6.9.4: a list file you picked yourself goes into the library (you can switch it off in Settings like a synced list)
+  // games in your IMDb rows (ratings: finished; lists: wishlist) into Games
+  const gamesFromImdb = () => GC.fromImdb(games, db.items(null, ["rated", "watched", "watchlist", "list"]).filter(r => r.medium === "Video Game" && r.source === "imdb"));
+  function listPicked(fileName) {
+    const stem = String(fileName || "").split("/").pop().replace(/\.[^.]+$/, "");
+    if (!stem || /watch\s*list/i.test(stem)) return;
+    let st = {}; try { st = JSON.parse(db.get("lib_lists", "{}")) || {}; } catch (e) { st = {}; }
+    const k = `imdb|${stem}`; if (k in st) return;
+    st[k] = true; db.set("lib_lists", JSON.stringify(st)); listMemo = null;
+  }
   function previewImport(files) {
     const rows = [];
     let total = 0;
@@ -3328,7 +3346,7 @@
       return out.concat(fails).join("; ");
     });
     if (secOn("games")) await step("games", "Games", async () => {
-      const im = GC.fromImdb(games, db.items(null, ["rated", "watched", "watchlist", "list"]).filter(r => r.medium === "Video Game" && r.source === "imdb"));
+      const im = gamesFromImdb();
       let steamTxt = "";
       if (db.get("steam_profile")) {
         try { const rows = await Imports.steamLibrary(http, db.get("steam_profile"), db.get("steam_key")); const sr = GC.importRows(games, rows, "Steam library"); db.set("steam_sync_at", String(Date.now()));
@@ -3521,6 +3539,27 @@
     } finally { webSyncing = false; }
   }
   // a merged file from the website replaces the one in memory and on the phone
+  // 0.6.9.4 (website): a file changed elsewhere, shown in place. Nothing is written back; if this page has unsaved
+  // changes to the same file, they're saved first and the server sends the merged result here again.
+  let liveT = null;
+  window.__sagaLive = (n, text) => {
+    if (!window.__sagaWeb || !text) return true;
+    if (n === "library.json" && libPending()) { libWrite(true); return true; }
+    if (n === "canonsync.json" && (db._timer || db._dirty)) { db.flush(); return true; }
+    const d = JSON.parse(text);
+    if (n === "canonsync.json") db.loadData(d);
+    else if (n === "library.json") { const fresh = new L.Library({ load: () => text }); lib.items = fresh.items; lib.adopted = fresh.adopted; lib.outbox = fresh.outbox; mirrorDirty = true; }
+    else if (n === "games.json") games.fromJSON(d);
+    else if (n === "books.json") books.fromJSON(d);
+    else if (n === "dw.json") { try { Kit.mods.timeline.reset(); } catch (e) { /* not loaded */ } }
+    else return true;
+    invalidate();
+    // shown when you're not typing and nothing is running
+    clearTimeout(liveT);
+    const show = () => { const a = document.activeElement; if (ui.job || (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) { liveT = setTimeout(show, 1500); return; } render(); };
+    liveT = setTimeout(show, 300);
+    return true;
+  };
   function applyWebFile(n, text) {
     if (!text) return;
     const d = JSON.parse(text);
@@ -4286,6 +4325,7 @@
             if (f.text === undefined) throw new Error("expected a text file, got a ZIP");
             if (kind === "imdb") total += C.importImdbCsv(db, f.name, f.text, "auto");
             else if (kind === "imdblist") total += C.importImdbCsv(db, f.name, f.text, "list");
+            if (kind === "imdb" || kind === "imdblist") listPicked(f.name);
             else total += C.importFranchiseFile(db, f.name, f.text);
           }
         } catch (e) { errs.push(`${f.name}: ${e.message}`); }
@@ -4294,7 +4334,7 @@
       let what = "";
       try {
         const b = libTotals(); libAdopt();
-        if (secOn("games")) { const im = GC.fromImdb(games, db.items(null, ["rated", "watched", "watchlist", "list"]).filter(r => r.medium === "Video Game" && r.source === "imdb")); if (im.added || im.rated) { games.save(); changed("games"); } b.gr = im.rated; b.ga = im.added; }
+        if (secOn("games")) { const im = gamesFromImdb(); if (im.added || im.rated) { games.save(); changed("games"); } b.gr = im.rated; b.ga = im.added; }
         const a = libTotals();
         what = `. Library: ${fmt(a.titles - b.titles)} new titles, ${fmt(a.rated - b.rated)} ratings, ${fmt(a.er - b.er)} episode ratings, ${fmt(a.eps - b.eps)} episodes ticked${b.ga || b.gr ? `; games: ${fmt(b.ga)} new, ${fmt(b.gr)} ratings` : ""}`;
       } catch (e) { logError("import", "library update after import failed: " + (e.stack || e.message)); what = ". The library couldn't be updated (see the error log in Settings)"; }
