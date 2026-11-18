@@ -1100,7 +1100,14 @@ window.BANTA_IT = {
 "off": "spenti",
 "Less than 1 GB free on the Pi: when the card is full, saving stops working. Delete old files or move to a bigger card.": "Meno di 1 GB libero sul Pi: quando la scheda è piena, il salvataggio smette di funzionare. Cancella file vecchi o passa a una scheda più grande.",
 "taste match": "affinità di gusti",
-"You both want to watch": "Volete vederlo entrambi"
+"You both want to watch": "Volete vederlo entrambi",
+"Import my list from a note": "Importa la mia lista da una nota",
+"Pick the .txt": "Scegli il .txt",
+"Check first": "Controlla prima",
+"Put back the built-in marks": "Rimetti i segni incorporati",
+"Lines like “12. The Aztecs (8)” under headings like “------S1------”, as you keep them in Samsung Notes. A rating marks the story done with that rating (the note's rating wins over Saga's); an empty () leaves Saga's mark alone; “-[Polly]”, ⤵️ and Avg. lines are ignored. A copy of everything is kept first.": "Righe come “12. The Aztecs (8)” sotto intestazioni come “------S1------”, come le tieni in Samsung Notes. Un voto segna la storia come fatta con quel voto (il voto della nota vince su quello di Saga); un () vuoto lascia com'è il segno in Saga; “-[Polly]”, ⤵️ e le righe Avg. vengono ignorati. Prima si tiene una copia di tutto.",
+"In Samsung Notes: open the note › ⋮ › Share › Text file, then pick it here. Or select all the text in the note, copy, and paste it below.": "In Samsung Notes: apri la nota › ⋮ › Condividi › File di testo, poi sceglilo qui. Oppure seleziona tutto il testo della nota, copialo e incollalo qui sotto.",
+"Or, if your copy of Saga came with your list built in: put back those marks, only where a story has no mark now.": "Oppure, se la tua copia di Saga ha la tua lista incorporata: rimetti quei segni, solo dove una storia ora non ne ha."
 };
 window.BANTA_IT_PAT = [
 [
@@ -2018,5 +2025,13 @@ window.BANTA_IT_PAT = [
 [
 "(.+)\\. Is the address the one from tailscale funnel status, starting with https://\\?",
 "$1. L'indirizzo è quello di tailscale funnel status, che inizia con https://?"
+],
+[
+"(\\d[\\d,.]*) stories in the note, (\\d[\\d,.]*) rated: (\\d[\\d,.]*) new, (\\d[\\d,.]*) with a different rating \\(the note's wins\\), (\\d[\\d,.]*) already the same\\. (\\d[\\d,.]*) without a rating are left as they are(.*)",
+"$1 storie nella nota, $2 con voto: $3 nuove, $4 con un voto diverso (vince quello della nota), $5 già uguali. $6 senza voto restano come sono$7"
+],
+[
+"(\\d[\\d,.]*) not found in the timeline",
+"$1 non trovate nella cronologia"
 ]
 ];

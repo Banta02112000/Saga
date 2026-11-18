@@ -248,6 +248,7 @@
         ${x.rated >= 3 ? histHtml(x) : ""}
       </div>
       ${going.length ? `<h3>In progress</h3><div class="listcard">${going.slice(0, 12).map(o => `<div class="item" data-action="tlgo" data-g="${o.gi}" data-t="${o.ti}"><div class="grow" style="min-width:0"><b>${esc(o.g.name)} › ${esc(o.t.name)}</b><div class="small muted ell">${o.y.d}/${o.y.n} · ★ ${avg(o.y)}${o.nx ? ` · next: ${esc(o.nx.w.title)}` : ""}</div><div class="minibar" style="margin-top:6px"><i style="width:${pct(o.y)}%"></i></div></div></div>`).join("")}</div>` : ""}
+      <div class="row" style="gap:8px;margin:4px 0 12px"><button class="btn small" data-action="dwimport">${K.icon("box")}Import my list from a note</button></div>
       <h3>Groups</h3><div class="ustats">${d.groups.map((g, gi) => { const y = statsOf(canonEntries(g));
         return `<div class="card" style="padding:14px;margin-bottom:10px"><div class="row"><b class="grow">${esc(g.name)}</b><span class="muted">${y.d}/${y.n} · ${pct(y)}% · ★ ${avg(y)}</span></div>
           <div class="minibar" style="margin:8px 0"><i style="width:${pct(y)}%"></i></div>${avgChips(y, false)}
@@ -362,6 +363,84 @@
     return null;
   }
   function recent(limit = 10) { return Object.entries(load().works).filter(([, v]) => v.done && v.at).map(([k, v]) => ({ k, t: workOf({ k }).title, date: v.at })).sort((a, b) => b.date.localeCompare(a.date)).slice(0, limit); }
+  // ---- 0.6.9.3: your list as you keep it in a note (Samsung Notes and the like), pasted or as a .txt:
+  //   -------S1-------            a section (the era tab of the same name in Doctor Who)
+  //   12. The Aztecs (8)          a story with your rating: done, rated 8
+  //   13. Tlotoxl ()              not rated yet: left as it is in Saga
+  //   14. Men of War (4) -[Mark Steadman]   who's in it, ignored; ⤵️ and "Avg." lines ignored; a title can wrap onto the next line
+  const nkey = t => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/&/g, "and").replace(/[^a-z0-9]/g, "");
+  function parseNote(text) {
+    const out = [], lines = String(text || "").replace(/\r/g, "").split("\n");
+    let tab = null, cur = null;
+    const flush = () => { if (cur) { out.push(cur); cur = null; } };
+    for (let raw of lines) {
+      const line = raw.replace(/[\u2934\u2935\u2B07\uFE0F\u21B5\u21A9\u2193]/g, "").replace(/\s+$/, "");
+      const h = /^\s*-{3,}\s*(.+?)\s*-{3,}\s*$/.exec(line);
+      if (h) { flush(); tab = h[1].trim(); continue; }
+      if (!line.trim() || /^\s*avg\b/i.test(line)) { flush(); continue; }
+      const m = /^\s*(\d+)[.)]\s*(.*)$/.exec(line);
+      if (m) { flush(); cur = { tab, n: +m[1], text: m[2].trim() }; continue; }
+      if (cur) cur.text += " " + line.trim(); // a wrapped title
+    }
+    flush();
+    for (const e of out) {
+      let t = e.text.replace(/\s*-\s*\[[^\]]*\]\s*$/, ""); // -[Polly]
+      const pAfter = /\s*\[(\d+(?:\s*-\s*\d+)?)\]\s*$/.exec(t); // The War Games (8) [10]
+      if (pAfter) t = t.slice(0, pAfter.index);
+      const r = /\(\s*(\d+(?:[.,]\d+)?)?\s*\)\s*$/.exec(t);
+      e.rating = r && r[1] ? Math.max(1, Math.min(10, parseFloat(r[1].replace(",", ".")))) : null;
+      if (r) t = t.slice(0, r.index);
+      const pm = /\s*\[(\d+(?:\s*-\s*\d+)?)\]\s*$/.exec(t); // The Chase [1-4]
+      e.part = (pm ? pm[1] : pAfter ? pAfter[1] : "").replace(/\s+/g, "");
+      if (pm) t = t.slice(0, pm.index);
+      e.title = t.replace(/\.{3}$/, "").trim();
+      delete e.text;
+    }
+    return out.filter(e => e.title);
+  }
+  // which timeline entry a note line is: same section and position, else the same title in that section, else the
+  // only entry anywhere with that title
+  function matchNote(entries) {
+    const d = D(), main = d.groups.find(g => /^doctor who$/i.test(g.name)) || d.groups[0];
+    const byTitle = new Map();
+    for (const g of d.groups) for (const t of g.tabs) for (const it of itemsOf(g, t, true)) { const n = nkey(workOf(it).title); if (!byTitle.has(n)) byTitle.set(n, new Set()); byTitle.get(n).add(it.k); }
+    return entries.map(e => {
+      const tab = main && main.tabs.find(t => t.name.toLowerCase() === String(e.tab || "").toLowerCase());
+      const want = nkey(e.title), same = it => { const w = nkey(workOf(it).title); return (w === want || w.startsWith(want) && want.length >= 12) && (!e.part || it.part === e.part || it.k.endsWith("|" + e.part)); };
+      let k = null;
+      if (tab) {
+        const raw = tab.items[e.n - 1];
+        if (raw && same(raw)) k = raw.k;
+        if (!k) { const all = itemsOf(main, tab, true).concat(tab.items.filter(x => x.ref)); const hit = all.find(same); if (hit) k = hit.k; }
+      }
+      if (!k) { const ks = byTitle.get(want); if (ks && ks.size === 1) k = [...ks][0]; }
+      return Object.assign({}, e, { k });
+    });
+  }
+  // what importing would do (dry) or does: a rating in the note wins; an empty () leaves Saga's mark alone
+  function importNote(text, dry) {
+    const rows = matchNote(parseNote(text));
+    if (!rows.length) throw new Error("no numbered stories found (lines like “12. The Aztecs (8)” under a “----S1----” heading)");
+    const s = dry ? JSON.parse(JSON.stringify(load())) : load();
+    const out = { lines: rows.length, rated: 0, added: 0, changed: 0, same: 0, empty: 0, keptHere: 0, unmatched: [] };
+    for (const r of rows) {
+      if (!r.k) { out.unmatched.push(`${r.tab ? r.tab + " " : ""}${r.n}. ${r.title}${r.part ? ` [${r.part}]` : ""}`); continue; }
+      const me = s.works[r.k] || {};
+      if (r.rating == null) { out.empty++; if (me.done || me.rating) out.keptHere++; continue; }
+      out.rated++;
+      if (me.done && +me.rating === r.rating) { out.same++; continue; }
+      if (me.done || me.rating) out.changed++; else out.added++;
+      s.works[r.k] = Object.assign({}, me, { done: true, rating: r.rating });
+    }
+    if (!dry && (out.added || out.changed)) save();
+    return out;
+  }
+  function restoreMine(mine, dry) {
+    const s = dry ? JSON.parse(JSON.stringify(load())) : load(); let n = 0;
+    for (const [k, v] of Object.entries((mine && mine.works) || {})) { const me = s.works[k] || {}; if (!v || !(v.done || v.rating) || me.done || me.rating) continue; s.works[k] = Object.assign({}, me, { done: !!v.done, rating: v.rating || null }, me.notes || !v.notes ? {} : { notes: v.notes }); n++; }
+    if (!dry && n) save();
+    return n;
+  }
   const statesFor = () => load();
-  K.mods.timeline = { title: "Doctor Who", statsOf, canonEntries, render, act, change, input, migrate, next, recent, openStory, state: statesFor, reset: () => { st = null; ver++; }, waitsFor, deleteEntry, moveEntry, itemsOf, data: () => D(), mine: () => load(), saveMine: () => save() };
+  K.mods.timeline = { title: "Doctor Who", restoreMine, parseNote, matchNote, importNote, statsOf, canonEntries, render, act, change, input, migrate, next, recent, openStory, state: statesFor, reset: () => { st = null; ver++; }, waitsFor, deleteEntry, moveEntry, itemsOf, data: () => D(), mine: () => load(), saveMine: () => save() };
 })();

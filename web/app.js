@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.6.9.2";
+  const VERSION = "0.6.9.3";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -300,6 +300,7 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.6.9.3", ["Doctor Who › Import my list from a note: your list as you keep it in Samsung Notes (Share › Text file, or copy and paste). Check first shows what changes; a rating in the note wins, an empty () leaves Saga's mark alone; a copy is kept first.", "Doctor Who › Put back the built-in marks: the marks your copy of Saga came with, only where a story has none now."]],
     ["0.6.9.2", ["Your Saga website: the address works typed without https://, and a failed sync says why (an address ending in :8443 works only with Tailscale on; a name the phone can't find means Funnel is off; a refused sync key).", "Your own AI server: an address typed without http:// (like 100.116.92.58:3000) works.", "The error log no longer fills up with tiny screen hitches: only real pauses are written."]],
     ["0.6.9.1", ["Only a rating means watched or finished. An IMDb list or watchlist file brought in through Import used to mark every title on it as watched (and its games as finished): now an unrated title goes to To watch (a game to the Wishlist), and titles and games marked only because of an earlier import are put back once, with a copy kept first. Anything you rated, ticked, dated or wrote a note on stays as it is.", "Any other CSV: a title counts as watched only with a rating, a watched status or a watched date.", "A film rated on IMDb is dated the day you rated it, not the day it came out."]],
     ["0.6.9", ["History (Settings › Backup): before every import, Start over, list removal, merge, going back and the first sync of the day, a copy of what you made yourself is kept (the last 12); go back to any of them.",
@@ -4130,6 +4131,27 @@
   // watched (and a game as finished). Once: those rows become watchlist entries, and titles and games that were marked
   // watched/finished only because of them go back to To watch / Wishlist. Anything you rated, ticked, dated or wrote a
   // note on stays as it is. A copy is kept first (Settings › Backup › Earlier copies).
+  // 0.6.9.3: your Doctor Who list from a note (Samsung Notes: Share › Text file, or copy all and paste)
+  function openDwImport() {
+    sheet(`<div class="kicker">Doctor Who</div><h2 style="margin:4px 0 8px">Import my list from a note</h2>
+      <p class="small muted">Lines like “12. The Aztecs (8)” under headings like “------S1------”, as you keep them in Samsung Notes. A rating marks the story done with that rating (the note's rating wins over Saga's); an empty () leaves Saga's mark alone; “-[Polly]”, ⤵️ and Avg. lines are ignored. A copy of everything is kept first.</p>
+      <p class="small muted">In Samsung Notes: open the note › ⋮ › Share › Text file, then pick it here. Or select all the text in the note, copy, and paste it below.</p>
+      <div class="row" style="gap:8px;margin:8px 0"><button class="btn small" data-action="dwnotefile">${icon("box")}Pick the .txt</button></div>
+      <textarea id="dwnote" rows="8" style="width:100%" placeholder="------S0------&#10;1. The Three Paths (4)&#10;2. Report on Term's Work (7)"></textarea>
+      <div id="dwnoteout" class="small" style="margin:8px 0"></div>
+      <div class="row" style="gap:8px"><button class="btn small" data-action="dwnoteprev">Check first</button><button class="btn" data-action="dwnotego" id="dwnotego" disabled>Import</button></div>
+      <hr style="margin:16px 0"><p class="small muted">Or, if your copy of Saga came with your list built in: put back those marks, only where a story has no mark now.</p><button class="btn small" data-action="dwmine">Put back the built-in marks</button>`, "dwimport");
+  }
+  function dwPreview() {
+    const out = $("#dwnoteout"), go = $("#dwnotego"), text = ($("#dwnote") || {}).value || "";
+    if (!out) return;
+    try {
+      const r = Kit.mods.timeline.importNote(text, true);
+      out.innerHTML = `${fmt(r.lines)} stories in the note, ${fmt(r.rated)} rated: <b>${fmt(r.added)} new</b>, <b>${fmt(r.changed)} with a different rating</b> (the note's wins), ${fmt(r.same)} already the same. ${fmt(r.empty)} without a rating are left as they are${r.keptHere ? ` (${fmt(r.keptHere)} of them have a mark in Saga, kept)` : ""}.`
+        + (r.unmatched.length ? `<details style="margin-top:6px"><summary>${fmt(r.unmatched.length)} not found in the timeline</summary>${r.unmatched.slice(0, 60).map(x => `<div>${esc(x)}</div>`).join("")}</details>` : "");
+      if (go) go.disabled = !(r.added || r.changed);
+    } catch (e) { out.textContent = e.message; if (go) go.disabled = true; }
+  }
   function fixListedWatched() {
     if (db.get("fix_listed_v1")) return null;
     const bad = db.items("imdb", ["watched"]).filter(r => !(+r.rating > 0));
@@ -4387,6 +4409,20 @@
       case "inboxdone": { const id = el.dataset.id; db.cacheSet("inbox:now", { at: Date.now(), items: inbox().filter(y => y.id !== id) }); render(); webApi("POST", "api/inbox", { done: id }).catch(() => {}); break; }
       case "actopen": { const P = people().find(p => p.name === el.dataset.p), x = P && (P.recent || [])[+el.dataset.i]; if (x) openTitle(Object.assign({ why: `${P.name} ${ACT[x.kind] || x.kind} it ${WHEN(x.date)}` }, x)); break; }
       case "webadmin": openAdmin(); break;
+      case "dwimport": openDwImport(); break;
+      case "dwnotefile": Native.pick(true).then(files => { const f = (files || []).find(x => typeof x.text === "string"); if (!f) { if (files && files.length) toast("Pick the note as a text file (.txt): Samsung Notes › Share › Text file"); return; } const ta = $("#dwnote"); if (ta) { ta.value = f.text; dwPreview(); } }); break;
+      case "dwnoteprev": dwPreview(); break;
+      case "dwnotego": {
+        const T = Kit.mods.timeline, text = ($("#dwnote") || {}).value || "";
+        try { snapshot("before importing the Doctor Who list from a note"); const r = T.importNote(text, false); T.reset(); changed("timeline"); closeOverlay(); render();
+          toast(`Doctor Who: ${fmt(r.added)} new ratings, ${fmt(r.changed)} changed, ${fmt(r.same)} already the same${r.unmatched.length ? `, ${fmt(r.unmatched.length)} not found` : ""}`);
+        } catch (err) { toast(err.message); }
+        break; }
+      case "dwmine": {
+        loadScript("dw-mine.js").then(() => { const T = Kit.mods.timeline; if (!window.DW_MINE) { toast("This build has no built-in copy"); return; }
+          snapshot("before putting back the built-in Doctor Who marks"); const n = T.restoreMine(window.DW_MINE, false); T.reset(); changed("timeline"); closeOverlay(); render();
+          toast(n ? `${fmt(n)} Doctor Who marks put back` : "Nothing to put back: every built-in mark is already there"); });
+        break; }
       case "snapnow": toast(snapshot("kept by hand") ? "Copy kept" : "Couldn't keep a copy"); render(); break;
       case "dupopen": openDuplicates(); break;
       case "dupmerge": { const P = ui.dups && ui.dups[el.dataset.kind][+el.dataset.i]; if (!P) break; snapshot("before merging duplicates");
