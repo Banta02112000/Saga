@@ -30,7 +30,8 @@
 
   // 0.6.9: your Saga website. If it hasn't answered for 3 hours, a notification (once), and another when it's back.
   async function website(db, now = Date.now()) {
-    const base = String(db.get("web_sync_url", "")).trim().replace(/\/+$/, "");
+    let base = String(db.get("web_sync_url", "")).trim().replace(/\/+$/, "");
+    if (base && !/^https?:\/\//i.test(base)) base = (/^(\d+\.){3}\d+(:\d+)?$|^localhost\b/i.test(base) ? "http://" : "https://") + base;
     if (!base || db.get("web_watch", "1") !== "1") return "";
     let ok = false;
     try { const r = await Promise.race([http("GET", base + "/api/health", { headers: { Accept: "application/json" } }), new Promise(res => setTimeout(() => res({ status: 0 }), 20000))]); ok = r.status === 200 && /"ok":true/.test(r.body || ""); } catch (e) { ok = false; }

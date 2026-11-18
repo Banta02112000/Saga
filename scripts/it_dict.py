@@ -522,3 +522,7 @@ P += [(r"You and (.+)", "Tu e $1"), (r"games (.+) finished", "giochi finiti da $
   (rf"Saga (\S+) · Node (\S+) · running for {N} (days|h)", "Saga $1 · Node $2 · attivo da $3 $4"),
   (r"App updates on the download page: (.+)", "Aggiornamenti dell'app nella pagina di download: $1")]
 P += [(rf"{N} titles and {N} games were only on a list, not rated: back to To watch / Wishlist", "$1 titoli e $2 giochi erano solo in una lista, senza voto: tornati in Da vedere / Lista desideri")]
+P += [(r"the phone can't find (\S+)\. With Tailscale off, the address works only while Funnel is on \(on the Pi: tailscale funnel status\)", "il telefono non trova $1. Con Tailscale spento, l'indirizzo funziona solo se Funnel è attivo (sul Pi: tailscale funnel status)"),
+  (r"(.+)\. An address ending in :8443 works only with Tailscale on: from anywhere, use it without :8443", "$1. Un indirizzo che finisce con :8443 funziona solo con Tailscale acceso: da ovunque, usalo senza :8443"),
+  (r"the website refused the sync key \((\d+)\): copy it again from the server \(node server\.js --set-password\)", "il sito ha rifiutato la chiave di sincronizzazione ($1): copiala di nuovo dal server (node server.js --set-password)"),
+  (r"(.+)\. Is the address the one from tailscale funnel status, starting with https://\?", "$1. L'indirizzo è quello di tailscale funnel status, che inizia con https://?")]

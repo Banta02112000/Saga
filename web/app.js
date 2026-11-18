@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.6.9.1";
+  const VERSION = "0.6.9.2";
   const AUTO_SYNC_HOURS = 12;
   const DEFAULT_PROFILE = "PKCE / Public Client (App 000001)";
 
@@ -300,6 +300,7 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.6.9.2", ["Your Saga website: the address works typed without https://, and a failed sync says why (an address ending in :8443 works only with Tailscale on; a name the phone can't find means Funnel is off; a refused sync key).", "Your own AI server: an address typed without http:// (like 100.116.92.58:3000) works.", "The error log no longer fills up with tiny screen hitches: only real pauses are written."]],
     ["0.6.9.1", ["Only a rating means watched or finished. An IMDb list or watchlist file brought in through Import used to mark every title on it as watched (and its games as finished): now an unrated title goes to To watch (a game to the Wishlist), and titles and games marked only because of an earlier import are put back once, with a copy kept first. Anything you rated, ticked, dated or wrote a note on stays as it is.", "Any other CSV: a title counts as watched only with a rating, a watched status or a watched date.", "A film rated on IMDb is dated the day you rated it, not the day it came out."]],
     ["0.6.9", ["History (Settings › Backup): before every import, Start over, list removal, merge, going back and the first sync of the day, a copy of what you made yourself is kept (the last 12); go back to any of them.",
       "Find duplicates (Settings › Tidy up): the same film, series or game entered twice, side by side; merge keeps the further status, your rating, every date, ticked episodes, notes and ids. The same game on two consoles isn't a duplicate.",
@@ -443,7 +444,7 @@
     if (v) render();
     return v;
   }
-  function updateUrl() { const u = db.get("web_sync_url", "").replace(/\/+$/, ""); return u ? u + "/download" : ""; }
+  function updateUrl() { const u = webBase(); return u ? u + "/download" : ""; }
   function whatsNew(force) {
     const seen = db.get("seen_version", "");
     const fresh = !seen && !lib.all().length && !db.items(null, null).length;
@@ -552,7 +553,8 @@
       let native = { total: 0, list: [] };
       try { const A = window.Android; if (A && A.screenReport) { A.watchScreen(false); const t = String(A.screenReport() || "0").split("\n"); native = { total: +t[0] || 0, list: t.slice(1).map(l => l.split("\t")).map(([ms, w]) => [+ms, w || ""]) }; } } catch (e) { /* older app */ }
       const jankAll = Object.values(jank).reduce((a, b) => a + b, 0);
-      if (stalls.length || jankAll > 600 || native.total > 600) {
+      // 0.6.9.2: a report only when the screen really stuck (one pause, or 3 s of hitches): smaller ones were noise in the log
+      if (stalls.length || jankAll > 3000 || native.total > 3000) {
         const worst = stalls.slice().sort((a, b) => b[0] - a[0]).slice(0, 5);
         const steps = Object.entries(jank).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, ms]) => `${(ms / 1000).toFixed(1)} s in "${k}"`).join("; ");
         const line = `SLOW screen paused ${stalls.length} time${stalls.length === 1 ? "" : "s"} over 0.7 s` + (worst.length ? ` (longest: ${worst.map(([ms, st]) => `${(ms / 1000).toFixed(1)} s during "${String(st).replace(/\s*\(\d+ s\)$/, "").slice(0, 60)}"`).join("; ")})` : "") +
@@ -1368,7 +1370,7 @@
           <div class="row wrap"><code class="small" style="word-break:break-all">${esc(calUrl())}</code></div><div class="row wrap"><button class="btn small" data-action="copyval" data-text="${esc(calUrl())}">Copy</button><button class="btn small quiet" data-action="calnew">New address</button></div></div>`
           : (window.__sagaWeb || db.get("web_sync_url")) ? `<button class="btn small" data-action="calnow">${icon("upcoming")}Make a calendar link for Google Calendar</button>` : ""}
         ${window.__sagaWeb ? `<a class="btn" href="api/backup" download>${icon("box")}Download a backup of your files (.zip)</a>`
-          : db.get("web_sync_url") ? `<button class="btn" data-action="open" data-url="${esc(db.get("web_sync_url").replace(/\/+$/, "") + "/api/backup")}">${icon("box")}Download the website's copy (.zip)</button>` : ""}
+          : db.get("web_sync_url") ? `<button class="btn" data-action="open" data-url="${esc(webBase() + "/api/backup")}">${icon("box")}Download the website's copy (.zip)</button>` : ""}
         <p class="small muted" style="margin:0">Phone and website hold the same files, so either one can rebuild the other. For a copy of every account on the Pi (onto a USB stick, say): <code>node server.js --backup /media/usb/saga.zip</code>.</p>
         ${WS.get().at ? `<p class="small muted" style="margin:0">Last: ${esc(new Date(WS.get().at).toLocaleString(lang() === "it" ? "it-IT" : "en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }))} · ${esc(WS.get().msg || "")}</p>` : ""}
       </section>
@@ -3381,15 +3383,30 @@
   let webSyncing = false, webSyncT = null;
   // its own small file, so keeping track doesn't itself change the synced files
   const WS = { get: () => { try { return JSON.parse(Native.load("web_sync.json") || "{}") || {}; } catch (e) { return {}; } }, set: o => Native.save("web_sync.json", JSON.stringify(Object.assign(WS.get(), o))) };
+  // 0.6.9.2: the website's address as typed, made usable: no "https://" → added; a trailing slash dropped
+  function webBase() {
+    let u = String(db.get("web_sync_url", "")).trim().replace(/\/+$/, "");
+    if (u && !/^https?:\/\//i.test(u)) u = (/^(\d+\.){3}\d+(:\d+)?$|^localhost\b/i.test(u) ? "http://" : "https://") + u;
+    return u;
+  }
+  // what a failed website call means, in words (the phone only gets Java's error text)
+  function webWhy(r) {
+    const e = String((r && (r.status || r.error)) || "nothing"), u = webBase(), port = (/:(\d+)$/.exec(u) || [])[1];
+    if (/UnknownHost|resolve host/i.test(e)) return `the phone can't find ${u.replace(/^https?:\/\//, "")}. With Tailscale off, the address works only while Funnel is on (on the Pi: tailscale funnel status)`;
+    if (port === "8443" && /SSL|closed|reset|ConnectException|timeout/i.test(e)) return `${e}. An address ending in :8443 works only with Tailscale on: from anywhere, use it without :8443`;
+    if (/^401$|^403$/.test(e)) return `the website refused the sync key (${e}): copy it again from the server (node server.js --set-password)`;
+    if (/SSL|closed|reset/i.test(e)) return `${e}. Is the address the one from tailscale funnel status, starting with https://?`;
+    return `the website answered ${e}`;
+  }
   function webSyncSoon(ms = 30000) { if (!db.get("web_sync_url") || db.get("web_sync_auto", "1") !== "1") return; clearTimeout(webSyncT); webSyncT = setTimeout(() => syncWithWebServer(false).catch(() => {}), ms); }
   // ---- 0.6.5: friends on your Saga website (each person decides to share; see /api/people on the server)
   async function webApi(method, pth, body) {
     if (window.__sagaWeb) { const r = await fetch(pth, { method, credentials: "same-origin", headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined }); if (!r.ok) throw new Error(`the website answered ${r.status}`); return r.json(); }
-    const base = String(db.get("web_sync_url", "")).trim().replace(/\/+$/, "");
+    const base = webBase();
     if (!base) throw new Error("set the website address first");
     const H = Object.assign({ Accept: "application/json" }, body ? { "Content-Type": "application/json" } : {}, db.get("web_sync_key") ? { Authorization: "Bearer " + db.get("web_sync_key") } : {});
     const r = await Native.http(method, base + "/" + pth, { headers: H, body: body ? JSON.stringify(body) : undefined });
-    if (r.status !== 200) throw new Error(`the website answered ${r.status || r.error || "nothing"}`);
+    if (r.status !== 200) throw new Error(webWhy(r));
     return JSON.parse(r.body);
   }
   const people = () => { const p = db.cacheGet("people:now"); return (p && p.people) || []; };
@@ -3447,7 +3464,7 @@
     if (!window.__sagaWeb && !db.get("web_sync_url")) return;
     try { const c = icsText(); const r = await webApi("POST", "api/calendar", { text: c.text }); if (r && r.path) { db.set("cal_path", r.path); } } catch (e) { logError("calendar", e.message); }
   }
-  const calUrl = () => { const base = window.__sagaWeb ? location.origin + location.pathname.replace(/[^/]*$/, "") : String(db.get("web_sync_url", "")).replace(/\/+$/, "") + "/"; return db.get("cal_path") ? base + db.get("cal_path") : ""; };
+  const calUrl = () => { const base = window.__sagaWeb ? location.origin + location.pathname.replace(/[^/]*$/, "") : webBase() + "/"; return db.get("cal_path") ? base + db.get("cal_path") : ""; };
   // 0.6.9: the website's owner page: who has an account and when they last came by, space left, backups, updates
   async function openAdmin() {
     $("#overlay").innerHTML = `<div class="scrim bottom" data-action="dismiss"><div class="sheet" role="dialog" aria-modal="true"><h3 style="margin:0">Your Saga website</h3><p class="small muted">Asking the website…</p></div></div>`;
@@ -3463,7 +3480,7 @@
       <p class="small muted">App updates on the download page: ${a.apks.length ? esc(a.apks.join(", ")) : "none (copy APKs into /opt/saga/data/apk/)"}.${a.autoUpdate ? "" : " Nightly updates: <code>bash /opt/saga/app/site/auto-update.sh on</code>."}</p>`;
   }
   async function syncWithWebServer(loud) {
-    const base = String(db.get("web_sync_url", "")).trim().replace(/\/+$/, "");
+    const base = webBase();
     if (!base || webSyncing || ui.job) return "";
     webSyncing = true;
     const H = Object.assign({ Accept: "application/json" }, db.get("web_sync_key") ? { Authorization: "Bearer " + db.get("web_sync_key") } : {});
@@ -3473,7 +3490,7 @@
       saveAllNow(); // everything written first
       const m = await http("GET", base + "/api/sync/manifest", { headers: H });
       if (m.status === 401) throw new Error("the website asked for the sync key (Settings › Accounts and sync › Saga website)");
-      if (m.status !== 200) throw new Error(`the website answered ${m.status || m.error || "nothing"}`);
+      if (m.status !== 200) throw new Error(webWhy(m));
       const man = JSON.parse(m.body).files || {};
       const last = WS.get().state || {};
       const changedHere = [];
@@ -3484,7 +3501,7 @@
         if (!local && !srv) continue;
         await C.breathe(0);
         const r = await http("POST", base + "/api/sync/file/" + n, { headers: Object.assign({ "Content-Type": "application/json" }, H), body: local || "" });
-        if (r.status !== 200) throw new Error(`${n}: the website answered ${r.status || r.error}`);
+        if (r.status !== 200) throw new Error(`${n}: ${webWhy(r)}`);
         const j = JSON.parse(r.body);
         sent++;
         if (j.text !== local) { applyWebFile(n, j.text); got++; changedHere.push(n); }
@@ -4789,5 +4806,5 @@
   const last = parseFloat(db.get("last_sync", "0")) || 0;
   const hasSources = db.get("username") || db.get("imdb_user") || db.get("canon_urls") || db.get("imdb_lists");
   if (db.get("auto_sync") === "1" && hasSources && Date.now() / 1000 - last > AUTO_SYNC_HOURS * 3600) { db.set("sync_open", "0"); doSync(); db.set("sync_open", "1"); }
-  window.__app = { fixListedWatched, openLib, wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
+  window.__app = { fixListedWatched, webApi, webWhy, openLib, wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
 })();

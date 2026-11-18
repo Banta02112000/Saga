@@ -3439,7 +3439,7 @@ ${blocks.join("\n\n")}`;
     custom: { label: "Other (OpenAI-compatible)", base: "", model: "", keys: "the service's own site" },
   };
   // the address as typed (with or without a trailing /v1 or /api), reduced to the server's own address
-  const serverBase = b => String(b || "").trim().replace(/\/+$/, "").replace(/\/(v1|api|ollama)$/i, "");
+  const serverBase = b => { const u = String(b || "").trim().replace(/\/+$/, "").replace(/\/(v1|api|ollama)$/i, ""); return !u || /^https?:\/\//i.test(u) ? u : "http://" + u; };
   // which models the server has; also the connection test in Settings
   async function localModels(http, cfg) {
     const p = AI_PRESETS[cfg.preset] || {}, base = serverBase(cfg.base), key = String(cfg.key || "").trim();
