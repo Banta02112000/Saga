@@ -19,6 +19,18 @@ const ok = (c, m) => { if (!c) { console.error("FAIL: " + m); process.exit(1); }
     ok(fs.existsSync(path.join(data, "canonsync.json")) && JSON.parse(fs.readFileSync(path.join(data, "canonsync.json"), "utf8")).settings.site_test === "yes", "settings saved on the server");
     await pg.reload(); await pg.waitForFunction(() => window.__app, null, { timeout: 15000 });
     ok(await pg.evaluate(() => __app.lib.all().some(x => x.title === "Website Film") && __app.db.get("site_test") === "yes"), "after reloading, everything is still there");
+    // 0.7.0: the history of changes, with an undo; the website pauses saving when the phone runs a newer Saga
+    await pg.evaluate(() => __app.openHistory()); await pg.waitForSelector('.histlist [data-action="webundo"]', { timeout: 10000 });
+    const hl = await pg.textContent(".sheet");
+    ok(/Website Film/.test(hl) && /added/.test(hl) && /on the website/.test(hl), "history lists the film added on the website");
+    await pg.evaluate(() => { document.querySelector("#overlay").innerHTML = ""; });
+    fs.writeFileSync(path.join(data, ".phone.json"), JSON.stringify({ version: "9.9.9", at: Date.now() }));
+    await pg.reload(); await pg.waitForFunction(() => document.getElementById("behindbar") && __sagaWeb.paused(), null, { timeout: 15000 });
+    const bb = await pg.textContent("#behindbar");
+    await pg.evaluate(() => { __app.lib.add({ type: "movie", title: "Not Saved While Behind", year: 2002 }, "watchlist"); __app.lib.save(); });
+    await pg.waitForTimeout(1500);
+    ok(/9\.9\.9/.test(bb) && /aren't saved/.test(bb) && !/Not Saved While Behind/.test(fs.readFileSync(path.join(data, "library.json"), "utf8")) && await pg.evaluate(() => __sagaWeb.held() > 0), "website older than the phone: says so and doesn't save: " + bb.slice(0, 120));
+    fs.rmSync(path.join(data, ".phone.json")); await pg.reload(); await pg.waitForFunction(() => window.__app && !__sagaWeb.paused(), null, { timeout: 15000 });
     // 0.6.2: installable; the app's files are kept for when the server can't be reached, your data never is
     const swOk = await pg.evaluate(() => navigator.serviceWorker.ready.then(r => !!r.active));
     await pg.reload(); await pg.waitForFunction(() => window.__app, null, { timeout: 15000 });

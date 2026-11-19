@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Saga website: update itself from GitHub every night (04:40), or stop doing that.
+# Saga website: update itself from GitHub every 6 hours (on by default since 0.7.0), or stop doing that.
 #   bash auto-update.sh on     · bash auto-update.sh off     · bash auto-update.sh status
 # Your files in /opt/saga/data are never touched by an update. The log: journalctl -u saga-update
 set -euo pipefail
@@ -19,10 +19,10 @@ ExecStart=/bin/sh -c 'cd "$APP" && /usr/bin/sudo -u "$OWNER" git pull --ff-only 
 UNIT
     sudo tee /etc/systemd/system/saga-update.timer > /dev/null <<UNIT
 [Unit]
-Description=Update the Saga website every night
+Description=Update the Saga website every 6 hours
 
 [Timer]
-OnCalendar=*-*-* 04:40
+OnCalendar=*-*-* 00/6:40
 RandomizedDelaySec=15m
 Persistent=true
 
@@ -31,10 +31,12 @@ WantedBy=timers.target
 UNIT
     sudo systemctl daemon-reload
     sudo systemctl enable --now saga-update.timer
-    echo "Saga will update itself every night around 04:40. Next run: $(systemctl list-timers saga-update.timer --no-legend | awk '{print $1, $2, $3}')"
+    rm -f "$APP/.no-auto-update"
+    echo "Saga will update itself every 6 hours. Next run: $(systemctl list-timers saga-update.timer --no-legend | awk '{print $1, $2, $3}')"
     ;;
   off)
     sudo systemctl disable --now saga-update.timer 2>/dev/null || true
+    touch "$APP/.no-auto-update" # remembered: update.sh won't turn it back on
     echo "Automatic updates are off. Update by hand with: bash $APP/site/update.sh"
     ;;
   status)

@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const C = window.Core;
-  const VERSION = "0.6.9.9";
+  const VERSION = "0.7.0";
   const AUTO_SYNC_HOURS = 12;
   Object.assign(C.PROFILES, (window.CANONSYNC_PRESET || {}).traktProfiles || {});
   const DEFAULT_PROFILE = (window.CANONSYNC_PRESET || {}).traktDefault || "PKCE (your own Trakt app)";
@@ -310,6 +310,9 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.7.0", ["Website sync sends only what changed: one rating, one ticked episode, one game, instead of whole files. Faster, and the phone and website no longer trip over each other. The first sync after updating sends everything once, as before; a copy of your data is kept first. If the two ever disagree after a sync, Saga compares the whole file instead and notes it in the error log.",
+      "History of changes (Settings › Accounts and sync): every change your website has seen, from the phone or the website, newest first, with what changed (rating 4 → 5…) and an Undo for each. Kept from this version on.",
+      "The website keeps up with your phone: it updates itself every 6 hours (turned on by update.sh unless you turned it off), and when it runs an older Saga than your phone it says so on every screen, doesn't save changes to your data, and updates itself if it can."]],
     ["0.6.9.9", ["Length and cast on every film and series: how long it runs (\"1 h 57 min\", or per episode), who directed or created it, and the main cast with their roles, right under the title. Each episode shows its own length, and its guest cast once you open its season.",
       "Series show the years they ran: 2010 (began and ended that year), 2010-2020 (ended), 2010- (still running). In your library, the canon and the universe lists.",
       "Music: listening time this week and in 30 days, plays by weekday and over 12 months, your longest streak and busiest day, artists new to you, the song on repeat, how much is after midnight, your genres, and how much of the month your top 10 artists take. Saga now keeps your newest 10,000 scrobbles for these.",
@@ -1477,7 +1480,7 @@
         ${field("web_sync_key", "Sync key", { secret: true, hint: "Printed by  node server.js --set-password  on the server (needed for a public address; through Tailscale it works without one)." })}
         <label class="switch"><input type="checkbox" data-setting="web_sync_auto" ${db.get("web_sync_auto", "1") === "1" ? "checked" : ""}><span>Sync with the website by itself<small class="muted" style="display:block">After each sync, when you open the app, and a little after you change something.</small></span></label>
         <button class="btn" data-action="websync" ${db.get("web_sync_url") ? "" : "disabled"}>${icon("sync")}Sync with the website now</button>
-        ${window.__sagaWeb || db.get("web_sync_url") ? `<button class="btn small" data-action="webadmin">${icon("box")}Website status (owner)</button>` : ""}
+        ${window.__sagaWeb || db.get("web_sync_url") ? `<button class="btn small" data-action="webhist">${icon("undo")}History of changes</button><button class="btn small" data-action="webadmin">${icon("box")}Website status (owner)</button>` : ""}
         ${window.__sagaWeb || db.get("web_sync_url") ? `${window.__sagaWeb ? "" : `<label class="switch"><input type="checkbox" data-action="webkeys" ${KEYS_OUT() ? "checked" : ""}><span>Send my keys and sign-ins to my website<small class="muted" style="display:block">So the website can sync Trakt, Steam, Music and the rest by itself. They're kept in your account's files on the Pi (not encrypted there). Sections, language and look always go with your settings.</small></span></label>`}${shareHtml()}
         <button class="btn small" data-action="peoplenow">Refresh friends</button>` : ""}
         ${calUrl() ? `<div class="card" style="padding:10px"><b>Your calendar</b><p class="small muted" style="margin:4px 0">Episodes, releases, games and books you're waiting for. In Google Calendar: Other calendars › + › From URL, and paste this address (keep it private: anyone with it can read the dates). It updates after each sync.</p>
@@ -3645,6 +3648,20 @@
     if (r.status !== 200) throw new Error(webWhy(r));
     return JSON.parse(r.body);
   }
+  // 0.7.0: the website runs an older Saga than your phone: it doesn't save changes to your data (the older version could
+  // undo what the newer did) and updates itself when it can; it says so on every screen
+  async function behindCheck(m) {
+    const pv = m && m.phone && m.phone.version;
+    if (!pv || verNum(pv) <= verNum(VERSION)) return;
+    window.__sagaWeb.pause(true);
+    const bar = (html) => { let b = document.getElementById("behindbar"); if (!b) { b = document.createElement("div"); b.id = "behindbar"; document.body.prepend(b); } b.innerHTML = html; };
+    bar(`<b>Your phone runs Saga ${esc(pv)}, this website ${VERSION}.</b> Updating the website… Changes made here now aren't saved.`);
+    let r = null;
+    try { r = await webApi("POST", "api/admin/update", {}); } catch (e) { r = { ok: false, error: /403/.test(e.message) ? "only the website's owner can update it" : e.message }; }
+    if (r && r.ok && r.restart) { bar(`<b>Updating the website to Saga ${esc(r.to)}…</b> This page reloads in a few seconds.`); setTimeout(() => location.reload(), 8000); return; }
+    if (r && r.ok && !r.restart) { window.__sagaWeb.pause(false); bar(`Your phone runs Saga ${esc(pv)}; the newest on GitHub is ${esc(r.to || VERSION)}, which this website already has. <button class="btn quiet small" onclick="this.parentNode.remove()">OK</button>`); return; }
+    bar(`<b>Your phone runs Saga ${esc(pv)}, this website ${VERSION}:</b> changes made here aren't saved until it's updated (${esc((r && r.error) || "no answer")}). On the Pi: <code>bash /opt/saga/app/site/update.sh</code>`);
+  }
   // 0.6.9.9: the website's owner updates it from here (it pulls the newest Saga from GitHub and restarts)
   async function webUpdate() {
     toast("Asking the website to update…");
@@ -3744,6 +3761,29 @@
       <p class="small muted">App updates on the download page: ${a.apks.length ? esc(a.apks.join(", ")) : "none (copy APKs into /opt/saga/data/apk/)"}.${a.autoUpdate ? "" : " Nightly updates: <code>bash /opt/saga/app/site/auto-update.sh on</code>."}</p>
       <button class="btn small" data-action="webupdate">${icon("sync")}Update the website from GitHub${verNum(a.version) < verNum(VERSION) ? ` (it has ${esc(a.version)}, this ${window.__sagaWeb ? "page" : "app"} ${VERSION})` : ""}</button>`;
   }
+  // 0.7.0: every change the website has seen, newest first: what, where it came from, and an undo for each
+  const HIST_FILE = { "library.json": "Films & series", "games.json": "Games", "books.json": "Books", "dw.json": "Doctor Who", "canonsync.json": "Canon & settings", "music.json": "Music" };
+  const HIST_DEV = { phone: "on the phone", web: "on the website", undo: "undone" };
+  async function openHistory(before) {
+    if (!before) $("#overlay").innerHTML = `<div class="scrim bottom" data-action="dismiss"><div class="sheet" role="dialog" aria-modal="true"><h3 style="margin:0">History of changes</h3><p class="small muted">Asking the website…</p></div></div>`;
+    let h;
+    try { h = await webApi("GET", "api/history?limit=100" + (before ? "&before=" + before : "")); }
+    catch (e) { const sh = $("#overlay .sheet"); if (sh) sh.innerHTML = `<h3 style="margin:0">History of changes</h3><p class="small muted">${/404/.test(e.message) ? "Your website is older than 0.7.0: update it first (Settings › Website status)." : esc(e.message)}</p>`; return; }
+    const items = h.items || [];
+    const rows = items.map(x => `<div class="item"><div class="grow" style="min-width:0"><b class="ell">${esc(x.title)}</b><div class="small muted">${esc([x.what, HIST_FILE[x.file] || x.file, HIST_DEV[x.dev] || x.dev, WHEN(new Date(x.at).toISOString().slice(0, 10)) + " " + new Date(x.at).toTimeString().slice(0, 5)].join(" · "))}</div>${x.fields.length ? `<div class="small ell">${x.fields.map(f => `${esc(f.f)}: ${esc(f.from)} → ${esc(f.to)}`).join(" · ")}</div>` : ""}</div><button class="btn quiet small" data-action="webundo" data-file="${esc(x.file)}" data-r="${x.r}">Undo</button></div>`).join("");
+    const more = items.length >= 100 ? `<button class="btn small" data-action="webhistmore" data-before="${items[items.length - 1].at}">Older</button>` : "";
+    const sh = $("#overlay .sheet"); if (!sh) return;
+    if (before) { const box = sh.querySelector(".histlist"); if (box) box.insertAdjacentHTML("beforeend", rows); const mb = sh.querySelector('[data-action="webhistmore"]'); if (mb) mb.outerHTML = more; return; }
+    sh.innerHTML = `<h3 style="margin:0">History of changes</h3><p class="small muted" style="margin:2px 0 10px">Every change to your data that your website has seen, from the phone or the website. Undo puts that one title (or setting) back as it was before; the phone gets it at the next sync.</p>
+      ${items.length ? `<div class="listcard histlist">${rows}</div>${more}` : `<p class="small muted">Nothing yet: changes are kept from Saga 0.7.0 on.</p>`}`;
+  }
+  async function undoChange(file, r, btn) {
+    try { await webApi("POST", "api/history/undo", { file, r }); }
+    catch (e) { toast("Couldn't undo: " + e.message); return; }
+    if (btn) { btn.disabled = true; btn.textContent = "Undone"; }
+    if (!window.__sagaWeb) { const msg = await syncWithWebServer(false); toast("Undone" + (/failed/.test(msg) ? ": it reaches the phone at the next sync" : "")); }
+    else toast("Undone");
+  }
   async function syncWithWebServer(loud) {
     const base = webBase();
     if (!base || webSyncing || ui.job) return "";
@@ -3763,21 +3803,49 @@
         if (wv && wv !== WS.get().ver) WS.set({ ver: wv }); }
       const last = WS.get().state || {};
       const changedHere = [];
+      // 0.7.0: websites that keep a history send and take only the entries that changed; the first time (and whenever
+      // the two disagree) the whole file goes, as before. A copy of everything is kept before the first one.
+      const SE = window.SagaEntries, v2 = !!(mj.sync2 && SE), S2 = (WS.get().v2) || {};
+      if (v2 && !WS.get().v2) { try { snapshot("before the website sync that sends only changes"); } catch (e) { /* no copy */ } }
+      const saveV2 = (n, rev) => { try { S2[n] = { rev, h: SE.hashes(n, SE.split(n, JSON.parse(Native.load(n) || "{}"))) }; WS.set({ v2: S2 }); } catch (e) { logError("website sync", n + ": " + e.message); } };
       for (const n of WEB_FILES) {
         // 0.6.9.6: keys.json is made here when you send your keys (from the phone's encrypted store, never a file here)
         if (n === "keys.json" && !KEYS_OUT()) continue;
+        if (v2 && n !== "keys.json" && S2[n] && S2[n].rev != null) {
+          const local = Native.load(n) || "";
+          if (local) {
+            await C.breathe(0);
+            const m = SE.split(n, JSON.parse(local)), patch = SE.diff(n, S2[n].h, m);
+            if (!patch.length && mj.revs && mj.revs[n] === S2[n].rev) continue;
+            const r = await http("POST", base + "/api/sync2/" + n, { headers: Object.assign({ "Content-Type": "application/json" }, H), body: JSON.stringify({ since: S2[n].rev, patch, version: VERSION }) });
+            if (r.status !== 200) throw new Error(`${n}: ${webWhy(r)}`);
+            const j = JSON.parse(r.body);
+            if (!j.full) {
+              SE.apply(m, j.changes || []);
+              if (SE.digest(n, m) === j.digest) {
+                sent++;
+                if ((j.changes || []).length) { applyWebFile(n, JSON.stringify(SE.join(m))); got++; changedHere.push(n); }
+                saveV2(n, j.rev);
+                last[n] = { local: fileStamp(Native.load(n) || ""), server: null }; WS.set({ state: last });
+                continue;
+              }
+              logError("website sync", `${n}: phone and website disagreed after sending changes; the whole file is compared instead`);
+            }
+          }
+        }
         const local = n === "keys.json" ? keysText() : Native.load(n) || "";
         const st = last[n] || {}, srv = man[n] && man[n].sha256;
         if (local && fileStamp(local) === st.local && (!srv || srv === st.server)) continue;
         if (!local && !srv) continue;
         await C.breathe(0);
-        const r = await http("POST", base + "/api/sync/file/" + n, { headers: Object.assign({ "Content-Type": "application/json" }, H), body: local || "" });
+        const r = await http("POST", base + "/api/sync/file/" + n, { headers: Object.assign({ "Content-Type": "application/json", "X-Saga-Version": VERSION }, H), body: local || "" });
         if (r.status !== 200) throw new Error(`${n}: ${webWhy(r)}`);
         const j = JSON.parse(r.body);
         sent++;
         if (j.text !== local) { applyWebFile(n, j.text); got++; changedHere.push(n); }
         last[n] = { local: fileStamp((n === "keys.json" ? keysText() : Native.load(n)) || j.text), server: j.sha256 }; // what's on the phone now, as the phone wrote it
         WS.set({ state: last });
+        if (v2 && j.rev != null && n !== "keys.json") saveV2(n, j.rev);
       }
       const msg = !sent ? "nothing to do" : `${sent} file${sent === 1 ? "" : "s"} compared${got ? `, changes from the website in ${changedHere.map(n => n.replace(".json", "")).join(", ")}` : ""}`;
       WS.set({ at: Date.now(), msg });
@@ -4706,6 +4774,9 @@
       case "inboxdone": { const id = el.dataset.id; db.cacheSet("inbox:now", { at: Date.now(), items: inbox().filter(y => y.id !== id) }); render(); webApi("POST", "api/inbox", { done: id }).catch(() => {}); break; }
       case "actopen": { const P = people().find(p => p.name === el.dataset.p), x = P && (P.recent || [])[+el.dataset.i]; if (x) openTitle(Object.assign({ why: `${P.name} ${ACT[x.kind] || x.kind} it ${WHEN(x.date)}` }, x)); break; }
       case "webadmin": openAdmin(); break;
+      case "webhist": openHistory(); break;
+      case "webhistmore": openHistory(+t.dataset.before); break;
+      case "webundo": undoChange(t.dataset.file, +t.dataset.r, t); break;
       case "dwimport": openDwImport(); break;
       case "dwnotefile": Native.pick(true).then(files => { const f = (files || []).find(x => typeof x.text === "string"); if (!f) { if (files && files.length) toast("Pick the note as a text file (.txt): Samsung Notes › Share › Text file"); return; } const ta = $("#dwnote"); if (ta) { ta.value = f.text; dwPreview(); } }); break;
       case "dwnoteprev": dwPreview(); break;
@@ -5153,10 +5224,11 @@
   setTimeout(() => { try { if (window.Android && Android.otaOk) Android.otaOk(); } catch (e) { /* older app */ } }, 4000);
   if (!navigator.webdriver) setTimeout(() => { peopleRefresh(false).catch(() => {}); recsRefresh(false).catch(() => {}); otaCheck(false).catch(() => {}); }, 15000);
   setInterval(() => { if (!document.hidden) livePull(); }, 5 * 60000);
+  if (window.__sagaWeb && window.__sagaWeb.ready) window.__sagaWeb.ready.then(m => behindCheck(m)).catch(() => {});
   setTimeout(() => { fillImages().catch(() => {}); if (secOn("games")) GC.linkSteam(games, Saga.http, 40, 700).then(n => { if (n) { games.save(); if (!document.querySelector("#overlay .sheet")) render(); } }).catch(() => {}); }, 2500);
   if (db.get("bg_enabled", "1") === "1" && !db.get("notif_asked")) { Native.requestNotifications(); db.set("notif_asked", "1"); }
   const last = parseFloat(db.get("last_sync", "0")) || 0;
   const hasSources = db.get("username") || db.get("imdb_user") || db.get("canon_urls") || db.get("imdb_lists");
   if (db.get("auto_sync") === "1" && hasSources && Date.now() / 1000 - last > AUTO_SYNC_HOURS * 3600) { db.set("sync_open", "0"); doSync(); db.set("sync_open", "1"); }
-  window.__app = { libSyncOne, fixListedWatched, webApi, webWhy, prefsIn, prefsOut, keysIn, keysText, notDropped, openLib, wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
+  window.__app = { openHistory, behindCheck, libSyncOne, fixListedWatched, webApi, webWhy, prefsIn, prefsOut, keysIn, keysText, notDropped, openLib, wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
 })();

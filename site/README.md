@@ -76,9 +76,16 @@ on plain `http://100.x.x.x:8787` it works as a normal page.
 ## Update
 `bash /opt/saga/app/site/update.sh`
 
-Or let it update itself every night around 04:40 (your files are never touched; the log is `journalctl -u saga-update`):
-`bash /opt/saga/app/site/auto-update.sh on` (`off` to stop, `status` to check). When the website is behind,
-its Home screen says so.
+Since 0.7.0 it updates itself every 6 hours (installed or updated with these scripts; your files are never
+touched; the log is `journalctl -u saga-update`). `bash /opt/saga/app/site/auto-update.sh off` stops that (and
+update.sh then leaves it off), `on` turns it back on, `status` checks. The owner can also update it from the app
+(Settings › Website status › Update the website from GitHub). When the website runs an older Saga than your phone,
+it doesn't save changes to your data until it's updated, and tries to update itself.
+
+## History of changes
+The website keeps every change to your data, entry by entry (`<data>/journal/`, up to ~20 MB per file; the oldest
+half goes first). The phone sends and gets only what changed since its last sync; Settings › History of changes
+lists who changed what and when, with an undo for each.
 
 App updates for the phones: copy the APKs into `/opt/saga/data/apk/`. The phone app announces a new version and
 "Get it" opens `https://<your Saga address>/download`; other people only see the Starter builds there.

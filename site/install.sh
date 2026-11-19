@@ -53,7 +53,7 @@ if curl -fsS "http://127.0.0.1:$PORT/api/health" > /dev/null; then
   echo "Next, put it on your tailnet with HTTPS:"
   echo "  sudo tailscale serve --bg --https=8443 http://127.0.0.1:$PORT"
   echo "From anywhere without Tailscale, free: sudo tailscale funnel --bg $PUBLIC_PORT   (the sign-in page protects it; see README)"
-  echo "Keep it up to date by itself every night (optional): bash $HERE/auto-update.sh on"
+  if [ "${SAGA_NO_AUTO_UPDATE:-}" != "1" ]; then bash "$HERE/auto-update.sh" on || true; else echo "Automatic updates are off: bash $HERE/auto-update.sh on"; fi
   echo "then open https://$(tailscale status --json 2>/dev/null | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).Self.DNSName.replace(/\.$/,""))}catch(e){console.log("<pi-name>.<tailnet>.ts.net")}})'):8443"
 else
   echo "The service didn't start. See: journalctl -u saga -n 50"

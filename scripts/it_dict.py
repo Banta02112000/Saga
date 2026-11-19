@@ -596,3 +596,14 @@ D.update({
 })
 P += [(rf"{N} h {N} min per episode", "$1 h $2 min a episodio"), (rf"{N} min per episode", "$1 min a episodio"), (rf"{N} h per episode", "$1 h a episodio"),
       (rf"busiest day: (.+)", "giorno più intenso: $1"), (rf"Your website runs Saga (.+)", "Il tuo sito usa Saga $1")]
+
+# 0.7.0: history, website behind
+D.update({
+  "History of changes": "Cronologia delle modifiche",
+  "Undo": "Annulla",
+  "Undone": "Annullato",
+  "Older": "Più vecchie",
+  "added": "aggiunto", "removed": "rimosso", "changed": "modificato",
+  "on the phone": "sul telefono", "on the website": "sul sito", "undone": "annullato",
+  "Films & series": "Film e serie", "Canon & settings": "Canon e impostazioni",
+})

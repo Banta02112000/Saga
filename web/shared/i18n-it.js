@@ -1180,7 +1180,16 @@ window.BANTA_IT = {
 "Directed by": "Regia di",
 "Created by": "Creata da",
 "With": "Con",
-"per episode": "a episodio"
+"per episode": "a episodio",
+"History of changes": "Cronologia delle modifiche",
+"Older": "Più vecchie",
+"added": "aggiunto",
+"removed": "rimosso",
+"changed": "modificato",
+"on the phone": "sul telefono",
+"on the website": "sul sito",
+"undone": "annullato",
+"Canon & settings": "Canon e impostazioni"
 };
 window.BANTA_IT_PAT = [
 [

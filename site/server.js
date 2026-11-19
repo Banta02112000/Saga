@@ -10,7 +10,11 @@
    Set or change the password:  node server.js --set-password   (prints the sync key for the phone app too) */
 "use strict";
 const http = require("http"), fs = require("fs"), path = require("path"), zlib = require("zlib"), crypto = require("crypto");
-const { mergeText } = require("./merge.js");
+const { mergeText, merge3 } = require("./merge.js");
+const J = require("./journal.js"); // 0.7.0: every change, entry by entry
+const E = require(path.join(WEB_DIR_FOR_ENTRIES(), "shared", "entries.js"));
+function WEB_DIR_FOR_ENTRIES() { for (const d of [process.env.SAGA_WEB, path.join(__dirname, "..", "web"), path.join(__dirname, "web")]) if (d && fs.existsSync(path.join(d, "shared", "entries.js"))) return d; return path.join(__dirname, "web"); }
+const JOURNALED = ["canonsync.json", "library.json", "games.json", "books.json", "dw.json", "music.json"];
 const hooks = require("./webhooks.js");
 const PORT = +(process.env.SAGA_PORT || 8787), HOST = process.env.SAGA_HOST || "127.0.0.1";
 const PUBLIC_PORT = +(process.env.SAGA_PUBLIC_PORT || 8788), TRUST_TS = process.env.SAGA_TRUST_TAILSCALE !== "0";
@@ -127,10 +131,19 @@ function prune() {
 }
 setInterval(prune, 6 * 3600e3).unref(); prune();
 
-function writeAtomic(dir, name, buf) {
+// 0.7.0: the Saga version the person's phone last synced with (the website stops editing when it's older)
+function phoneVersion(dir, v) {
+  const f = path.join(dir, ".phone.json");
+  if (v) { try { fs.writeFileSync(f, JSON.stringify({ version: String(v).slice(0, 20), at: Date.now() })); } catch (e) { /* read-only */ } return null; }
+  try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch (e) { return null; }
+}
+function writeAtomic(dir, name, buf, dev) {
   daily(dir, name);
   const f = path.join(dir, name), tmp = f + "." + process.pid + ".tmp";
+  let old = null;
+  if (JOURNALED.includes(name)) try { old = fs.existsSync(f) ? fs.readFileSync(f, "utf8") : ""; } catch (e) { old = null; }
   fs.writeFileSync(tmp, buf); fs.renameSync(tmp, f);
+  if (old != null) try { J.record(dir, name, old, buf.toString("utf8"), dev || "web"); } catch (e) { console.error("journal:", e.message); }
 }
 
 // ---- a .zip export opened: text entries come back as text (the same shape the phone app gives)
@@ -443,7 +456,7 @@ const handler = isPublic => async (req, res) => {
         if (!same) setTimeout(() => process.exit(0), 800);
       });
     }
-    if (p === "/api/me") return send(res, 200, JSON.stringify({ user: user || null, users: AUTH ? Object.keys(AUTH.users).length : 0 }));
+    if (p === "/api/me") return send(res, 200, JSON.stringify({ user: user || null, users: AUTH ? Object.keys(AUTH.users).length : 0, version: APP_VERSION, phone: phoneVersion(DIR) }));
     if (p.startsWith("/api/")) {
       if (p === "/api/all" && req.method === "GET") {
         const out = {};
@@ -459,18 +472,70 @@ const handler = isPublic => async (req, res) => {
       if (p === "/api/sync/manifest" && req.method === "GET") {
         const files = {};
         for (const n of SYNC_FILES) { const f = path.join(DIR, n); if (fs.existsSync(f)) { const t = fs.readFileSync(f, "utf8"); const st = fs.statSync(f); files[n] = { mtime: st.mtimeMs, size: st.size, sha256: sha(t) }; } }
-        return send(res, 200, JSON.stringify({ files, serverTime: Date.now(), version: APP_VERSION }));
+        return send(res, 200, JSON.stringify({ files, serverTime: Date.now(), version: APP_VERSION, revs: Object.fromEntries(JOURNALED.map(n => [n, J.rev(DIR, n)])), sync2: 1 }));
+      }
+      // 0.7.0: a sync that sends only what changed. Body: { since: the revision this device last had, patch:
+      // [[key, value] | [key]], version }. Answer: { rev, changes (what this device doesn't have yet), digest } or
+      // { full: true } when the journal doesn't reach back that far (the device then sends the whole file once).
+      if (p.startsWith("/api/sync2/") && req.method === "POST") {
+        const n = safe(p.slice(11));
+        if (!n || !JOURNALED.includes(n)) return send(res, 400, '{"error":"not a synced file"}');
+        const j = JSON.parse((await readBody(req, 200 * 1024 * 1024)).toString("utf8") || "{}");
+        if (j.version) phoneVersion(DIR, j.version);
+        const f = path.join(DIR, n), cur = fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "";
+        if (!cur || !J.covers(DIR, n, j.since)) return send(res, 200, JSON.stringify({ full: true, rev: J.rev(DIR, n) }));
+        const m = E.split(n, JSON.parse(cur)), theirs = J.since(DIR, n, j.since), touched = new Set();
+        for (const c of j.patch || []) {
+          const k = c[0]; if (typeof k !== "string" || E.isDevice(n, k)) continue;
+          const mine = c.length > 1 ? c[1] : undefined;
+          let v = mine;
+          if (theirs.has(k)) { const t = theirs.get(k); v = t.known ? merge3(t.before, mine, m.get(k), n, E.fieldOf(k)) : mine; }
+          if (v === undefined) m.delete(k); else { E.apply(m, [[k, v]]); }
+          touched.add(k);
+          if (E.hash(v) !== E.hash(mine)) theirs.set(k, { merged: true });
+        }
+        const text = JSON.stringify(E.join(m));
+        if (text !== cur) { writeAtomic(DIR, n, Buffer.from(text), "phone"); announce(DIR, [n], "phone"); }
+        const changes = [];
+        for (const k of theirs.keys()) { if (E.isDevice(n, k) || (touched.has(k) && !theirs.get(k).merged)) continue; changes.push(m.has(k) ? [k, m.get(k)] : [k]); }
+        // a container whose records changed: its marker too, so the device can put the file back together
+        return send(res, 200, JSON.stringify({ rev: J.rev(DIR, n), changes, digest: E.digest(n, m) }));
+      }
+      // 0.7.0: what changed lately, newest first, and undoing one change
+      if (p === "/api/history" && req.method === "GET") {
+        const before = +(url.searchParams.get("before") || 0) || Infinity, limit = Math.min(500, +(url.searchParams.get("limit") || 200));
+        const items = J.history(DIR, JOURNALED, limit, before).map(x => {
+          const what = x.p === undefined ? "added" : x.v === undefined ? "removed" : "changed";
+          const fields = what === "changed" && x.p && x.v && typeof x.p === "object" && typeof x.v === "object"
+            ? [...new Set([...Object.keys(x.p), ...Object.keys(x.v)])].filter(f => !/^(updated|ts|at|ver|_.*)$/.test(f) && JSON.stringify(x.p[f]) !== JSON.stringify(x.v[f])).slice(0, 6) : [];
+          const show = f => { const a = x.p && x.p[f], b = x.v && x.v[f]; const s = v => v == null ? "–" : typeof v === "object" ? (Array.isArray(v) ? v.length + " items" : "…") : String(v).slice(0, 40); return { f, from: s(a), to: s(b) }; };
+          return { r: x.r, file: x.file, at: x.at, dev: x.dev, title: E.label(x.file, x.k, x.v !== undefined ? x.v : x.p), what, fields: fields.map(show) };
+        });
+        return send(res, 200, JSON.stringify({ items }));
+      }
+      if (p === "/api/history/undo" && req.method === "POST") {
+        const j = JSON.parse((await readBody(req)).toString("utf8") || "{}"), n = safe(String(j.file || ""));
+        if (!JOURNALED.includes(n)) return send(res, 400, '{"error":"not a synced file"}');
+        const x = J.entry(DIR, n, +j.r);
+        if (!x || x.x) return send(res, 404, '{"error":"that change is no longer in the history"}');
+        const f = path.join(DIR, n), cur = fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "{}";
+        const m = E.split(n, JSON.parse(cur || "{}"));
+        if (x.p === undefined) m.delete(x.k); else E.apply(m, [[x.k, x.p]]);
+        const text = JSON.stringify(E.join(m));
+        if (text !== cur) { writeAtomic(DIR, n, Buffer.from(text), "undo"); announce(DIR, [n], "undo"); }
+        return send(res, 200, JSON.stringify({ ok: true, rev: J.rev(DIR, n) }));
       }
       if (p.startsWith("/api/sync/file/") && req.method === "POST") {
         const n = safe(p.slice(15));
         if (!n || !SYNC_FILES.includes(n)) return send(res, 400, '{"error":"not a synced file"}');
         const mine = (await readBody(req)).toString("utf8");
+        if (req.headers["x-saga-version"]) phoneVersion(DIR, req.headers["x-saga-version"]);
         const f = path.join(DIR, n), theirs = fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "";
         const base = fs.existsSync(basePath(DIR, n)) ? fs.readFileSync(basePath(DIR, n), "utf8") : "";
         const merged = mergeText(n, base, mine, theirs);
-        if (merged !== theirs) { writeAtomic(DIR, n, Buffer.from(merged)); announce(DIR, [n], "phone"); }
+        if (merged !== theirs) { writeAtomic(DIR, n, Buffer.from(merged), "phone"); announce(DIR, [n], "phone"); }
         fs.writeFileSync(basePath(DIR, n), merged);
-        return send(res, 200, JSON.stringify({ text: merged, sha256: sha(merged), changedHere: merged !== mine }));
+        return send(res, 200, JSON.stringify({ text: merged, sha256: sha(merged), changedHere: merged !== mine, rev: JOURNALED.includes(n) ? J.rev(DIR, n) : undefined }));
       }
       if (p.startsWith("/api/file/")) {
         const n = safe(p.slice(10));
@@ -488,7 +553,7 @@ const handler = isPublic => async (req, res) => {
             }
           }
           const fn = path.join(DIR, n), same = SYNC_FILES.includes(n) && fs.existsSync(fn) && fs.readFileSync(fn).equals(body);
-          if (!same) writeAtomic(DIR, n, body);
+          if (!same) writeAtomic(DIR, n, body, "web");
           const h = remember(DIR + "|" + n, body.toString("utf8"));
           if (SYNC_FILES.includes(n) && !same) announce(DIR, [n], String(req.headers["x-tab"] || "web")); // 0.6.9.4: nothing changed, nobody told
           return send(res, 200, JSON.stringify({ sha256: h }));

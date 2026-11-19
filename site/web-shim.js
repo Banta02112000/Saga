@@ -56,7 +56,10 @@
     queue[name] = p;
     return p;
   }
-  function save(name, text) { text = String(text == null ? "" : text); files[name] = text; send(name, "PUT", text); return true; }
+  // 0.7.0: while this website runs an older Saga than your phone, its changes to your data aren't sent (an older
+  // version could undo what the newer one did); the page says so and the website updates itself
+  var paused = false, held = 0, SYNCED = /^(canonsync|library|games|books|dw|music)\.json$/;
+  function save(name, text) { text = String(text == null ? "" : text); files[name] = text; if (paused && SYNCED.test(name)) { held++; return true; } send(name, "PUT", text); return true; }
   function append(name, text) { text = String(text || ""); files[name] = (files[name] || "") + text; send(name, "POST", text); return true; }
   // the phone (or another page) changed a file on the server: reload to show it, once nothing of ours is unsaved
   try {
@@ -147,8 +150,9 @@
     take: function () { return ""; }, post: noop, busy: noop, notify: noop, widget: noop, shareTo: function () { return false; },
     share: function (title, text) { try { if (navigator.share) { navigator.share({ title: title, text: text }).catch(noop); return true; } } catch (e) { /* no share sheet */ } return false; },
   };
-  window.__sagaWeb = { pending: function () { return unsent; }, files: function () { return Object.keys(files); }, user: "" };
-  fetch(api("me")).then(function (r) { return r.json(); }).then(function (m) { window.__sagaWeb.user = m.user || ""; }).catch(function () {});
+  window.__sagaWeb = { pending: function () { return unsent; }, files: function () { return Object.keys(files); }, user: "", me: null,
+    pause: function (on) { paused = !!on; }, paused: function () { return paused; }, held: function () { return held; } };
+  window.__sagaWeb.ready = fetch(api("me")).then(function (r) { return r.json(); }).then(function (m) { window.__sagaWeb.user = m.user || ""; window.__sagaWeb.me = m; return m; }).catch(function () { return null; });
   // 0.6.2: installable, and the app and its pictures open even when the server can't be reached.
   // Browsers only allow this on https (a Cloudflare Tunnel, Tailscale serve) or on localhost.
   try { if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("sw.js").catch(noop); } catch (e) { /* not available */ }
