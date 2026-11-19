@@ -173,6 +173,7 @@
       ${low ? `<p class="small" style="color:#f0883e">Less than 1 GB free on the Pi: when the card is full, saving stops working. Delete old files or move to a bigger card.</p>` : ""}
       <h4>People</h4><div class="listcard">${a.people.map(p => `<div class="item"><div class="grow" style="min-width:0"><b>${A.esc(p.name)}</b>${p.owner ? ' <span class="muted small">(owner)</span>' : ""}<div class="small muted">last here ${ago(p.at)} · last phone sync ${ago(p.sync)} · ${mb(p.size)}${p.shares ? " · shares" : ""}${p.calendar ? " · calendar" : ""}</div></div></div>`).join("")}</div>
       <p class="small muted">App updates on the download page: ${a.apks.length ? A.esc(a.apks.join(", ")) : "none (copy APKs into /opt/saga/data/apk/)"}.${a.autoUpdate ? "" : " Nightly updates: <code>bash /opt/saga/app/site/auto-update.sh on</code>."}</p>
+      ${a.imdbCheck ? `<p class="small${a.imdbCheck.state === "changed" ? "" : " muted"}"${a.imdbCheck.state === "changed" ? ' style="color:#f0883e"' : ""}>Daily IMDb check (${A.esc(new Date(a.imdbCheck.at).toLocaleString())}): ${a.imdbCheck.state === "ok" ? "IMDb answers the way Saga reads it" : a.imdbCheck.state === "changed" ? "IMDb changed something Saga reads: " + A.esc(a.imdbCheck.lines.join(" · ")) : "no usable answer from IMDb today (it turned the Pi away)"}.</p>` : ""}
       <button class="btn small" data-action="webupdate">${A.icon("sync")}Update the website from GitHub${A.verNum(a.version) < A.verNum(A.VERSION) ? ` (it has ${A.esc(a.version)}, this ${window.__sagaWeb ? "page" : "app"} ${A.VERSION})` : ""}</button>`;
   }
   // 0.7.0: every change the website has seen, newest first: what, where it came from, and an undo for each
@@ -215,6 +216,7 @@
       // 0.6.9.9: which Saga the website runs (older websites only say it at /api/health)
       { let wv = mj.version || ""; if (!wv && Date.now() - (+WS.get().verAt || 0) > 6 * 3600e3) try { WS.set({ verAt: Date.now() }); const hr = await http("GET", base + "/api/health", { headers: H }); wv = (JSON.parse(hr.body || "{}") || {}).version || ""; } catch (e) { /* unknown */ }
         if (wv && wv !== WS.get().ver) WS.set({ ver: wv }); }
+      if (mj.imdbCheck && JSON.stringify(mj.imdbCheck) !== JSON.stringify(WS.get().imdb || null)) WS.set({ imdb: mj.imdbCheck }); // 0.7.3: the Pi's daily IMDb check
       const last = WS.get().state || {};
       const changedHere = [];
       // 0.7.0: websites that keep a history send and take only the entries that changed; the first time (and whenever

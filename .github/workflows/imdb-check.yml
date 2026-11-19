@@ -1,8 +1,7 @@
 name: imdb-check
-# Every morning: does IMDb still answer the way Saga reads it? Opens an issue when IMDb changed something.
+# Does IMDb still answer the way Saga reads it? Opens an issue when IMDb changed something. By hand only since 0.7.3:
+# IMDb turns GitHub's servers away, so the daily check runs on your Saga website (the Pi) instead.
 on:
-  schedule:
-    - cron: "17 5 * * *"
   workflow_dispatch:
 permissions:
   contents: read

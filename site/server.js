@@ -14,6 +14,16 @@ const { mergeText, merge3 } = require("./merge.js");
 const J = require("./journal.js"); // 0.7.0: every change, entry by entry
 const E = require(path.join(WEB_DIR_FOR_ENTRIES(), "shared", "entries.js"));
 function WEB_DIR_FOR_ENTRIES() { for (const d of [process.env.SAGA_WEB, path.join(__dirname, "..", "web"), path.join(__dirname, "web")]) if (d && fs.existsSync(path.join(d, "shared", "entries.js"))) return d; return path.join(__dirname, "web"); }
+// 0.7.3: once a day, does IMDb still answer the way Saga reads it? (GitHub's servers are turned away; the Pi usually isn't)
+const IMDB_CHECK_FILE = path.join(process.env.SAGA_DATA || path.join(__dirname, "data"), ".imdb-check.json");
+let imdbCheck = (() => { try { return JSON.parse(fs.readFileSync(IMDB_CHECK_FILE, "utf8")); } catch (e) { return null; } })();
+async function runImdbCheck() {
+  if (typeof fetch !== "function" || process.env.SAGA_NO_IMDB_CHECK === "1") return;
+  try { const r = await require(path.join(WEB_DIR_FOR_ENTRIES(), "check_imdb.js")).check(); imdbCheck = r; fs.writeFileSync(IMDB_CHECK_FILE, JSON.stringify(r)); if (r.state === "changed") console.error("IMDb changed something Saga reads:", r.lines.join(" | ")); }
+  catch (e) { console.error("imdb check:", e.message); }
+}
+setTimeout(() => { if (!imdbCheck || Date.now() - imdbCheck.at > 20 * 3600e3) runImdbCheck(); }, 60000).unref();
+setInterval(runImdbCheck, 24 * 3600e3).unref();
 const JOURNALED = ["canonsync.json", "library.json", "games.json", "books.json", "dw.json", "music.json"];
 const hooks = require("./webhooks.js");
 const PORT = +(process.env.SAGA_PORT || 8787), HOST = process.env.SAGA_HOST || "127.0.0.1";
@@ -440,7 +450,7 @@ const handler = isPublic => async (req, res) => {
       const daily = path.join(DATA, ".daily"); let lastDaily = null; try { lastDaily = fs.readdirSync(daily).sort().pop() || null; } catch (e) { /* none */ }
       const people = AUTH ? Object.keys(AUTH.users).map(n => ({ name: n, owner: n === AUTH.owner, at: (SEEN[n] || {}).at || 0, sync: (SEEN[n] || {}).sync || 0, size: du(dirOf(n === AUTH.owner ? "" : n)), shares: shares(n), calendar: !!AUTH.users[n].cal })) : [];
       return send(res, 200, JSON.stringify({ version: APP_VERSION, uptime: Math.round(process.uptime()), node: process.version, people, disk, lastDaily,
-        autoUpdate: fs.existsSync("/etc/systemd/system/timers.target.wants/saga-update.timer"), apks: fs.existsSync(APK_DIR) ? fs.readdirSync(APK_DIR).filter(n => /\.apk$/i.test(n)) : [] }));
+        autoUpdate: fs.existsSync("/etc/systemd/system/timers.target.wants/saga-update.timer"), imdbCheck, apks: fs.existsSync(APK_DIR) ? fs.readdirSync(APK_DIR).filter(n => /\.apk$/i.test(n)) : [] }));
     }
     // 0.6.9.9: the owner updates the website from the app (Settings › Your Saga website), so the website runs the same
     // version as the phone: git pull from GitHub, then this server stops and systemd starts the new one (Restart=always)
@@ -472,7 +482,7 @@ const handler = isPublic => async (req, res) => {
       if (p === "/api/sync/manifest" && req.method === "GET") {
         const files = {};
         for (const n of SYNC_FILES) { const f = path.join(DIR, n); if (fs.existsSync(f)) { const t = fs.readFileSync(f, "utf8"); const st = fs.statSync(f); files[n] = { mtime: st.mtimeMs, size: st.size, sha256: sha(t) }; } }
-        return send(res, 200, JSON.stringify({ files, serverTime: Date.now(), version: APP_VERSION, revs: Object.fromEntries(JOURNALED.map(n => [n, J.rev(DIR, n)])), sync2: 1 }));
+        return send(res, 200, JSON.stringify({ files, serverTime: Date.now(), version: APP_VERSION, revs: Object.fromEntries(JOURNALED.map(n => [n, J.rev(DIR, n)])), sync2: 1, imdbCheck }));
       }
       // 0.7.0: a sync that sends only what changed. Body: { since: the revision this device last had, patch:
       // [[key, value] | [key]], version }. Answer: { rev, changes (what this device doesn't have yet), digest } or

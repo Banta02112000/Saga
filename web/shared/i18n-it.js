@@ -1207,7 +1207,9 @@ window.BANTA_IT = {
 "Game details from your prompt": "Dettagli dei giochi dal tuo prompt",
 "Length and cast for titles": "Durata e cast dei titoli",
 "Merge exact duplicates": "Unisci i duplicati esatti",
-"Nothing yet: it runs after each sync.": "Ancora niente: parte dopo ogni sincronizzazione."
+"Nothing yet: it runs after each sync.": "Ancora niente: parte dopo ogni sincronizzazione.",
+"Check the weekly copy": "Controlla la copia settimanale",
+"IMDb changed something Saga reads": "IMDb ha cambiato qualcosa che Saga legge"
 };
 window.BANTA_IT_PAT = [
 [

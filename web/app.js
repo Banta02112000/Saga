@@ -276,7 +276,7 @@
   function undoChange(...a) { return P_website().undoChange(...a); }
   function syncWithWebServer(...a) { return P_website().syncWithWebServer(...a); }
   const C = window.Core;
-  const VERSION = "0.7.2";
+  const VERSION = "0.7.3";
   const AUTO_SYNC_HOURS = 12;
   Object.assign(C.PROFILES, (window.CANONSYNC_PRESET || {}).traktProfiles || {});
   const DEFAULT_PROFILE = (window.CANONSYNC_PRESET || {}).traktDefault || "PKCE (your own Trakt app)";
@@ -584,6 +584,9 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.7.3", ["Lighter saving on the phone: ticking an episode, rating or changing a status adds one line to a small change log instead of writing your whole library (megabytes) again. The whole file is written when you leave the app, before a website sync and when the log gets long; if the phone stops the app in between, the log is read back at the next start, so nothing is lost.",
+      "The daily IMDb check now runs on your website (the Pi): IMDb turns GitHub's servers away. When it finds that IMDb changed something Saga reads, Home on the phone says so; the website's owner page shows the last result.",
+      "Done by itself: once a week the newest automatic copy of your data is opened and compared with what you have; a broken or incomplete copy is replaced at once."]],
     ["0.7.2", ["Saga now does the small jobs you used to start by hand, after each sync (and when the app opens), and writes down each one (Sync › Done by itself, where each can be switched off): a part that failed because IMDb or the connection turned it away is tried again 45 minutes later (3 times a day); canon games you rated or listed on IMDb leave Games › Missing (Finished with your rating, or Wishlist); new games get their details from your prompt (Gemini API key only); films and series get their length and cast; exact duplicates (the same IMDb, TMDB or Steam id) are merged, with a copy kept first.",
       "Website offline: changes made while it couldn't reach the Pi are merged against the version they started from, so they can't undo anything the phone sent meanwhile (even if the Pi restarted)."]],
     ["0.7.1", ["Search finds people too: everyone in the cast, and who directed or created what's in your library, with what you've watched of theirs; also episodes by name, and your music (artists and songs).",
@@ -2401,7 +2404,16 @@
   // ------------------------------------------------------------ render & nav
   // ------------------------------------------------------------ your library: films and series you track here
   const L = window.Lib;
-  const lib = new L.Library({ load: () => Native.load("library.json"), save: t => Native.save("library.json", t) });
+  // 0.7.3: on the phone, a tick, a rating or a status change is one line added to library.log instead of the whole library
+  // (megabytes) written again; the whole file is written when the app goes to the background, before a website sync, and
+  // when the log gets long. Only after that write lands is the log emptied (one writer thread, in order).
+  const LIBLOG = "library.log", libLogOn = !!(Native.canAppend && Native.parts);
+  let libLogN = 0, libLogBytes = 0, libDirtyAll = false, libObLen = 0;
+  const libDirtyIds = new Set();
+  const libPersist = { load: () => Native.load("library.json"), save: t => Native.save("library.json", t), loadLog: libLogOn ? () => Native.load(LIBLOG) : null };
+  const lib = new L.Library(libPersist);
+  libLogN = lib.logLines || 0; libObLen = lib.outbox.length;
+  if (libLogN) setTimeout(() => { libDirtyAll = true; libWrite(); }, 3000); // changes kept in the log last time: into the file now
   let libStamp = window.Android && Android.stamp ? String(Android.stamp("library.json") || "") : "";
   const lang = () => (BantaShell.lang ? BantaShell.lang() : "en");
   const libOpt = () => ({ tmdbKey: db.get("tmdb_key"), lang: lang(), country: db.get("region", "IT") });
@@ -2457,24 +2469,36 @@
   // The library file is written a moment later, and once for a burst of changes (a sync, ticking several episodes):
   // with a big library each write takes long enough to hold up the screen. Leaving the app writes it at once.
   let libTimer = null, libLast = 0, libGen = 0, libBusy = false;
+  const libLogClear = () => { libLogN = 0; libLogBytes = 0; try { Native.saveLater(LIBLOG, ""); } catch (e) { /* next full write */ } };
   function libWrite(sync) {
     clearTimeout(libTimer); libTimer = null; libLast = Date.now(); libJobDirty = false;
+    // 0.7.3: only these titles changed: one line each (not while a full write is still on its way)
+    if (sync !== true && libLogOn && !libDirtyAll && libDirtyIds.size && !libBusy && libLogN < 500 && libLogBytes < 1.5e6 && lib.outbox.length >= libObLen) {
+      let t = "";
+      for (const id of libDirtyIds) t += JSON.stringify([id, lib.items[id] || null]) + "\n";
+      if (lib.outbox.length > libObLen) t += JSON.stringify(["@ob+", lib.outbox.slice(libObLen)]) + "\n";
+      try { Native.append(LIBLOG, t); libLogN += libDirtyIds.size; libLogBytes += t.length; libObLen = lib.outbox.length; libDirtyIds.clear(); return; }
+      catch (e) { logError("save", "library log: " + e.message); } // the whole file instead
+    }
+    libDirtyAll = false; libDirtyIds.clear(); libObLen = lib.outbox.length;
     if (sync !== true && Native.parts) { // built and handed over in pieces: the screen stays free
       const gen = ++libGen; libBusy = true;
       C.jsonParts(lib.toJSON()).then(parts => (gen === libGen ? Native.saveParts("library.json", parts, () => gen === libGen) : false))
-        .then(ok => { if (ok) libStamp = null; }, () => {}).then(() => { if (gen === libGen) libBusy = false; });
+        .then(ok => { if (ok) { libStamp = null; if (libLogOn && libLogN) libLogClear(); } }, () => {}).then(() => { if (gen === libGen) libBusy = false; });
       return;
     }
     libGen++; libBusy = false;
-    if (!sync && Native.later) { Native.saveLater("library.json", JSON.stringify(lib.toJSON())); libStamp = null; return; }
+    if (!sync && Native.later) { Native.saveLater("library.json", JSON.stringify(lib.toJSON())); libStamp = null; if (libLogOn && libLogN) libLogClear(); return; }
     lib.save();
+    if (libLogOn && libLogN) libLogClear();
     libStamp = window.Android && Android.stamp ? String(Android.stamp("library.json") || "") : "";
   }
   // after a background write, the stamp it left (asked only when needed: asking waits for the write)
   const libOwnStamp = () => { if (libStamp === null) libStamp = Native.ownStamp("library.json"); return libStamp; };
   let libJobDirty = false;
   const libPending = () => !!libTimer || libBusy || libJobDirty;
-  function libSave() {
+  function libSave(ids) {
+    if (ids && libLogOn) for (const id of [].concat(ids)) libDirtyIds.add(id); else libDirtyAll = true;
     // 0.6.9.6: shows you dropped, for the background's episode alerts too (they don't read the library)
     try { const dr = lib.all().filter(it => it.type === "show" && it.status === "dropped"); const v = JSON.stringify({ ids: dr.flatMap(it => [it.imdb, it.tmdb ? "tv:" + it.tmdb : null].filter(Boolean)), names: dr.map(it => C.norm(it.title)) });
       if (v !== db.get("shows_dropped", "")) db.set("shows_dropped", v); } catch (e) { /* next save */ }
@@ -3080,7 +3104,7 @@
   function libAct(a, el) {
     const it = ui.libOpen ? lib.get(ui.libOpen) : null;
     const date = () => (($("#libDate") || {}).value || TODAY());
-    const reopen = () => { libSave(); if (it) openLib(it.id); render(); };
+    const reopen = () => { libSave(it ? [it.id] : undefined); if (it) openLib(it.id); render(); };
     switch (a) {
       case "libsearch": commitFields(); libSearch(); return true;
       case "libclear": ui.libRes = null; ui.libQ = ""; render(); return true;
@@ -3100,7 +3124,7 @@
       case "libaddas": { const r = (ui.libRes || [])[+el.dataset.i]; if (r) { const x = libAdd(r, el.dataset.v); render(); openLib(x.id); } return true; }
       case "libopen": ui.libSeason = el.dataset.s ? +el.dataset.s : ui.libOpen === el.dataset.id ? ui.libSeason : null; openLib(el.dataset.id); return true;
       case "personlib": openPersonLib(el.dataset.v); return true;
-      case "libnext": { const x = lib.get(el.dataset.id); if (x) { const u = libUndo(x); lib.toggleEp(x, +el.dataset.s, +el.dataset.e); libSave(); toast(`Watched ${x.title} S${el.dataset.s} E${el.dataset.e}`, u); render(); if ($("#allRes")) $("#allRes").innerHTML = searchResults(); } return true; }
+      case "libnext": { const x = lib.get(el.dataset.id); if (x) { const u = libUndo(x); lib.toggleEp(x, +el.dataset.s, +el.dataset.e); libSave([x.id]); toast(`Watched ${x.title} S${el.dataset.s} E${el.dataset.e}`, u); render(); if ($("#allRes")) $("#allRes").innerHTML = searchResults(); } return true; }
       case "libadoptnow": { db.set("lib_adopt", "1"); const n = libAdopt(); toast(`${fmt(n)} titles added from your sync`); render(); lib.all().filter(x => x.type === "show").slice(0, 6).forEach(x => libDetails(x)); return true; }
     }
     if (!it) return false;
@@ -4111,7 +4135,7 @@
       case "recopen": { const x = (P_foryou().recsNow() || { items: [] }).items.find(y => y.type + y.tmdb === el.dataset.k); if (x) openTitle(Object.assign({ why: "because you rated " + x.because.join(", ") }, x)); break; }
       case "friendopen": { const P = P_website().people().find(p => p.name === el.dataset.p), x = P && P.lib[+el.dataset.i]; if (x) openTitle(Object.assign({ why: `${P.name}: ★ ${x.rating || "–"}` }, x)); break; }
       case "personopen": { const w = ui.person && ui.person.works && ui.person.works[+el.dataset.i]; if (w) openTitle(Object.assign({ why: w.roles.slice(0, 2).join(", ") }, w)); break; }
-      case "sqwatch": { const x = lib.get(el.dataset.id); if (x) { const u = libUndo(x); lib.setStatus(x, "watched"); libSave(); toast(`Watched ${x.title}`, u); if ($("#allRes")) $("#allRes").innerHTML = searchResults(); } break; }
+      case "sqwatch": { const x = lib.get(el.dataset.id); if (x) { const u = libUndo(x); lib.setStatus(x, "watched"); libSave([x.id]); toast(`Watched ${x.title}`, u); if ($("#allRes")) $("#allRes").innerHTML = searchResults(); } break; }
       case "personadd": { const w = ui.person && ui.person.works && ui.person.works[+el.dataset.i]; if (w) { libAdd({ type: w.type, title: w.title, year: w.year, tmdb: w.tmdb, poster: w.poster }, "watchlist"); drawPerson(); } break; }
       case "libcast": { const it = lib.get(ui.libOpen); if (!it) break; ui.libCast = { id: it.id, busy: true }; openLib(it.id);
         C.titleInfo(db, Native.http, P_deals().libCanon(it)).then(inf => { ui.libCast = { id: it.id, inf }; }, e => { ui.libCast = { id: it.id, err: e.message }; }).then(() => { if (ui.libOpen === it.id) openLib(it.id); }); break; }
@@ -4366,6 +4390,7 @@
       case "copyreport": Native.copy(ui.report); toast("Report copied"); break;
       case "copystalls": Native.copy(`Saga ${VERSION}: ${ui.stalls}`); toast("Copied"); break;
       case "retryfailed": doSync(true); break;
+      case "imdbchkhide": db.set("imdbchk_hide", el.dataset.v); render(); break;
       case "autoset": db.set("auto_" + el.dataset.k, el.checked ? "1" : "0"); toast(el.checked ? "On" : "Off"); break;
       case "bgnow":
         runJob("Release check", async p => {
@@ -4460,7 +4485,7 @@
 
   // leaving the app: everything written now and waited for, so a background sync starts from the latest copy
   // leaving the app: everything not yet written is written at once (the background job reads these files)
-  const saveAllNow = () => { commitFields(); if (libPending()) libWrite(true); else libOwnStamp(); gamesFile.now(); booksFile.now(); if (db._timer || db._flushing || db._cacheDirty || db._dirty) db.flush(true); };
+  const saveAllNow = () => { commitFields(); if (libPending() || libLogN) { libDirtyAll = true; libWrite(true); } else libOwnStamp(); gamesFile.now(); booksFile.now(); if (db._timer || db._flushing || db._cacheDirty || db._dirty) db.flush(true); };
   window.addEventListener("pagehide", saveAllNow);
   document.addEventListener("visibilitychange", () => { if (document.hidden) saveAllNow(); });
   window.__paused = saveAllNow;
@@ -4486,7 +4511,7 @@
     if (libPending()) libWrite(true); // our own unsaved changes first, so they're never taken for the background job's
     if (db.reload()) { invalidate(); ui.report = db.get("last_report", ui.report); }
     const ls = window.Android && Android.stamp ? String(Android.stamp("library.json") || "") : "";
-    if (ls && ls !== libOwnStamp()) { libStamp = ls; const fresh = new L.Library({ load: () => Native.load("library.json") }); lib.items = fresh.items; lib.adopted = fresh.adopted; lib.outbox = fresh.outbox; libMirror(); }
+    if (ls && ls !== libOwnStamp()) { libStamp = ls; const fresh = new L.Library({ load: () => Native.load("library.json"), loadLog: libPersist.loadLog }); lib.items = fresh.items; lib.adopted = fresh.adopted; lib.outbox = fresh.outbox; libObLen = lib.outbox.length; libMirror(); }
     try { const gs = Android.stamp("games.json"); if (gs && gs !== ui.gStamp) { if (ui.gStamp) { const t = Native.load("games.json"); if (t) games.fromJSON(JSON.parse(t)); } ui.gStamp = gs; } } catch (e) { /* not in the app */ }
     try { const bs = Android.stamp("books.json"); if (bs && bs !== ui.bStamp) { if (ui.bStamp) { const t = Native.load("books.json"); if (t) books.fromJSON(JSON.parse(t)); } ui.bStamp = bs; } } catch (e) { /* not in the app */ }
     applyPending();
@@ -4512,7 +4537,7 @@
     get db() { return db; }, get ui() { return ui; }, get C() { return C; }, get GC() { return GC; }, get L() { return L; }, get lib() { return lib; }, get games() { return games; },
     feat: k => secOn(k), get http() { return C.robust(Native.http, { timeout: 30000, tries: 2 }); }, gql: q => C.imdbGql(Native.http, q), get Native() { return Native; },
     doSync: (a, b) => doSync(a, b), libOpt: () => libOpt(), libSave: () => libSave(), get libTried() { return libTried; }, snapshot: w => snapshot(w),
-    changed: k => changed(k), logError: (a, b) => logError(a, b), esc: t => esc(t), lang: () => lang(), get Kit() { return Kit; },
+    changed: k => changed(k), logError: (a, b) => logError(a, b), esc: t => esc(t), lang: () => lang(), get Kit() { return Kit; }, get SH() { return SH; }, autoBackup: () => autoBackup(),
   }) : null;
   window.__sagaAuto = Auto && { run: why => ((navigator.webdriver && !window.__wantAuto) || window.__sagaWeb ? Promise.resolve() : Auto.run(why)) }; // the phone does them; the website gets the result
   // also when the app opens and they haven't run for 12 hours (no sync needed); a failed part from before is retried later
@@ -4577,5 +4602,5 @@
   const last = parseFloat(db.get("last_sync", "0")) || 0;
   const hasSources = db.get("username") || db.get("imdb_user") || db.get("canon_urls") || db.get("imdb_lists");
   if (db.get("auto_sync") === "1" && hasSources && Date.now() / 1000 - last > AUTO_SYNC_HOURS * 3600) { db.set("sync_open", "0"); doSync(); db.set("sync_open", "1"); }
-  window.__app = { openHistory, behindCheck, libSyncOne, fixListedWatched, webApi, webWhy, prefsIn, prefsOut, keysIn, keysText, notDropped, openLib, wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS: P_rules().RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle: P_backup().bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
+  window.__app = { libSave, openHistory, behindCheck, libSyncOne, fixListedWatched, webApi, webWhy, prefsIn, prefsOut, keysIn, keysText, notDropped, openLib, wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS: P_rules().RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle: P_backup().bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
 })();

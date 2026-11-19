@@ -71,6 +71,10 @@ const epKey = (s, e) => `${s}:${e}`;
       this.persist = persist || null;
       this.items = {}; this.adopted = {}; this.outbox = [];
       if (persist) { try { const j = JSON.parse(persist.load() || "{}"); this.items = j.items || {}; this.adopted = j.adopted || {}; this.outbox = j.outbox || []; } catch (e) { /* corrupt: start empty */ } }
+      // 0.7.3: changes since the last full write, one line each ([id, title] or [id, null]; ["@ob+", [...]] for Trakt's queue)
+      this.logLines = 0;
+      if (persist && persist.loadLog) { try { for (const l of String(persist.loadLog() || "").split("\n")) { if (!l) continue; let x; try { x = JSON.parse(l); } catch (e) { continue; } // a torn last line
+        if (!Array.isArray(x)) continue; if (x[0] === "@ob+") { if (Array.isArray(x[1])) this.outbox.push(...x[1]); } else if (x[1] === null) delete this.items[x[0]]; else if (x[1] && typeof x[1] === "object") this.items[x[0]] = x[1]; this.logLines++; } } catch (e) { /* no log */ } }
       for (const k in this.items) { this.items[k] = blank(this.items[k]); settleShow(this.items[k]); }
     }
     // every finished, ended series out of Watching; returns how many moved

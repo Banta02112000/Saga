@@ -14,6 +14,7 @@
     ["gameinfo", "Game details from your prompt", "New games get release dates, platforms, remakes and HLTB from your prompt (Gemini API key only, 5 per run)."],
     ["cast", "Length and cast for titles", "Films and series get their length and cast from TMDB in the background (12 per run)."],
     ["dupes", "Merge exact duplicates", "Two entries with the same IMDb, TMDB or Steam id become one (a copy is kept first; History › Undo)."],
+    ["backupcheck", "Check the weekly copy", "Once a week the newest automatic copy of your data is opened and compared with what you have, so a broken copy is found before you need it."],
   ];
   function make(S) {
     const db = () => S.db;
@@ -102,12 +103,28 @@
       if (names.length) { S.libSave(); S.games.save(); S.changed("games"); log("dupes", `Merged duplicates: ${names.slice(0, 6).join(", ")}${names.length > 6 ? ` and ${names.length - 6} more` : ""}`); }
     }
 
+    // ---- 6. the weekly copy opens and has everything in it
+    function backupCheck() {
+      if (!on("backupcheck") || !S.SH) return;
+      if (Date.now() - (+db().get("auto_bcheck_at", "0") || 0) < 6 * 864e5) return;
+      let list = []; try { list = JSON.parse(db().get("auto_backups", "[]")); } catch (e) { return; }
+      const newest = list.sort((a, b) => b.at - a.at)[0]; if (!newest) return;
+      db().set("auto_bcheck_at", String(Date.now()));
+      let d = null; try { d = JSON.parse(S.SH.read(`auto_backup_${newest.slot}.json`) || "null"); } catch (e) { d = null; }
+      const n = x => (x && typeof x === "object" ? Object.keys(x).length : 0);
+      const have = { titles: S.lib.all().length, games: S.games.games.length };
+      const got = d ? { titles: n(d.library && d.library.items), games: ((d.games && d.games.games) || []).length } : null;
+      // the copy is up to a week old: a few new titles since then are fine, a big gap isn't
+      const short = !got || got.titles < have.titles * 0.8 - 5 || got.games < have.games * 0.8 - 5;
+      if (short) { S.logError("backup check", `the weekly copy from ${new Date(newest.at).toISOString().slice(0, 10)} ${got ? `has ${got.titles} titles and ${got.games} games of your ${have.titles} and ${have.games}` : "doesn't open"}`); log("backupcheck", `The weekly copy from ${new Date(newest.at).toLocaleDateString()} ${got ? "is missing part of your data" : "doesn't open"}: a new one is made now`); try { db().set("auto_backup_at", "0"); S.autoBackup(); } catch (e) { /* next time */ } }
+      else log("backupcheck", `Weekly copy checked: it opens, with ${got.titles} titles and ${got.games} games`);
+    }
     // after a sync (and once when the app opens): each job in turn, quietly; one failing doesn't stop the others
     async function run(why) {
       if (running) return; running = true;
       try {
         retryLater();
-        for (const [name, fn] of [["dupes", dupes], ["gamecanon", gameCanon], ["cast", cast], ["gameinfo", gameInfo]]) {
+        for (const [name, fn] of [["backupcheck", backupCheck], ["dupes", dupes], ["gamecanon", gameCanon], ["cast", cast], ["gameinfo", gameInfo]]) {
           if (S.ui.job) break;
           try { await fn(); } catch (e) { S.logError("auto " + name, e.message); }
           await sleep(300);

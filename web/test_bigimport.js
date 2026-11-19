@@ -153,6 +153,19 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     return { lib: /left the app/.test(window.__files["library.json"]), canon: JSON.parse(window.__files["canonsync.json"]).settings.left_at === "now" }; });
   ok(left.canon, "leaving the app saves at once: " + JSON.stringify(left));
   ok(!lt.length || lt[0][1] < 1200, "sync never blocks the screen for long: " + JSON.stringify(lt.slice(0, 3)));
+  // 0.7.3: a change to one title is one line in library.log; leaving the app writes the whole file and empties the log
+  const lg = await A(async () => {
+    await new Promise(r => setTimeout(r, 5000)); // whatever was being written, done
+    const libBefore = window.__files["library.json"], it = __app.lib.all()[3];
+    it.rating = 7; it.notes = "kept in the log"; __app.libSave([it.id]);
+    for (let i = 0; i < 40 && !/kept in the log/.test(window.__files["library.log"] || ""); i++) await new Promise(r => setTimeout(r, 250));
+    const log = window.__files["library.log"] || "", fileSame = window.__files["library.json"] === libBefore;
+    const L2 = new window.Lib.Library({ load: () => window.__files["library.json"], loadLog: () => window.__files["library.log"] });
+    const replay = L2.items && L2.items[it.id] ? L2.items[it.id].notes : null;
+    window.__paused();
+    return { logged: /kept in the log/.test(log) && log.length < 20000, fileSame, replay: replay === "kept in the log", after: /kept in the log/.test(window.__files["library.json"]), cleared: window.__files["library.log"] === "" };
+  });
+  ok(lg.logged && lg.fileSame && lg.replay && lg.after && lg.cleared, "one title changed: a line in the log, not the whole library; leaving the app writes it all and empties the log: " + JSON.stringify(lg));
   console.log("errors", errors); ok(!errors.length, "no page errors"); console.log("BIG IMPORT TESTS PASSED");
   await browser.close(); srv.close();
 })().catch(e => { console.error(e); process.exit(1); });

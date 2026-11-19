@@ -635,3 +635,7 @@ D.update({
   "Merge exact duplicates": "Unisci i duplicati esatti",
   "Nothing yet: it runs after each sync.": "Ancora niente: parte dopo ogni sincronizzazione.",
 })
+D.update({
+  "Check the weekly copy": "Controlla la copia settimanale",
+  "IMDb changed something Saga reads": "IMDb ha cambiato qualcosa che Saga legge",
+})
