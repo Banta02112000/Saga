@@ -31,6 +31,18 @@ const ok = (c, m) => { if (!c) { console.error("FAIL: " + m); process.exit(1); }
     await pg.waitForTimeout(1500);
     ok(/9\.9\.9/.test(bb) && /aren't saved/.test(bb) && !/Not Saved While Behind/.test(fs.readFileSync(path.join(data, "library.json"), "utf8")) && await pg.evaluate(() => __sagaWeb.held() > 0), "website older than the phone: says so and doesn't save: " + bb.slice(0, 120));
     fs.rmSync(path.join(data, ".phone.json")); await pg.reload(); await pg.waitForFunction(() => window.__app && !__sagaWeb.paused(), null, { timeout: 15000 });
+    // 0.7.0: offline: the page opens from this browser's copy, keeps changes, sends them when the server is back
+    await pg.waitForTimeout(2500); // the copy is kept a moment after loading
+    await pg.context().setOffline(true);
+    await pg.reload(); await pg.waitForFunction(() => window.__app && window.__sagaOffline, null, { timeout: 20000 });
+    ok(await pg.evaluate(() => __app.lib.all().some(x => x.title === "Website Film") && !!document.getElementById("offlinebar")), "offline: the website opens with your data from this browser's copy");
+    await pg.evaluate(() => { __app.lib.add({ type: "movie", title: "Added While Offline", year: 2003 }, "watchlist"); __app.lib.save(); });
+    await pg.waitForTimeout(800);
+    ok(!/Added While Offline/.test(fs.readFileSync(path.join(data, "library.json"), "utf8")), "offline: the change waits in the browser");
+    await pg.context().setOffline(false);
+    await pg.evaluate(() => window.dispatchEvent(new Event("online")));
+    let sent = false; for (let i = 0; i < 40 && !sent; i++) { await pg.waitForTimeout(500); sent = /Added While Offline/.test(fs.readFileSync(path.join(data, "library.json"), "utf8")) && /Website Film/.test(fs.readFileSync(path.join(data, "library.json"), "utf8")); }
+    ok(sent && await pg.evaluate(() => !window.__sagaOffline), "back online: the change reaches the server, merged with what was there");
     // 0.6.2: installable; the app's files are kept for when the server can't be reached, your data never is
     const swOk = await pg.evaluate(() => navigator.serviceWorker.ready.then(r => !!r.active));
     await pg.reload(); await pg.waitForFunction(() => window.__app, null, { timeout: 15000 });

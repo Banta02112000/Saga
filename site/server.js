@@ -573,7 +573,10 @@ const handler = isPublic => async (req, res) => {
     const f = path.resolve(WEB, rel);
     if (!f.startsWith(WEB + path.sep) || !fs.existsSync(f) || !fs.statSync(f).isFile()) return send(res, 404, "Not found", "text/plain");
     let body = fs.readFileSync(f);
+    // 0.7.0: the app's scripts are started by web-shim.js once your data is there (from the server, or when it can't be
+    // reached, from the copy this browser keeps), in the same order
     if (rel === "index.html") body = Buffer.from(body.toString("utf8").replace(/<script src="boot\.js"><\/script>/, '<script src="web-shim.js"></script><script src="boot.js"></script>')
+      .replace(/<body([^>]*)>([\s\S]*)<\/body>/, (m, attrs, inner) => { const list = []; const rest = inner.replace(/<script src="([^"]+)"><\/script>/g, (t, src) => { list.push(src); return ""; }); return `<body${attrs} data-scripts="${list.join(",")}">${rest}</body>`; })
       .replace("</head>", '<link rel="manifest" href="manifest.json"><meta name="theme-color" content="#14121B"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png"></head>'));
     send(res, 200, body, TYPES[path.extname(f).toLowerCase()] || "application/octet-stream");
   } catch (e) {

@@ -324,7 +324,7 @@ const mock = () => {
   await page.waitForFunction(() => !window.__app.ui.job, null, { timeout: 15000 });
   await page.evaluate(() => __app.go("home"));
   const home = await page.textContent("#view");
-  if (!/Continue/.test(home) || !/S1 E3/.test(home)) throw new Error("continue watching missing:\n" + home.slice(0, 600));
+  if (!/What next/.test(home) || !/S1 E3/.test(home)) throw new Error("continue watching missing:\n" + home.slice(0, 600));
   await page.evaluate(() => __app.go("upcoming"));
   await page.click('[data-action=upfilter][data-v=towatch]');
   if (!/S1 E3/.test(await page.textContent("#view"))) throw new Error("To watch view empty");

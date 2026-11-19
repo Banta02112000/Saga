@@ -124,11 +124,11 @@
     for (const c of rows) { if (q && !G.norm(c.title).includes(q) && !G.norm(c.franchise).includes(q)) continue; const f = fr.get(c.franchise) || { name: c.franchise, have: 0, total: 0, miss: [], soon: [] }; if (c.unreleased) f.soon.push(c); else { f.total++; if (c.have) f.have++; else f.miss.push(c); } fr.set(c.franchise, f); }
     const list = [...fr.values()].filter(f => f.miss.length || f.soon.length).sort((a, b) => b.miss.length - a.miss.length || a.name.localeCompare(b.name));
     const all = rows.filter(c => !c.unreleased), have = all.filter(c => c.have).length;
-    const row = c => `<div class="item"><div class="grow" style="min-width:0"><b class="ell" style="display:block">${esc(c.title)}</b><div class="small muted">${esc([c.date || c.year || "", c.sub, window.Core && Core.canonFrom ? "from " + Core.canonFrom(c) : ""].filter(Boolean).join(" · "))}${c.unreleased ? " · <b>Not out yet</b>" : ""}</div></div>
+    const row = c => `<div class="item"><div class="grow" style="min-width:0"><b class="ell" style="display:block">${esc(c.title)}</b><div class="small muted">${esc([c.date || c.year || "", c.sub, window.Core && Core.canonFrom ? "from " + Core.canonFrom(c) : ""].filter(Boolean).join(" · "))}${c.unreleased ? " · <b>Not out yet</b>" : ""}${(() => { const m = ((lib().meta || {}).canonImdb || {})[`${G.norm(c.title)}|${c.year || ""}`]; return m && m.imdb ? ` · IMDb${m.r ? ` ★ ${m.r}` : ""}${m.votes ? ` (${m.votes.toLocaleString()})` : ""}, not rated by you` : m && m.none ? " · not on IMDb" : ""; })()}</div></div>
       <button class="btn small" data-action="gcanonadd" data-t="${esc(c.title)}" data-y="${esc(c.date || c.year || "")}" data-i="${esc(c.imdb || "")}" data-f="${esc(c.franchise)}">${K.icon("plus")}Wishlist</button>
       <button class="iconbtn" data-action="gcanonno" data-t="${esc(c.title)}" data-y="${esc(c.year || "")}" data-i="${esc(c.imdb || "")}" data-f="${esc(c.franchise)}" aria-label="Not canon" title="Not canon">${K.icon("notcanon")}</button></div>`;
     const gaps = lib().visible().filter(g => !g.aiAt && (!g.date || !g.platform || g.hours == null)).length;
-    return `<div class="row wrap" style="gap:8px;margin:4px 0"><button class="btn small" data-action="ginfoall">${K.icon("sync")}Fill missing details with AI${gaps ? ` (${fmt(gaps)} games)` : ""}</button></div>
+    return `<div class="row wrap" style="gap:8px;margin:4px 0"><button class="btn small" data-action="gcanonimdb">${K.icon("sync")}Check on IMDb (rating, finished)</button><button class="btn small" data-action="ginfoall">${K.icon("sync")}Fill missing details with AI${gaps ? ` (${fmt(gaps)} games)` : ""}</button></div>
       <p class="muted" style="margin:4px 0 12px">You have ${fmt(have)} of ${fmt(all.length)} canon games (${Math.round(100 * have / Math.max(1, all.length))}%), in ${fmt(fr.size)} series. Your Games tab is what counts: IMDb lists are only a source.</p>`
       + (list.length ? list.slice(0, ui.cLim || 40).map(f => `<section>${K.head(f.name, `${f.have} of ${f.total}`, f.miss.length)}<div class="listcard">${f.miss.map(row).join("")}${f.soon.map(row).join("")}</div></section>`).join("")
         + (list.length > (ui.cLim || 40) ? `<button class="btn block" data-action="gcanonmore">Show more</button>` : "") : `<p class="muted">You have every canon game${q ? " that matches" : ""}.</p>`);
@@ -206,6 +206,7 @@
       <h4>Prices in other stores</h4>${storesHtml(g)}
       ${g.steamMins || g.ach ? `<p class="small" style="margin:6px 0">Steam: ${g.steamMins ? `<b>${g.steamMins >= 120 ? Math.round(g.steamMins / 60) + " h" : g.steamMins + " min"}</b> played` : ""}${g.steam2w ? ` (${Math.round(g.steam2w / 6) / 10} h in the last two weeks)` : ""}${g.steamLast ? ` · last played ${esc(g.steamLast)}` : ""}${g.ach && g.ach.total ? ` · achievements <b>${g.ach.got}/${g.ach.total}</b> (${Math.round(100 * g.ach.got / g.ach.total)}%)` : ""}</p>${g.ach && g.ach.total ? `<div class="minibar" style="margin:0 0 8px"><i style="width:${Math.round(100 * g.ach.got / g.ach.total)}%"></i></div>` : ""}` : ""}
       <h4>Details</h4><div class="listcard">${facts.map(([k, v]) => `<div class="row small" style="min-height:38px;border-bottom:1px solid var(--line)" ${k === "Franchise" || k === "Multiverse" ? `data-action="mvopen" data-mv="${esc(v)}" role="button"` : k === "Studio" ? `data-action="gstudio" data-dev="${esc(v)}" role="button"` : ""}><span class="muted" style="width:42%">${esc(k)}</span><span class="grow">${esc(v)}${k === "Franchise" || k === "Multiverse" || k === "Studio" ? ` <span class="muted">›</span>` : ""}</span></div>`).join("")}</div>
+      ${g.aiText ? `<details class="small" style="margin:8px 0"><summary class="muted">AI answer to your prompt</summary><pre style="white-space:pre-wrap;font:inherit;margin:6px 0">${esc(g.aiText)}</pre><button class="btn quiet small" data-action="ginfoone" data-id="${esc(g.id)}">Ask again</button></details>` : `<button class="btn quiet small" data-action="ginfoone" data-id="${esc(g.id)}">${K.icon("spark")}Details from AI (your prompt)</button>`}
       <label class="field" style="margin-top:12px"><span>Notes</span><textarea rows="2" data-gnotes="1" placeholder="Difficulty, mods, who you played with…">${esc(g.notes)}</textarea></label>
       ${relatedHtml(g)}
       <h4>Where to get it</h4>${G.storeLinks(g).map(([n, u]) => `<button class="sheetbtn" data-action="open" data-url="${esc(u)}">${K.icon("open")}${esc(n)}</button>`).join("")}
@@ -256,6 +257,8 @@
       case "gfilter": ui.f = el.dataset.v; ui.lim = 120; Saga.render(); return true;
       case "gview": ui.view = el.dataset.v; Saga.render(); return true;
       case "ginfo": Saga.gameInfo([el.dataset.id]); return true;
+      case "gcanonimdb": Saga.gameImdbCheck(); return true;
+      case "ginfoone": { const g = lib().get(el.dataset.id); if (g) { g.aiAt = 0; Saga.gameInfo([g.id]); } return true; }
       case "ginfoall": Saga.gameInfo(lib().visible().filter(g => !g.aiAt && (!g.date || !g.platform || g.hours == null)).map(g => g.id)); return true;
       case "gcanonmore": ui.cLim = (ui.cLim || 40) + 40; Saga.render(); return true;
       case "gcanonadd": {

@@ -584,6 +584,78 @@ Answer only with a JSON array, one object per game, in this order, with exactly 
 Games:
 ${titles.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
   }
+  // 0.7.1: your own prompt, word for word, one game at a time (Settings never rewrites it)
+  const MY_INFO_PROMPT = "Tell me: game Title, OG Release Date, OG best Platform, Remake Name,re-released, remastered, Remake Release Date, re-released, remastered, Remake best Platform, HLTB\ndates month in letters day in number and year (january 1, 1900)\nremakes count only if they cover the same story\nfor this game\n";
+  const infoPromptOne = title => MY_INFO_PROMPT + String(title || "").trim();
+  // reads the answer to your prompt, however it's laid out: "Label: value" lines, a list, or a table
+  function parseInfoText(text, title) {
+    const s = String(text || "");
+    if (/^\s*\[/.test(s.trim()) || /```json/.test(s)) { try { const r = parseInfo(s); if (r.length) return Object.assign(r[0], { title }); } catch (e) { /* not JSON after all */ } }
+    const kv = [];
+    for (let l of s.replace(/\r/g, "").split("\n")) {
+      l = l.replace(/\*\*|__|`/g, "").trim();
+      if (!l) continue;
+      if (/^\|/.test(l)) { const cells = l.split("|").map(x => x.trim()).filter(Boolean); if (cells.length >= 2 && !/^:?-{2,}/.test(cells[0])) kv.push([cells[0], cells.slice(1).join(" ")]); continue; }
+      l = l.replace(/^([-*•]|\d+[.)])\s+/, "");
+      const m = /^([^:]{2,90}?):\s*(.*)$/.exec(l); if (m) kv.push([m[1].trim(), m[2].trim()]);
+    }
+    const get = test => { const e = kv.find(([k]) => test(k.toLowerCase())); return e ? e[1] : ""; };
+    const none = v => (/^(none|n\/?a|no\b|not applicable|unknown|—|-|nessun)/i.test(String(v).trim()) ? "" : String(v).trim());
+    const plain = v => none(v).replace(/\s*[([].*$/, "").replace(/[.;]+$/, "").trim();
+    const dateIn = v => { v = none(v).replace(/(\d)(st|nd|rd|th)\b/gi, "$1"); const m = /([A-Za-z]+\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})/.exec(v) || /(\d{1,2}\s+[A-Za-z]+\.?,?\s+\d{4})/.exec(v) || /\b(\d{4})\b/.exec(v); return m ? wordDate(m[1]) : ""; };
+    const og = k => /\bog\b|original/.test(k), rm = k => /remake|re-?releas|remaster/.test(k);
+    const rName = plain(get(k => rm(k) && /name|title/.test(k)) || get(k => rm(k) && !/date|platform/.test(k)));
+    const hl = none(get(k => /hltb|how ?long/.test(k)));
+    const hm = /(\d+(?:[.,]\d+)?)/.exec(hl);
+    const hours = hm ? Math.round(parseFloat(hm[1].replace(",", ".")) * 10) / 10 : null;
+    return { title, date: dateIn(get(k => og(k) && /date|releas/.test(k) && !/platform/.test(k))), platform: plain(get(k => og(k) && /platform/.test(k))),
+      remake: rName && norm(rName) !== norm(title) ? { title: rName, date: dateIn(get(k => rm(k) && /date/.test(k))), platform: plain(get(k => rm(k) && /platform/.test(k))) } : null,
+      hours: hours > 0 && hours < 1000 ? hours : null };
+  }
+  // 0.7.1: Games › Missing checked against IMDb: the canon games you rated there (finished, with your rating) or
+  // listed (wishlist) come into your Games; for the rest, IMDb's id and rating are found and shown. `mine` are your
+  // synced IMDb rows; `rows` the missing canon games.
+  async function imdbCheckMissing(lib, rows, mine, http, gql, opt = {}) {
+    const sleep = opt.sleep || (ms => new Promise(r => setTimeout(r, ms))), p = opt.progress || (() => {});
+    const byId = new Map(), byN = new Map();
+    for (const r of mine) { if (r.medium !== "Video Game") continue; if (r.imdb) byId.set(r.imdb, r); const a = byN.get(norm(r.title)) || []; a.push(r); byN.set(norm(r.title), a); }
+    const near = (list, y) => (list || []).find(r => !y || !r.year || Math.abs(r.year - y) <= 1) || null;
+    lib.meta.canonImdb = lib.meta.canonImdb || {};
+    const out = { finished: 0, wishlist: 0, found: 0, notFound: 0, rated: [] };
+    const ids = [];
+    for (let i = 0; i < rows.length; i++) {
+      const c = rows[i]; p(i / rows.length, `IMDb: ${c.title}`);
+      const key = `${norm(c.title)}|${c.year || ""}`, known = lib.meta.canonImdb[key] || {};
+      let id = c.imdb || known.imdb || null;
+      let r = (id && byId.get(id)) || near(byN.get(norm(c.title)), c.year);
+      if (!r && !id && !known.none) {
+        try {
+          const hits = await imdbGameSearch(http, c.title);
+          const h = hits.find(x => norm(x.title) === norm(c.title) && (!c.year || !x.dateText || Math.abs(+x.dateText - c.year) <= 1)) || hits.find(x => norm(x.title) === norm(c.title));
+          if (h) { id = h.imdb; r = byId.get(id) || null; } else known.none = Date.now();
+        } catch (e) { if (/HTTP (403|429|202)/.test(e.message)) { out.blocked = true; break; } }
+        if (opt.gap !== 0) await sleep(opt.gap || 400);
+      }
+      if (id) { known.imdb = id; ids.push(id); }
+      lib.meta.canonImdb[key] = known;
+      if (r) {
+        const res = fromImdb(lib, [Object.assign({}, r, { imdb: r.imdb || id })]);
+        const g = lib.find({ title: r.title, imdb: r.imdb || id, year: r.year });
+        if (g) { g.aka = [...new Set((g.aka || []).concat(norm(c.title) !== norm(g.title) ? [c.title] : []))]; if (!g.franchise && c.franchise) g.franchise = c.franchise; }
+        if (+r.rating > 0) { out.finished++; out.rated.push(c.title); } else out.wishlist++;
+        void res;
+      } else if (id) out.found++; else out.notFound++;
+    }
+    // IMDb's own rating for the ones it knows, 50 at a time
+    for (let i = 0; gql && i < ids.length; i += 50) {
+      try {
+        const d = await gql(`{titles(ids:${JSON.stringify(ids.slice(i, i + 50))}){id ratingsSummary{aggregateRating voteCount}}}`);
+        for (const t of (d && d.titles) || []) { if (!t || !t.ratingsSummary) continue; for (const k of Object.keys(lib.meta.canonImdb)) if (lib.meta.canonImdb[k].imdb === t.id) { lib.meta.canonImdb[k].r = t.ratingsSummary.aggregateRating || null; lib.meta.canonImdb[k].votes = t.ratingsSummary.voteCount || 0; } }
+      } catch (e) { out.ratingsFailed = e.message; break; }
+    }
+    lib.save();
+    return out;
+  }
   function parseInfo(text) {
     const s = String(text || ""), a = s.indexOf("["), b = s.lastIndexOf("]");
     if (a < 0 || b < a) throw new Error("the answer has no list of games in it");
@@ -792,7 +864,7 @@ ${titles.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
       games: lib.visible().map(g => ({ id: g.id, t: g.title, f: g.franchise, m: g.multiverse, done: g.status === "done", date: g.date })) };
   }
 
-  const API = { timePlayed, hrs, sourceOf, wordDate, longDate, infoPrompt, parseInfo, applyInfo, steamPlay, backlogHours, findDuplicates, mergeGames, linkRemake, mergeInto, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
+  const API = { MY_INFO_PROMPT, infoPromptOne, parseInfoText, imdbCheckMissing, timePlayed, hrs, sourceOf, wordDate, longDate, infoPrompt, parseInfo, applyInfo, steamPlay, backlogHours, findDuplicates, mergeGames, linkRemake, mergeInto, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
     steamSearch, linkSteam, steamPrices, storePrices, steamDates, importRows, fromImdb, storeLinks, indexFor, yearOf, NA };
   if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
   root.GamesCore = API;

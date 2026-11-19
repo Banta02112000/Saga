@@ -1,0 +1,36 @@
+name: imdb-check
+# Every morning: does IMDb still answer the way Saga reads it? Opens an issue when IMDb changed something.
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Ask IMDb
+        id: probe
+        working-directory: web
+        run: node check_imdb.js | tee ../imdb-check.txt
+      - name: Open an issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh issue list --state open --label imdb-changed --json number --jq '.[0].number' | grep -q .; then
+            gh label create imdb-changed --color d93f0b --description "IMDb changed something Saga reads" 2>/dev/null || true
+            gh issue create --label imdb-changed --title "IMDb changed: Saga's IMDb sync needs an update" --body "The daily check found a change ($(date -u +%F)):
+
+          \`\`\`
+          $(cat imdb-check.txt)
+          \`\`\`
+
+          Your stored ratings and lists are kept; the IMDb parts of a sync fail with a clear message until Saga is updated."
+          fi

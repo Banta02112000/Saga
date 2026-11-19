@@ -607,3 +607,22 @@ D.update({
   "on the phone": "sul telefono", "on the website": "sul sito", "undone": "annullato",
   "Films & series": "Film e serie", "Canon & settings": "Canon e impostazioni",
 })
+
+# 0.7.1: what next, search, year, keys
+D.update({
+  "What next": "Da continuare",
+  "People": "Persone",
+  "Best of the year": "Il meglio dell'anno",
+  "Keys": "Tasti",
+  "search everything": "cerca ovunque",
+  "close": "chiudi",
+  "Artist": "Artista",
+  "Close": "Chiudi",
+})
+D.update({
+  "Check on IMDb (rating, finished)": "Controlla su IMDb (voto, finito)",
+  "AI answer to your prompt": "Risposta dell'AI al tuo prompt",
+  "Ask again": "Chiedi di nuovo",
+  "Details from AI (your prompt)": "Dettagli dall'AI (il tuo prompt)",
+  "Missing games on IMDb": "Giochi mancanti su IMDb",
+})

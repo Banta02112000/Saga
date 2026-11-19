@@ -1011,6 +1011,7 @@
       if (g.imdb) byImdb.set(g.imdb, g);
       put(norm(g.title), parseYear(g.date), g);
       if (g.remake && g.remake.title) put(norm(g.remake.title), parseYear(g.remake.date), g);
+      for (const t of g.aka || []) put(norm(t), parseYear(g.date), g); // 0.7.1: the canon list's name for it (matched on IMDb)
     }
     const kept = new Map(), out = [];
     for (const c0 of db.canon()) {
@@ -2005,6 +2006,25 @@
     return m[0];
   }
 
+  // 0.7.0: what actually went wrong with IMDb, in one plain sentence, from the errors of each route tried
+  // (data service, hidden browser, CSV export, page). The most telling cause wins.
+  const IMDB_CAUSES = [
+    ["changed", /Cannot query field|Unknown (argument|type)|Validation|GRAPHQL_VALIDATION|not JSON|no titles found|layout|unexpected page/i, "IMDb changed how its data service or pages look, so Saga can't read them right now. What you already have is kept; an update to Saga will fix it (the daily check on GitHub notices it too)."],
+    ["private", /\b(401|403)\b|sign ?in|private|log ?in|not public/i, "IMDb wants you signed in (or this list is private): Settings › IMDb › Sign in to IMDb, or import the CSV export once."],
+    ["blocked", /\b(202|429)\b|challenge|captcha|limiting|refused earlier|robot/i, "IMDb is turning away automated requests for now. Nothing to fix on your side: it usually clears within the hour, then tap Retry failed."],
+    ["network", /network|timed? ?out|took longer|connection|ECONN|ENOTFOUND|HTTP 0\b|offline/i, "Saga couldn't reach IMDb (the connection dropped or was too slow). Tap Retry failed when you're back online."],
+  ];
+  function imdbWhy(errs) {
+    const text = [].concat(errs).join("; ");
+    for (const [kind, rx, msg] of IMDB_CAUSES) if (rx.test(text)) return { kind, msg };
+    return { kind: "other", msg: "IMDb gave an answer Saga didn't expect. What you already have is kept." };
+  }
+  function imdbFail(what, errs) {
+    const w = imdbWhy(errs);
+    const e = new Error(`${w.msg} (${what}; details: ${[].concat(errs).join("; ").slice(0, 300)})`);
+    e.imdbKind = w.kind; if (w.kind === "network") e.network = true;
+    return e;
+  }
   async function imdbList(http, url) {
     const lid = listIdFrom(url);
     const errs = [];
@@ -2027,7 +2047,7 @@
     }
     try { return [await pageItems(http, `https://www.imdb.com/list/${lid}/`), "page (may be first batch only)"]; } catch (e) { errs.push(`page: ${e.message}`); }
     if (netFail) throw netError(`couldn't reach IMDb after ${CONFIG.browseTries} tries (the connection dropped, or IMDb is limiting requests). Tap Retry failed in a few minutes.`);
-    throw new Error(`IMDb list ${lid} failed (${errs.join("; ")}). Check the list is public, or sign in to IMDb in Settings.`);
+    throw imdbFail(`list ${lid}`, errs);
   }
 
   // Accepts ur1234567, the newer p.xxxxxxxx profile IDs, or any IMDb profile/ratings/watchlist link.
@@ -2062,7 +2082,7 @@
       errs.push("no titles found in page");
     }
     if (netFail) throw netError(`couldn't reach IMDb after ${CONFIG.browseTries} tries (the connection dropped, or IMDb is limiting requests). Tap Retry failed in a few minutes.`);
-    throw new Error(`IMDb watchlist for ${id} failed (${errs.join("; ")}). Check your watchlist is public, or sign in to IMDb in Settings.`);
+    throw imdbFail(`watchlist ${id}`, errs);
   }
 
   async function imdbRatings(http, ur, want = 0, store = null) {
@@ -2100,7 +2120,7 @@
     } catch (e) { errs.push(`export: ${e.message}`); }
     try { return [{ watched: await pageItems(http, `https://www.imdb.com/user/${ur}/ratings/`) }, "page (first page only, no ratings)"]; } catch (e) { errs.push(`page: ${e.message}`); }
     if (netFail) throw netError(`couldn't reach IMDb after ${CONFIG.browseTries} tries (the connection dropped, or IMDb is limiting requests). Tap Retry failed in a few minutes.`);
-    throw new Error(`IMDb ratings for ${ur} failed (${errs.join("; ")}). If your ratings are private, import your ratings CSV, or use Sign in to IMDb in Settings.`);
+    throw imdbFail(`ratings ${ur}`, errs);
   }
 
   // ---- TMDB ----
@@ -3691,7 +3711,7 @@ ${blocks.join("\n\n")}`;
   function sourceHealth(db, now = Date.now()) {
     let st = {}; try { st = JSON.parse(db.get("sync_state", "{}")); } catch (e) { /* none */ }
     return Object.entries(st).filter(([, v]) => v && !v.ok && (v.streak || 1) >= 2)
-      .map(([label, v]) => ({ label, streak: v.streak || 2, okAt: v.okAt || 0, msg: v.msg || "", days: v.okAt ? Math.floor((now - v.okAt) / 864e5) : null }))
+      .map(([label, v]) => ({ label, streak: v.streak || 2, okAt: v.okAt || 0, msg: v.msg || "", kind: v.kind || "", days: v.okAt ? Math.floor((now - v.okAt) / 864e5) : null }))
       .sort((a, b) => b.streak - a.streak);
   }
   async function syncAll(db, http, progress, only = null, opt = {}) {
@@ -3811,7 +3831,7 @@ ${blocks.join("\n\n")}`;
         } catch (e) {
           report.push(`FAIL ${label}: ${e.message}`);
           const was = state[label] || {};
-          state[label] = { ok: false, at: Date.now(), ms: Date.now() - t0, msg: e.message, okAt: was.okAt || (was.ok ? was.at : 0), streak: (was.streak || 0) + 1 };
+          state[label] = { ok: false, at: Date.now(), ms: Date.now() - t0, msg: e.message, kind: e.imdbKind || "", okAt: was.okAt || (was.ok ? was.at : 0), streak: (was.streak || 0) + 1 };
           failed.push(label);
         }
         L(`end ${label} (${Date.now() - t0} ms)`);
@@ -3863,7 +3883,7 @@ ${blocks.join("\n\n")}`;
     MEDIA, PROFILES, SECRET_RX, norm, parseYear, mediumFromImdb, mediumFromText, ratio, TitleIndex, Store,
     parseCsv, parseImdbText, importImdbCsv, importFranchiseFile, traktEntries, routeTraktFile, storeTrakt, importTraktZip,
     breathe, jsonParts, BUSY: CONFIG_BUSY, consumed, Exclusion, canonStatus, canonStatusAsync, franchiseProgress, isUnreleased, gameCanon, keepImdbEps, canonFrom, upNext, missingCanon, discrepancies, computeStats,
-    recommend, sourceHealth, personWorks, DEVICE_RX, tmdbPosters, VMap, apiTitles, pageOrApi, gqlInfo, imdbReset: () => { gqlBlocked = false; }, imdbGql, gqlList, gqlRatings, imdbUr, authorizeUrl, exchangeCode, Trakt, traktSync, imdbList, imdbRatings, imdbWatchlist, imdbUserId, listIdFrom, walkTitles, browseTitles, pageExtract, pageProbe, probeFor, TMDB, collectionScan, season0Scan,
+    recommend, sourceHealth, personWorks, DEVICE_RX, imdbWhy, IMDB_CAUSES, T_FIELDS, imdbGql, tmdbPosters, VMap, apiTitles, pageOrApi, gqlInfo, imdbReset: () => { gqlBlocked = false; }, imdbGql, gqlList, gqlRatings, imdbUr, authorizeUrl, exchangeCode, Trakt, traktSync, imdbList, imdbRatings, imdbWatchlist, imdbUserId, listIdFrom, walkTitles, browseTitles, pageExtract, pageProbe, probeFor, TMDB, collectionScan, season0Scan,
     CONFIG, AI_PRESETS, compatProvider, compatScan, localModels, serverBase, traktOne, traktEpRatings, parseLines, parseMvGroup, relevantNames, promptLine, netHint, robust, pool, details, titleInfo, justWatch, pickDates, dateSummary, bestOffer, cachedInfo, enrichInfo, platformRatings, ratingDiffs, withTimeout, watchProgress, continueWatching, testGemini, gemError, fillPosters, posterKey, aiState, resetAi, canonScan, claudeScan, claudeCall, claudeModels, rankClaudeModel, CLAUDE_DEFAULT, upcomingEpisodes, canonKeys, parseJsonArray, multiverseScan, collectionRows, refreshCollections, tvNext, upcomingEvents, computeAlerts, backgroundRun, fmtWhen, hashId, geminiState, resetGemini, mvGroup, mvExpand, multiverses, mvMap, mvAlias, mvPending, mvDone, geminiProvider, vpnOptions, bestVpn, worldFrom, worldCountries, jwQuery, flag: FLAGS, VPN_DEFAULT, manualScan, franchiseBatches, verifyPrompt, parseVerify, newsBatches, newsPrompt, parseCanonRows, franchiseName, releaseList, releaseKey, parseDate, seeds, rankGeminiModel, resolveGeminiModel, syncAll, sleep,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Core;

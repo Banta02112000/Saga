@@ -1189,7 +1189,18 @@ window.BANTA_IT = {
 "on the phone": "sul telefono",
 "on the website": "sul sito",
 "undone": "annullato",
-"Canon & settings": "Canon e impostazioni"
+"Canon & settings": "Canon e impostazioni",
+"What next": "Da continuare",
+"Best of the year": "Il meglio dell'anno",
+"Keys": "Tasti",
+"search everything": "cerca ovunque",
+"close": "chiudi",
+"Artist": "Artista",
+"Check on IMDb (rating, finished)": "Controlla su IMDb (voto, finito)",
+"AI answer to your prompt": "Risposta dell'AI al tuo prompt",
+"Ask again": "Chiedi di nuovo",
+"Details from AI (your prompt)": "Dettagli dall'AI (il tuo prompt)",
+"Missing games on IMDb": "Giochi mancanti su IMDb"
 };
 window.BANTA_IT_PAT = [
 [

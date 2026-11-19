@@ -130,7 +130,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   // ---- Home
   await pg.click('nav#tabs [data-sec="home"]');
   const home = await pg.textContent("#view"); console.log("HOME:", home.replace(/\s+/g, " ").slice(0, 600));
-  ok(/Next episode/.test(home) && /Severance/.test(home) && /Continue/.test(home) && /Recently watched/.test(home), "Home: hero, continue, recent");
+  ok(/Next episode/.test(home) && /Severance/.test(home) && /What next/.test(home) && /Recently watched/.test(home), "Home: hero, continue, recent");
   ok(/Outer Wilds/.test(home) && /Dune/.test(home), "Home mixes games and books");
   await pg.screenshot({ path: `${OUT}/s-home.png`, fullPage: true });
   // tick the next episode from the hero → queued for Trakt
@@ -292,7 +292,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.7.0", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.7.1", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();
@@ -457,7 +457,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   await A(() => { BantaShell.setLang("it"); __app.go("home"); });
   await pg.waitForTimeout(200);
   const it = await pg.textContent("body");
-  ok(/Continua|Prossimo episodio|Visti di recente/.test(it), "Italian Home");
+  ok(/Da continuare|Continua|Prossimo episodio|Visti di recente/.test(it), "Italian Home");
   await pg.screenshot({ path: `${OUT}/s-home-it.png`, fullPage: true });
   await A(() => BantaShell.setLang("en"));
   await pg.waitForLoadState("load"); await pg.waitForTimeout(700);
@@ -532,7 +532,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   ok(await A(() => /All-time favourites/.test(document.querySelector("#overlay").textContent) && JSON.parse(__app.db.get("my_lists")).some(l => l.rule && l.rule.minRating === 9)), "a smart list preset saved and opened");
   await A(() => { document.querySelector("#overlay").innerHTML = ""; });
   const wr = await A(async () => { await __app.openWrapped(); const t = document.querySelector("#overlay").textContent; const w = __app.wrappedText(__app.wrappedData(new Date().getFullYear())); document.querySelector("#overlay").innerHTML = ""; return { card: /Year in review/.test(t) && /Month by month/.test(t), text: w }; });
-  ok(wr.card && /^My \d{4} in Saga\n.+hours of stories/.test(wr.text), "Year in review card and share text: " + wr.text.slice(0, 120));
+  ok(wr.card && /^My \d{4} in Saga\n.+ hours: .+watching/.test(wr.text), "Year in review card and share text: " + wr.text.slice(0, 120));
   const wb = await A(() => {
     const b = __app.books.add ? __app.books.add({ title: "Vagabond", manga: true, chapters: 300, chapter: 10 }, "reading") : null;
     const bk = (b && (b.book || b)) || __app.books.books.find(x => x.status === "reading");
@@ -918,6 +918,17 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     const over = await A(() => document.documentElement.scrollWidth - window.innerWidth);
     ok(over <= 2, `no sideways scrolling at ${w}px (${over})`);
   }
+  // 0.7.0: on a big screen a title opens beside the list, which stays usable; keys move around
+  await pg.setViewportSize({ width: 1500, height: 900 });
+  await A(() => { __app.go("library"); __app.render(); });
+  const two = await A(async () => { const ids = [...document.querySelectorAll('#view [data-action="libopen"]')].map(x => x.dataset.id).filter((v, i, a) => a.indexOf(v) === i).slice(0, 2); __app.openLib(ids[0]); await new Promise(r => setTimeout(r, 300));
+    const el = document.querySelector(`#view [data-action="libopen"][data-id="${ids[1]}"]`); const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + 10, r.top + r.height / 2);
+    return { side: document.body.classList.contains("sideopen"), close: !!document.querySelector("#overlay .sideclose"), reachable: !!(hit && hit.closest(`[data-id="${ids[1]}"]`)), ids }; });
+  await pg.screenshot({ path: `${OUT}/w1500-side.png` });
+  await pg.keyboard.press("Escape");
+  const esc1 = await A(() => !document.querySelector("#overlay").innerHTML && !document.body.classList.contains("sideopen"));
+  await pg.keyboard.press("g"); const gk = await A(() => __app.ui.sec);
+  ok(two.side && two.close && two.reachable && esc1 && gk === "games", "big screen: details beside the list, the list still usable, Esc closes, keys switch sections: " + JSON.stringify(Object.assign(two, { esc1, gk })));
   await pg.setViewportSize({ width: 390, height: 844 });
   console.log("SAGA 5 UI TESTS PASSED");
   await browser.close(); srv.close();

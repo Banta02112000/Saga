@@ -23,6 +23,13 @@ const ok = m => console.log("ok  " + m);
   const core = fs.readFileSync(path.join(__dirname, "core.js"), "utf8");
   assert.ok(core.includes(SE.DEVICE_RX.source), "per-device settings: the same list in core.js and entries.js");
 
+  // ---- IMDb failures in one plain sentence
+  const Cc = require("./core.js");
+  assert.strictEqual(Cc.imdbWhy(["api: IMDb API: Cannot query field \"foo\" on type \"Title\"", "export: HTTP 403"]).kind, "changed", "a changed data service is the most telling cause");
+  assert.strictEqual(Cc.imdbWhy(["api: IMDb API HTTP 403", "export: HTTP 401"]).kind, "private");
+  assert.strictEqual(Cc.imdbWhy(["api: IMDb API HTTP 202"]).kind, "blocked");
+  assert.strictEqual(Cc.imdbWhy(["browser: took longer than 4 min"]).kind, "network");
+  ok("IMDb failures: changed / private / blocked / network told apart");
   // ---- the server
   const data = fs.mkdtempSync(path.join(os.tmpdir(), "saga-070-")), port = 21000 + Math.floor(Math.random() * 2000);
   const srv = spawn(process.execPath, [path.join(__dirname, "../site/server.js")], { env: Object.assign({}, process.env, { SAGA_DATA: data, SAGA_WEB: __dirname, SAGA_PORT: String(port), SAGA_PUBLIC_PORT: "0", SAGA_JOURNAL_MAX: "4000" }), stdio: ["ignore", "inherit", "inherit"] });

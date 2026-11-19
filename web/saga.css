@@ -365,5 +365,17 @@ body[data-sec="music"] { --acc: #1db954; }
 .ep .castline{margin-top:1px}
 
 /* 0.7.0: the website is older than the phone */
-#behindbar{position:sticky;top:0;z-index:50;background:#5a3a12;color:#fff;padding:8px 14px;font-size:13px;line-height:1.4}
+#behindbar,#offlinebar{position:sticky;top:0;z-index:50;background:#5a3a12;color:#fff;padding:8px 14px;font-size:13px;line-height:1.4}
+#offlinebar{background:#2d3a4f}
 #behindbar code{background:rgba(0,0,0,.3);padding:1px 4px;border-radius:4px}
+/* 0.7.0: big screens: a title's details open beside the list, which stays usable (tap another title to switch;
+   Esc or the × closes). Phones and narrow windows keep the sheet over the page. */
+@media (min-width: 1200px) {
+  body.sideopen #overlay > .scrim.bottom { background: none; backdrop-filter: none; -webkit-backdrop-filter: none; pointer-events: none; }
+  body.sideopen #overlay > .scrim.bottom > .sheet { pointer-events: auto; box-shadow: -10px 0 30px rgba(0,0,0,.35); }
+  body.sideopen .topbar, body.sideopen main#view, body.sideopen .jobbar { margin-left: calc(var(--rail-w) + 20px); margin-right: calc(min(600px, 44vw) + 16px); max-width: none; }
+  body.sideopen #overlay > .scrim.bottom > .sideclose { display: flex; position: absolute; top: 14px; right: 18px; z-index: 60; pointer-events: auto; background: rgba(0,0,0,.5); border-radius: 50%; }
+}
+.sideclose { display: none; }
+.keyhelp { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px; }
+.keyhelp kbd { font: 600 12px/1 var(--mono, monospace); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; text-align: center; }
