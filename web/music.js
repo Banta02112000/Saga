@@ -179,7 +179,7 @@
   const fmt = n => (+n || 0).toLocaleString(S().lang() === "it" ? "it-IT" : "en-GB");
   const ago = t => { const m = Math.round((Date.now() / 1000 - t) / 60); return m < 1 ? "now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : K.when(t * 1000, S().lang()); };
   const ready = () => ({ lastfm: !!(db().get("lastfm_user") && db().get("lastfm_key")), spotify: !!(db().get("spotify_client_id") && db().get("spotify_token")) });
-  const redirect = () => `${(S().Native.linkScheme && S().Native.linkScheme()) || "bantaapps"}://oauth/spotify`;
+  const redirect = () => (window.__sagaWeb ? window.__sagaWeb.oauthUrl("spotify") : `${(S().Native.linkScheme && S().Native.linkScheme()) || "bantaapps"}://oauth/spotify`);
 
   function connectCard(full) {
     const r = ready();

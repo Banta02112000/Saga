@@ -3752,7 +3752,15 @@ ${blocks.join("\n\n")}`;
         // the app shares, freezing the screen. The whole list is read only when asked (Settings › IMDb).
         // 0.6.9.5: on the website there's no hidden browser, and IMDb answers servers with a challenge (HTTP 202):
         // the phone reads your ratings, the website gets them from the phone's next website sync
-        if (typeof window !== "undefined" && window.__sagaWeb) return { msg: "left to the phone (IMDb doesn't answer servers): the phone's next sync brings them here" };
+        // 0.7.5: the website tries IMDb's data service too (from some servers it answers); when it doesn't, the phone does it
+        if (typeof window !== "undefined" && window.__sagaWeb) {
+          try {
+            const uid = await imdbUr(http, db.get("imdb_user"), tplStore);
+            const items = uid ? await gqlRatings(http, uid, db.items("imdb", ["rated"]).length >= 1000 ? 500 : 0) : [];
+            if (items.length) { await db.addItemsAsync(items, "imdb", "rated", ""); keepEps(Object.assign(items.slice(), { total: items.total || 0, isRatings: true })); return { msg: `${items.length} ratings read by the website${items.total ? ` (IMDb counts ${items.total})` : ""}`, got: items.length }; }
+          } catch (e) { /* turned away: left to the phone */ }
+          return { msg: "left to the phone (IMDb turned the website away today): the phone's next sync brings them here" };
+        }
         const have = db.items("imdb", ["rated"]).length;
         const want = have >= 1000 && !opt.fullImdb ? 500 : 0;
         const [groups, route] = await imdbRatings(http, db.get("imdb_user"), want, tplStore);

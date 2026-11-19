@@ -276,7 +276,7 @@
   function undoChange(...a) { return P_website().undoChange(...a); }
   function syncWithWebServer(...a) { return P_website().syncWithWebServer(...a); }
   const C = window.Core;
-  const VERSION = "0.7.4";
+  const VERSION = "0.7.5";
   const AUTO_SYNC_HOURS = 12;
   Object.assign(C.PROFILES, (window.CANONSYNC_PRESET || {}).traktProfiles || {});
   const DEFAULT_PROFILE = (window.CANONSYNC_PRESET || {}).traktDefault || "PKCE (your own Trakt app)";
@@ -584,6 +584,8 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.7.5", ["Everything on both: the website can now sign in to Spotify, IsThereAnyDeal and AniList (they come back to <your website>/oauth/…: add that address to the app you made with each of them, next to the phone's; AniList allows one, so there use Paste the address instead). The website also tries your IMDb ratings itself (when IMDb turns it away, the phone brings them as before), shows notifications while it's open (new episodes, price alerts), takes things shared to it once installed as an app, and shows Done by itself (your phone runs those jobs, the switches work from both).",
+      "The phone gets the website's two-pane view too: on an opened Fold or a tablet (from 880px), a title opens beside the list."]],
     ["0.7.4", ["Fixed: series (and a few films and games) shown as \"From: IMDb watched\" that you never saw and never rated. When IMDb's data service didn't answer, Saga read your ratings page itself, and that page also lists suggestions and other titles: those without a rating were saved as watched. Now only titles with your rating are taken from it. The ones it added are removed once (only if you hadn't rated, tagged or noted them, and they're on no other list or source of yours), with a copy kept first; removed titles don't come back with a sync.",
       "\"Not mine: remove\" next to the From line on every film and series (tap twice). It stays removed: a sync won't bring it back. Several at once: Library › Select › Remove."]],
     ["0.7.3", ["Lighter saving on the phone: ticking an episode, rating or changing a status adds one line to a small change log instead of writing your whole library (megabytes) again. The whole file is written when you leave the app, before a website sync and when the log gets long; if the phone stops the app in between, the log is read back at the next start, so nothing is lost.",

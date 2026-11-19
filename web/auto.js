@@ -135,7 +135,7 @@
     function html() {
       let a = []; try { a = JSON.parse(db().get("auto_log", "[]")); } catch (e) { a = []; }
       const esc = S.esc, when = t => new Date(t).toLocaleString(S.lang() === "it" ? "it-IT" : "en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-      return `<section>${S.Kit.head("Done by itself")}<div class="card" style="padding:10px">${JOBS.map(([k, t, d]) => `<label class="switch"><input type="checkbox" data-action="autoset" data-k="${k}" ${on(k) ? "checked" : ""}><span><b>${esc(t)}</b><small class="muted" style="display:block">${esc(d)}</small></span></label>`).join("")}</div>
+      return `<section>${S.Kit.head("Done by itself")}${typeof window !== "undefined" && window.__sagaWeb ? `<p class="small muted" style="margin:0 0 8px">Your phone does these (so they don't run twice); the switches here change what it does, and the list shows what it did.</p>` : ""}<div class="card" style="padding:10px">${JOBS.map(([k, t, d]) => `<label class="switch"><input type="checkbox" data-action="autoset" data-k="${k}" ${on(k) ? "checked" : ""}><span><b>${esc(t)}</b><small class="muted" style="display:block">${esc(d)}</small></span></label>`).join("")}</div>
         <div class="listcard" style="margin-top:8px">${a.length ? a.slice(0, 20).map(x => `<div class="item"><div class="grow" style="min-width:0"><div class="small">${esc(x.what)}</div><div class="small muted">${esc(when(x.at))}</div></div></div>`).join("") : `<p class="small muted" style="padding:8px 0">Nothing yet: it runs after each sync.</p>`}</div></section>`;
     }
     return { run, html, retryLater, JOBS, log, on, _jobs: { dupes, gameCanon, cast, gameInfo } };

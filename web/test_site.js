@@ -31,6 +31,16 @@ const ok = (c, m) => { if (!c) { console.error("FAIL: " + m); process.exit(1); }
     await pg.waitForTimeout(1500);
     ok(/9\.9\.9/.test(bb) && /aren't saved/.test(bb) && !/Not Saved While Behind/.test(fs.readFileSync(path.join(data, "library.json"), "utf8")) && await pg.evaluate(() => __sagaWeb.held() > 0), "website older than the phone: says so and doesn't save: " + bb.slice(0, 120));
     fs.rmSync(path.join(data, ".phone.json")); await pg.reload(); await pg.waitForFunction(() => window.__app && !__sagaWeb.paused(), null, { timeout: 15000 });
+    // 0.7.5: a sign-in on the website comes back to <site>/oauth/<name>, which hands the address to the Saga page
+    ok(await pg.evaluate(() => __sagaWeb.oauthUrl("spotify")) === `http://127.0.0.1:${port}/oauth/spotify`, "sign-ins on the website come back to the website");
+    await pg.evaluate(() => { window.__oauth = u => { window.__oauthSeen = u; }; });
+    { const cb = await pg.evaluate(p => { const w = window.open(`http://127.0.0.1:${p}/oauth/spotify?code=abc&state=xyz`, "_blank"); return !!w; }, port); await pg.waitForTimeout(1200); void cb; }
+    { const got = await pg.evaluate(() => { const a = Android.takeOauth(); return [a, Android.takeOauth(), window.__oauthSeen || ""]; }); ok((/oauth\/spotify\?code=abc/.test(got[0]) && got[1] === "") || /oauth\/spotify\?code=abc/.test(got[2]), "the sign-in's answer reaches the Saga page once: " + JSON.stringify(got)); }
+    // shared to the website installed as an app (share target)
+    await pg.waitForFunction(() => __sagaWeb.pending() === 0, null, { timeout: 15000 }).catch(() => {});
+    await pg.goto(`http://127.0.0.1:${port}/?text=${encodeURIComponent("Dune Part Two")}`, { timeout: 20000 }); await pg.waitForFunction(() => window.__app, null, { timeout: 15000 });
+    await pg.evaluate(() => { document.querySelector("#overlay").innerHTML = ""; });
+    ok(await pg.evaluate(() => fetch("manifest.json").then(r => r.json()).then(m => !!m.share_target)), "the website can be a share target");
     // 0.7.0: offline: the page opens from this browser's copy, keeps changes, sends them when the server is back
     await pg.waitForTimeout(2500); // the copy is kept a moment after loading
     await pg.context().setOffline(true);

@@ -84,6 +84,10 @@
     }).catch(function () { /* still away */ });
   }
   window.addEventListener("online", flushWaiting);
+  var oauthBack = function () { if (window.__oauthPoll) try { window.__oauthPoll(); } catch (e) { /* app not ready */ } };
+  window.addEventListener("storage", function (e) { if (e.key === "saga_oauth" && e.newValue) oauthBack(); });
+  window.addEventListener("message", function (e) { if (e.origin === location.origin && e.data && e.data.sagaOauth) { try { localStorage.setItem("saga_oauth", e.data.sagaOauth); } catch (x) { /* none */ } oauthBack(); } });
+  window.addEventListener("focus", oauthBack);
   setInterval(function () { if (Object.keys(waiting).length || window.__sagaOffline) { if (!Object.keys(waiting).length) { fetch(api("me"), { cache: "no-store" }).then(function (r) { if (r.ok) { window.__sagaOffline = null; bar(""); } }).catch(function () {}); } else flushWaiting(); } }, 20000);
   var stampOf = function (t) { t = t || ""; return t.length + ":" + t.slice(-16); };
   // 0.6.9.4: a file changed on the server (the phone synced, another page saved, a webhook): its new text is handed to
@@ -211,13 +215,20 @@
     pickBackupFile: noop,
     writeUri: function () { return false; },
     writeUriBuf: function (id, uri, k) { delete bufs[k]; deliver("__saveDone", id, "false"); },
-    takeShared: function () { return ""; },
+    // 0.7.5: shared to Saga from another app (the website installed as an app: its share target), once
+    takeShared: function () { try { var q = new URLSearchParams(location.search), t = [q.get("title"), q.get("text"), q.get("url")].filter(Boolean).join(" "); if (t && !window.__sharedTaken) { window.__sharedTaken = true; history.replaceState(null, "", location.pathname); return t; } } catch (e) { /* none */ } return ""; },
+    // 0.7.5: sign-ins come back to <site>/oauth/<name> in another tab, which leaves the address here
+    takeOauth: function () { try { var u = localStorage.getItem("saga_oauth"); if (u) { localStorage.removeItem("saga_oauth"); return u; } } catch (e) { /* none */ } return ""; },
+    linkScheme: function () { return ""; },
     // the phone's own things: nothing to do on a website
     copy: function (t) { try { navigator.clipboard.writeText(t); } catch (e) { /* no clipboard */ } },
     openUrl: function (u) { window.open(u, "_blank", "noopener"); },
     openInApp: function (u) { window.open(u, "_blank", "noopener"); },
     openClassic: function (u) { window.open(u, "_blank", "noopener"); },
-    notify: noop, notifyAction: noop, status: noop, clearStatus: noop, requestNotifications: noop,
+    // 0.7.5: notifications while the website is open (new episodes, price alerts…), when the browser allows them
+    notify: function (id, title, text) { try { if (window.Notification && Notification.permission === "granted") new Notification(String(title || "Saga"), { body: String(text || ""), tag: "saga-" + id, icon: "icon-192.png" }); } catch (e) { /* not here */ } },
+    requestNotifications: function () { try { if (window.Notification && Notification.permission === "default") Notification.requestPermission(); } catch (e) { /* not here */ } },
+    notifyAction: noop, status: noop, clearStatus: noop,
     setBars: noop, setBackground: noop, done: noop, randomUrl: function () { return ""; },
     watchScreen: noop, screenReport: function () { return "0"; },
   };
@@ -231,6 +242,7 @@
     share: function (title, text) { try { if (navigator.share) { navigator.share({ title: title, text: text }).catch(noop); return true; } } catch (e) { /* no share sheet */ } return false; },
   };
   window.__sagaWeb = { pending: function () { return unsent; }, files: function () { return Object.keys(files); }, user: "", me: null,
+    oauthUrl: function (name) { return location.origin + location.pathname.replace(/[^/]*$/, "") + "oauth/" + name; },
     pause: function (on) { paused = !!on; }, paused: function () { return paused; }, held: function () { return held; } };
   window.__sagaWeb.ready = fetch(api("me")).then(function (r) { return r.json(); }).then(function (m) { window.__sagaWeb.user = m.user || ""; window.__sagaWeb.me = m; return m; }).catch(function () { return null; });
   // 0.6.2: installable, and the app and its pictures open even when the server can't be reached.

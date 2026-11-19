@@ -42,7 +42,7 @@
     A.Native.openUrl(A.GC.itadAuthUrl(cid, itadRedirect(), await A.Native.sha256url(verifier), state));
     A.toast("Approve Saga on IsThereAnyDeal; you'll come back here by yourself");
   }
-  const itadRedirect = () => `${(A.Native.linkScheme && A.Native.linkScheme()) || "bantaapps"}://oauth/itad`;
+  const itadRedirect = () => (window.__sagaWeb ? window.__sagaWeb.oauthUrl("itad") : `${(A.Native.linkScheme && A.Native.linkScheme()) || "bantaapps"}://oauth/itad`); // 0.7.5: the website signs in too
   // the browser comes back with …://oauth/itad?code=…&state=… (or the address pasted by hand)
   async function itadFinish(url) {
     let st = {}; try { st = JSON.parse(A.db.get("itad_pkce_secret", "{}")) || {}; } catch (e) { st = {}; }
@@ -58,7 +58,7 @@
   }
   window.__oauth = url => { if (/oauth\/itad/.test(url)) itadFinish(url); else if (/oauth\/anilist/.test(url)) anilistFinish(url); else if (/oauth\/spotify/.test(url) && Kit.mods.music) Kit.mods.music.spotifyFinish(url); };
   // 0.6.9: AniList sign-in (the token comes back in the address: …://oauth/anilist#access_token=…)
-  const anilistRedirect = () => `${(A.Native.linkScheme && A.Native.linkScheme()) || "bantaapps"}://oauth/anilist`;
+  const anilistRedirect = () => (window.__sagaWeb ? window.__sagaWeb.oauthUrl("anilist") : `${(A.Native.linkScheme && A.Native.linkScheme()) || "bantaapps"}://oauth/anilist`);
   function anilistFinish(url) {
     const t = Imports.anilistTokenFrom(url);
     if (!t) { A.toast("That isn't an AniList sign-in address"); return; }

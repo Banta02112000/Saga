@@ -35,7 +35,7 @@ const SHIM = fs.readFileSync(path.join(__dirname, "web-shim.js"));
 const APP_VERSION = (() => { try { return (/const VERSION = "([\d.]+)"/.exec(fs.readFileSync(path.join(WEB, "app.js"), "utf8")) || [])[1] || ""; } catch (e) { return ""; } })();
 // 0.6.2: installable app (manifest) and the offline copy of the app and its pictures (service worker)
 const SW = fs.readFileSync(path.join(__dirname, "sw.js"));
-const MANIFEST = JSON.stringify({ name: "Saga", short_name: "Saga", start_url: "./", scope: "./", display: "standalone", background_color: "#14121B", theme_color: "#14121B",
+const MANIFEST = JSON.stringify({ name: "Saga", short_name: "Saga", start_url: "./", scope: "./", display: "standalone", share_target: { action: "./", method: "GET", params: { title: "title", text: "text", url: "url" } }, background_color: "#14121B", theme_color: "#14121B",
   description: "Films, series, games, books and Doctor Who in one place",
   icons: [{ src: "icon-192.png", sizes: "192x192", type: "image/png" }, { src: "icon-512.png", sizes: "512x512", type: "image/png" }] });
 const ICONS = Object.fromEntries(["icon-192.png", "icon-512.png"].filter(n => fs.existsSync(path.join(__dirname, n))).map(n => [n, fs.readFileSync(path.join(__dirname, n))]));
@@ -311,6 +311,8 @@ const handler = isPublic => async (req, res) => {
     if (p === "/api/auth/logout") { res.writeHead(303, { Location: "../../login", "Set-Cookie": `saga_session=; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=0` }); return res.end(); }
     if (p === "/api/health") return send(res, 200, JSON.stringify({ ok: true, auth: !!AUTH, version: APP_VERSION }));
     if (p === "/manifest.json") return send(res, 200, MANIFEST, "application/manifest+json");
+    // 0.7.5: where a sign-in started on the website comes back (Spotify, IsThereAnyDeal, AniList); the page hands it over
+    if (/^\/oauth\/[a-z]+$/.test(p)) return send(res, 200, '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Saga</title></head><body style="font:16px system-ui;background:#14121B;color:#eee;padding:24px">Signing in…<script src="../oauth-done.js"></script></body></html>', "text/html; charset=utf-8");
     if (p === "/sw.js") { res.writeHead(200, { "Content-Type": TYPES[".js"], "Cache-Control": "no-cache", "Service-Worker-Allowed": "/" }); return res.end(SW); }
     if (ICONS[p.slice(1)]) { res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "max-age=604800" }); return res.end(ICONS[p.slice(1)]); }
     // 0.6.9: your calendar for Google Calendar: /cal/<random code>.ics (a code of its own, not your sync key)
