@@ -89,6 +89,7 @@
       await A.db.settled();
       await A.backupToFile(false).catch(() => {});
       if (A.db.get("web_sync_url") && A.db.get("web_sync_auto", "1") === "1") await A.syncWithWebServer(false);
+      if (window.__sagaAuto) await window.__sagaAuto.run("after sync"); // 0.7.2: auto.js
     } catch (e) { A.logError("after sync", e.message); }
     A.afterRunning = false;
   }

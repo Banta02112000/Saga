@@ -20,7 +20,19 @@
   // ---- 0.7.0: offline. This browser keeps a copy of your files (IndexedDB) and the changes it couldn't send yet. When
   // the server can't be reached, the app opens from that copy; changes wait and go out when it's back (the server
   // merges them with whatever the phone sent meanwhile). The app's scripts start once the files are there.
-  var IDB = "saga-offline", waiting = {}; // name → { text, base } not sent yet
+  var IDB = "saga-offline", waiting = {}; // name → { text, base, baseText } not sent yet
+  var known = {}; Object.keys(files).forEach(function (n) { known[n] = files[n]; }); // what the server last confirmed
+  function wait(name, text) { var w = waiting[name]; waiting[name] = { text: text, base: (w && w.base) || shas[name] || "", baseText: w && w.baseText != null ? w.baseText : (known[name] != null ? known[name] : "") }; keepWaiting(); }
+  // a change kept while offline goes out merged against the version it started from
+  function sendWaiting(n, w) {
+    if (w.baseText == null) { if (w.base) shas[n] = w.base; send(n, "PUT", w.text); return; }
+    unsent++;
+    fetch(api("merge/" + encodeURIComponent(n)), { method: "POST", headers: { "Content-Type": "application/json", "X-Tab": TAB }, body: JSON.stringify({ base: w.baseText, mine: w.text }) })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (j) { shas[n] = j.sha256; known[n] = j.text; if (j.text !== files[n]) live(n, j.text); keepCopy(); })
+      .catch(function (e) { waiting[n] = w; keepWaiting(); console.error("Saga: couldn't send " + n, e); })
+      .then(function () { unsent--; });
+  }
   function idb(fn) {
     return new Promise(function (res) {
       try { var rq = indexedDB.open(IDB, 1); rq.onupgradeneeded = function () { rq.result.createObjectStore("kv"); };
@@ -48,11 +60,11 @@
     keepCopy();
     var w = r[0] || {};
     // changes made here while the server was away: sent now, merged on the server, the result shown
-    Object.keys(w).forEach(function (n) { if (w[n] && typeof w[n].text === "string") { if (w[n].base) shas[n] = w[n].base; files[n] = w[n].text; later(function () { send(n, "PUT", w[n].text); }); } });
+    Object.keys(w).forEach(function (n) { if (w[n] && typeof w[n].text === "string") { files[n] = w[n].text; later(function () { sendWaiting(n, w[n]); }); } });
     if (Object.keys(w).length) idbPut("waiting", {});
   }) : idbGet("files").then(function (c) {
     if (!c || !c.files) return;
-    files = c.files; shas = c.shas || {};
+    files = c.files; shas = c.shas || {}; Object.keys(files).forEach(function (n) { known[n] = files[n]; });
     return idbGet("waiting").then(function (w) {
       waiting = w || {}; Object.keys(waiting).forEach(function (n) { files[n] = waiting[n].text; });
       delete window.__sagaServerError;
@@ -67,7 +79,7 @@
     fetch(api("me"), { cache: "no-store" }).then(function (r) {
       if (!r.ok) return;
       var w = waiting; waiting = {}; keepWaiting();
-      names.forEach(function (n) { if (w[n].base) shas[n] = w[n].base; send(n, "PUT", w[n].text); });
+      names.forEach(function (n) { sendWaiting(n, w[n]); });
       window.__sagaOffline = null; bar(""); if (window.__sagaOnline) try { window.__sagaOnline(); } catch (e) { /* app older */ }
     }).catch(function () { /* still away */ });
   }
@@ -104,6 +116,7 @@
           if (!r.ok) throw new Error("HTTP " + r.status);
           return r.json().then(function (j) {
             if (j && j.sha256) shas[name] = j.sha256;
+            known[name] = j && j.merged ? j.text : text;
             keepCopy();
             // changes from the phone were folded in on the server: show them
             if (j && j.merged) live(name, j.text);
@@ -112,7 +125,7 @@
         .catch(function (e) {
           // 0.7.0: the server can't be reached: kept in this browser, sent when it's back
           if (method === "PUT" && SYNCED.test(name) && (e instanceof TypeError || /fetch|network/i.test(e.message))) {
-            waiting[name] = { text: text, base: (waiting[name] && waiting[name].base) || shas[name] || "" }; keepWaiting();
+            wait(name, text);
             if (!window.__sagaOffline) { window.__sagaOffline = { at: Date.now() }; bar("<b>Offline</b>: changes are kept in this browser and sent when the website is back."); }
             return;
           }
@@ -125,7 +138,7 @@
   // version could undo what the newer one did); the page says so and the website updates itself
   var paused = false, held = 0, SYNCED = /^(canonsync|library|games|books|dw|music)\.json$/;
   function save(name, text) { text = String(text == null ? "" : text); files[name] = text; if (paused && SYNCED.test(name)) { held++; return true; }
-    if (window.__sagaOffline && SYNCED.test(name)) { waiting[name] = { text: text, base: (waiting[name] && waiting[name].base) || shas[name] || "" }; keepWaiting(); keepCopy(); return true; }
+    if (window.__sagaOffline && SYNCED.test(name)) { wait(name, text); keepCopy(); return true; }
     send(name, "PUT", text); return true; }
   function append(name, text) { text = String(text || ""); files[name] = (files[name] || "") + text; send(name, "POST", text); return true; }
   // the phone (or another page) changed a file on the server: reload to show it, once nothing of ours is unsaved

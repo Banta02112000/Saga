@@ -276,7 +276,7 @@
   function undoChange(...a) { return P_website().undoChange(...a); }
   function syncWithWebServer(...a) { return P_website().syncWithWebServer(...a); }
   const C = window.Core;
-  const VERSION = "0.7.1";
+  const VERSION = "0.7.2";
   const AUTO_SYNC_HOURS = 12;
   Object.assign(C.PROFILES, (window.CANONSYNC_PRESET || {}).traktProfiles || {});
   const DEFAULT_PROFILE = (window.CANONSYNC_PRESET || {}).traktDefault || "PKCE (your own Trakt app)";
@@ -584,6 +584,8 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.7.2", ["Saga now does the small jobs you used to start by hand, after each sync (and when the app opens), and writes down each one (Sync › Done by itself, where each can be switched off): a part that failed because IMDb or the connection turned it away is tried again 45 minutes later (3 times a day); canon games you rated or listed on IMDb leave Games › Missing (Finished with your rating, or Wishlist); new games get their details from your prompt (Gemini API key only); films and series get their length and cast; exact duplicates (the same IMDb, TMDB or Steam id) are merged, with a copy kept first.",
+      "Website offline: changes made while it couldn't reach the Pi are merged against the version they started from, so they can't undo anything the phone sent meanwhile (even if the Pi restarted)."]],
     ["0.7.1", ["Search finds people too: everyone in the cast, and who directed or created what's in your library, with what you've watched of theirs; also episodes by name, and your music (artists and songs).",
       "Home: What next. One queue across series, canon, games, books and Doctor Who, ordered by what you did last, so what you're in the middle of comes first. The next film or series of each franchise you've started is in it too.",
       "Year in review counts listening time too (from your scrobbles), and has a Best of the year: your top-rated film, series, game and book of that year, and your top artist.",
@@ -3480,6 +3482,7 @@
         <button class="btn small" style="margin-top:10px" data-action="go" data-sec="settings" data-scroll="accounts">Accounts and lists</button></section>
       <section>${Kit.head("Connection test", `<button class="btn quiet small" data-action="nettest"${ui.netTesting ? " disabled" : ""}>${ui.netTesting ? "Testing…" : "Test"}</button>`)}<div class="listcard">${ui.netTest ? ui.netTest.map(t => `<div class="srcrow"><span class="st ${t.ok ? "ok" : "fail"}"></span><div class="grow"><b>${esc(t.name)}</b><div class="small muted">${esc(t.msg)}</div></div></div>`).join("") : `<p class="muted small" style="padding:10px 0">Checks whether your phone can reach Trakt, TMDB, IMDb and the other sources. If one is blocked here but opens on another network, the block is on the network, not in the app.</p>`}</div></section>
       <section>${Kit.head("After the sources")}<div class="listcard">${STG.map(([k, l]) => srcRow(l, stages[k], ui.job && ui.stage === k)).join("")}</div></section>
+      ${Auto ? Auto.html() : ""}
       ${ui.report ? `<section>${Kit.head("Report", `<button class="btn quiet small" data-action="copydiag">${icon("copy")}Copy report and log</button>`)}<pre class="log">${esc(ui.report)}${db.get("stage_report") ? "\n" + esc(db.get("stage_report")) : ""}</pre>
         <details class="report"><summary>Technical log (every request, its answer and how long it took)</summary><pre class="log">${esc(db.get("sync_log", "") || "Empty")}</pre></details></section>` : ""}
       <p class="small muted">If a source keeps failing, tap Copy report and log and send it to whoever helps you with the app: it has no passwords or keys in it.</p>`;
@@ -4363,6 +4366,7 @@
       case "copyreport": Native.copy(ui.report); toast("Report copied"); break;
       case "copystalls": Native.copy(`Saga ${VERSION}: ${ui.stalls}`); toast("Copied"); break;
       case "retryfailed": doSync(true); break;
+      case "autoset": db.set("auto_" + el.dataset.k, el.checked ? "1" : "0"); toast(el.checked ? "On" : "Off"); break;
       case "bgnow":
         runJob("Release check", async p => {
           const r = await C.backgroundRun(db, Native.http, p);
@@ -4503,6 +4507,16 @@
       return `${fmt(r.finished)} rated on IMDb → Finished with your rating${r.wishlist ? `, ${fmt(r.wishlist)} on your IMDb lists → Wishlist` : ""}, ${fmt(r.found)} found on IMDb but not rated by you${r.notFound ? `, ${fmt(r.notFound)} not on IMDb` : ""}${r.blocked ? ". IMDb started turning requests away: try the rest later" : ""}${window.__sagaWeb ? " (on the website, IMDb often refuses: the phone does this better)" : ""}`;
     });
   }
+  // 0.7.2: the small jobs Saga does by itself after a sync (auto.js); Sync › Done by itself shows and switches them
+  const Auto = window.SagaAuto ? SagaAuto.make({
+    get db() { return db; }, get ui() { return ui; }, get C() { return C; }, get GC() { return GC; }, get L() { return L; }, get lib() { return lib; }, get games() { return games; },
+    feat: k => secOn(k), get http() { return C.robust(Native.http, { timeout: 30000, tries: 2 }); }, gql: q => C.imdbGql(Native.http, q), get Native() { return Native; },
+    doSync: (a, b) => doSync(a, b), libOpt: () => libOpt(), libSave: () => libSave(), get libTried() { return libTried; }, snapshot: w => snapshot(w),
+    changed: k => changed(k), logError: (a, b) => logError(a, b), esc: t => esc(t), lang: () => lang(), get Kit() { return Kit; },
+  }) : null;
+  window.__sagaAuto = Auto && { run: why => ((navigator.webdriver && !window.__wantAuto) || window.__sagaWeb ? Promise.resolve() : Auto.run(why)) }; // the phone does them; the website gets the result
+  // also when the app opens and they haven't run for 12 hours (no sync needed); a failed part from before is retried later
+  setTimeout(() => { try { if (window.__sagaAuto && !window.__sagaWeb && Date.now() - (+db.get("auto_at", "0") || 0) > 12 * 3600e3 && !ui.job) window.__sagaAuto.run("app opened"); } catch (e) { /* next time */ } }, 90000);
   const Saga = window.Saga = { gameImdbCheck: () => gameImdbCheck(), gameInfo: ids => gameInfoRun(ids), http: C.robust(Native.http, { timeout: 30000, tries: 2 }), Native, db, games, books, lib, lang, feat, render, sheet, go, changed,
     close: () => { if (Kit.mods.books && Kit.mods.books.stopScan) Kit.mods.books.stopScan(); closeOverlay(); } };
   Kit.toast = toast; Kit.icon = icon; Kit.sheet = sheet; Kit.close = Saga.close;

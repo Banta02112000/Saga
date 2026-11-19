@@ -37,11 +37,13 @@ const ok = (c, m) => { if (!c) { console.error("FAIL: " + m); process.exit(1); }
     await pg.reload(); await pg.waitForFunction(() => window.__app && window.__sagaOffline, null, { timeout: 20000 });
     ok(await pg.evaluate(() => __app.lib.all().some(x => x.title === "Website Film") && !!document.getElementById("offlinebar")), "offline: the website opens with your data from this browser's copy");
     await pg.evaluate(() => { __app.lib.add({ type: "movie", title: "Added While Offline", year: 2003 }, "watchlist"); __app.lib.save(); });
+    // meanwhile the phone adds a film on the server: the offline change must not undo it
+    { const f = path.join(data, "library.json"), d = JSON.parse(fs.readFileSync(f, "utf8")); d.items["phone:1"] = { id: "phone:1", type: "movie", title: "Added On The Phone Meanwhile", year: 2004, status: "watchlist", watches: [], eps: {}, tags: [] }; fs.writeFileSync(f, JSON.stringify(d)); }
     await pg.waitForTimeout(800);
     ok(!/Added While Offline/.test(fs.readFileSync(path.join(data, "library.json"), "utf8")), "offline: the change waits in the browser");
     await pg.context().setOffline(false);
     await pg.evaluate(() => window.dispatchEvent(new Event("online")));
-    let sent = false; for (let i = 0; i < 40 && !sent; i++) { await pg.waitForTimeout(500); sent = /Added While Offline/.test(fs.readFileSync(path.join(data, "library.json"), "utf8")) && /Website Film/.test(fs.readFileSync(path.join(data, "library.json"), "utf8")); }
+    let sent = false; for (let i = 0; i < 40 && !sent; i++) { await pg.waitForTimeout(500); sent = /Added While Offline/.test(fs.readFileSync(path.join(data, "library.json"), "utf8")) && /Website Film/.test(fs.readFileSync(path.join(data, "library.json"), "utf8")) && /Added On The Phone Meanwhile/.test(fs.readFileSync(path.join(data, "library.json"), "utf8")); }
     ok(sent && await pg.evaluate(() => !window.__sagaOffline), "back online: the change reaches the server, merged with what was there");
     // 0.6.2: installable; the app's files are kept for when the server can't be reached, your data never is
     const swOk = await pg.evaluate(() => navigator.serviceWorker.ready.then(r => !!r.active));

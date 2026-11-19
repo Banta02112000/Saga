@@ -626,3 +626,12 @@ D.update({
   "Details from AI (your prompt)": "Dettagli dall'AI (il tuo prompt)",
   "Missing games on IMDb": "Giochi mancanti su IMDb",
 })
+D.update({
+  "Done by itself": "Fatto da solo",
+  "Try failed sync parts again": "Riprova le parti della sincronizzazione fallite",
+  "Canon games from your IMDb": "Giochi canon dal tuo IMDb",
+  "Game details from your prompt": "Dettagli dei giochi dal tuo prompt",
+  "Length and cast for titles": "Durata e cast dei titoli",
+  "Merge exact duplicates": "Unisci i duplicati esatti",
+  "Nothing yet: it runs after each sync.": "Ancora niente: parte dopo ogni sincronizzazione.",
+})

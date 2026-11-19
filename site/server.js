@@ -525,6 +525,17 @@ const handler = isPublic => async (req, res) => {
         if (text !== cur) { writeAtomic(DIR, n, Buffer.from(text), "undo"); announce(DIR, [n], "undo"); }
         return send(res, 200, JSON.stringify({ ok: true, rev: J.rev(DIR, n) }));
       }
+      // 0.7.2: changes a page made while it couldn't reach the server: merged three ways against the version they started
+      // from, so nothing the phone sent meanwhile is lost
+      if (p.startsWith("/api/merge/") && req.method === "POST") {
+        const n = safe(p.slice(11));
+        if (!n || !JOURNALED.includes(n)) return send(res, 400, '{"error":"not a synced file"}');
+        const j = JSON.parse((await readBody(req, 200 * 1024 * 1024)).toString("utf8") || "{}");
+        const f = path.join(DIR, n), cur = fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "";
+        const merged = cur ? mergeText(n, String(j.base || ""), String(j.mine || ""), cur) : String(j.mine || "");
+        if (merged !== cur) { writeAtomic(DIR, n, Buffer.from(merged), "web"); announce(DIR, [n], String(req.headers["x-tab"] || "web")); }
+        return send(res, 200, JSON.stringify({ text: merged, sha256: remember(DIR + "|" + n, merged) }));
+      }
       if (p.startsWith("/api/sync/file/") && req.method === "POST") {
         const n = safe(p.slice(15));
         if (!n || !SYNC_FILES.includes(n)) return send(res, 400, '{"error":"not a synced file"}');

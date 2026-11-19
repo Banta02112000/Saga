@@ -19,7 +19,7 @@ $J8 -cp tools/d8-jvm.jar com.android.tools.r8.D8 --release --min-api 26 --output
 cp dexout/classes.dex app/
 cp -r res_gen/res app/res
 python3 scripts/gen_it.py
-cp web/index.html web/boot.js web/style.css web/saga.css web/core.js web/extras.js web/app.js web/library.js web/activity.js web/imports.js web/kit.js web/images.js web/games.js web/games-ui.js web/books-ui.js web/timeline.js web/music.js web/website.js web/deals.js web/backup.js web/tidy.js web/rules.js web/foryou.js web/bg.html web/bg.js app/assets/
+cp web/index.html web/boot.js web/style.css web/saga.css web/core.js web/extras.js web/app.js web/library.js web/activity.js web/imports.js web/kit.js web/images.js web/games.js web/games-ui.js web/books-ui.js web/timeline.js web/music.js web/website.js web/deals.js web/backup.js web/tidy.js web/rules.js web/foryou.js web/auto.js web/bg.html web/bg.js app/assets/
 python3 scripts/stage_web.py app/assets $([ "$EDITION" = blank ] && echo --blank)
 if [ "$EDITION" = blank ]; then
   printf '/* Shareable build: no personal sources or keys. Everything is entered in Settings. */\nwindow.CANONSYNC_PRESET = {};\n' > app/assets/preset.js
