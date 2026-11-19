@@ -639,3 +639,4 @@ D.update({
   "Check the weekly copy": "Controlla la copia settimanale",
   "IMDb changed something Saga reads": "IMDb ha cambiato qualcosa che Saga legge",
 })
+D.update({ "Not mine: remove": "Non mio: rimuovi" })

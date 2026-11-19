@@ -2106,8 +2106,11 @@
     if (http.browse) {
       try {
         const items = await pageOrApi(http, `https://www.imdb.com/user/${ur}/ratings/`, CONFIG.listBrowseMs + 120000, want, store);
-        const groups = {};
-        for (const it of items) (groups[it.rating ? "rated" : "watched"] = groups[it.rating ? "rated" : "watched"] || []).push(it);
+        // 0.7.4: only titles with your rating next to them: the page also shows suggestions and other titles, which were
+        // being saved as "watched" (series you never saw, not rated anywhere)
+        const groups = {}, rated = items.filter(it => +it.rating > 0);
+        if (rated.length) groups.rated = rated;
+        if (!rated.length) throw new Error("no ratings readable on the page");
         Object.defineProperty(groups, "total", { value: items.total || 0, enumerable: false });
         Object.defineProperty(groups, "newest", { value: items.newest, enumerable: false });
         return [groups, items.route || browserRoute(items)];
@@ -2118,7 +2121,7 @@
       if (Object.keys(groups).length) return [groups, "CSV export"];
       errs.push("export: login required");
     } catch (e) { errs.push(`export: ${e.message}`); }
-    try { return [{ watched: await pageItems(http, `https://www.imdb.com/user/${ur}/ratings/`) }, "page (first page only, no ratings)"]; } catch (e) { errs.push(`page: ${e.message}`); }
+    // 0.7.4: the plain page has no ratings on it, so nothing from it can be called watched: no last-resort page read any more
     if (netFail) throw netError(`couldn't reach IMDb after ${CONFIG.browseTries} tries (the connection dropped, or IMDb is limiting requests). Tap Retry failed in a few minutes.`);
     throw imdbFail(`ratings ${ur}`, errs);
   }

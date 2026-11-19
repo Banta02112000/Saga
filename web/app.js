@@ -276,7 +276,7 @@
   function undoChange(...a) { return P_website().undoChange(...a); }
   function syncWithWebServer(...a) { return P_website().syncWithWebServer(...a); }
   const C = window.Core;
-  const VERSION = "0.7.3";
+  const VERSION = "0.7.4";
   const AUTO_SYNC_HOURS = 12;
   Object.assign(C.PROFILES, (window.CANONSYNC_PRESET || {}).traktProfiles || {});
   const DEFAULT_PROFILE = (window.CANONSYNC_PRESET || {}).traktDefault || "PKCE (your own Trakt app)";
@@ -584,6 +584,8 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.7.4", ["Fixed: series (and a few films and games) shown as \"From: IMDb watched\" that you never saw and never rated. When IMDb's data service didn't answer, Saga read your ratings page itself, and that page also lists suggestions and other titles: those without a rating were saved as watched. Now only titles with your rating are taken from it. The ones it added are removed once (only if you hadn't rated, tagged or noted them, and they're on no other list or source of yours), with a copy kept first; removed titles don't come back with a sync.",
+      "\"Not mine: remove\" next to the From line on every film and series (tap twice). It stays removed: a sync won't bring it back. Several at once: Library › Select › Remove."]],
     ["0.7.3", ["Lighter saving on the phone: ticking an episode, rating or changing a status adds one line to a small change log instead of writing your whole library (megabytes) again. The whole file is written when you leave the app, before a website sync and when the log gets long; if the phone stops the app in between, the log is read back at the next start, so nothing is lost.",
       "The daily IMDb check now runs on your website (the Pi): IMDb turns GitHub's servers away. When it finds that IMDb changed something Saga reads, Home on the phone says so; the website's owner page shows the last result.",
       "Done by itself: once a week the newest automatic copy of your data is opened and compared with what you have; a broken or incomplete copy is replaced at once."]],
@@ -2559,7 +2561,7 @@
     if (it.ratedHere) add("your rating in Saga");
     if (Object.keys(it.er || {}).length) add("episode ratings (IMDb/Trakt)");
     if (it.mal) add("MyAnimeList link");
-    return `<p class="small muted srcline" style="margin:6px 0"><b>From:</b> ${out.length ? out.map(esc).join(" · ") : "added by you, or an import Saga didn't record"}</p>`;
+    return `<div class="row srcline" style="margin:6px 0;gap:8px;align-items:center"><p class="small muted grow" style="margin:0"><b>From:</b> ${out.length ? out.map(esc).join(" · ") : "added by you, or an import Saga didn't record"}</p><button class="btn quiet small" data-action="libremove">${icon("notcanon")}<span>Not mine: remove</span></button></div>`;
   }
   function whyHtml(it) {
     const o = originsOf(it), seen = new Set();
@@ -3844,6 +3846,34 @@
       if (go) go.disabled = !(r.added || r.changed);
     } catch (e) { out.textContent = e.message; if (go) go.disabled = true; }
   }
+  // 0.7.4: titles IMDb's ratings page had wrongly given as "watched" (suggestions and other titles on the page, no rating
+  // anywhere): those rows go, and so do the films, series and games that came only from them and that you haven't touched.
+  // A copy of everything is kept first (Settings › Data › copies before big changes).
+  function fixImdbPageNoise() {
+    if (db.get("fix_imdbnoise_v1")) return null;
+    const bad = db.items("imdb", ["watched"]).filter(r => !(+r.rating > 0));
+    if (!bad.length) { db.set("fix_imdbnoise_v1", "1"); return null; }
+    try { snapshot("before removing titles IMDb's page wrongly gave as watched"); } catch (e) { return null; } // no copy, no change
+    const keys = new Set(bad.flatMap(r => [r.imdb && "i:" + r.imdb, "n:" + C.norm(r.title) + "|" + (r.year || "")].filter(Boolean)));
+    for (const r of bad) db.itemsMap.delete(C.Store.itemId(r));
+    const ix = originsIndex(), gone = [];
+    for (const it of lib.all()) {
+      if (!(keys.has("i:" + it.imdb) || keys.has("n:" + C.norm(it.title) + "|" + (it.year || "")))) continue;
+      if (it.rating > 0 || it.ratedHere || it.notes || (it.tags || []).length) continue; // something of yours: kept
+      if (originsOf(it, ix).length) continue; // still on another list, rating or source of yours
+      lib.remove(it.id); gone.push(it.title); // remembered as removed: a sync won't bring it back
+    }
+    let gms = 0;
+    for (const g of games.games.slice()) {
+      if (g.src !== "imdb" || g.rating > 0 || g.notes || (g.sessions || []).length || !(keys.has("i:" + g.imdb) || [...keys].some(k => k.startsWith("n:" + C.norm(g.title) + "|")))) continue;
+      games.remove(g.id); gms++;
+    }
+    if (gone.length) libSave();
+    if (gms) games.save();
+    db.set("fix_imdbnoise_v1", "1"); db.flush();
+    try { let a = []; try { a = JSON.parse(db.get("auto_log", "[]")); } catch (e) { a = []; } a.unshift({ at: Date.now(), k: "fix", what: `Removed ${gone.length} title${gone.length === 1 ? "" : "s"}${gms ? ` and ${gms} game${gms === 1 ? "" : "s"}` : ""} IMDb's page had wrongly given as watched${gone.length ? `: ${gone.slice(0, 8).join(", ")}${gone.length > 8 ? "…" : ""}` : ""}` }); db.set("auto_log", JSON.stringify(a.slice(0, 60))); } catch (e) { /* log only */ }
+    return { rows: bad.length, films: gone.length, games: gms, names: gone };
+  }
   function fixListedWatched() {
     if (db.get("fix_listed_v1")) return null;
     const bad = db.items("imdb", ["watched"]).filter(r => !(+r.rating > 0));
@@ -4560,6 +4590,7 @@
   migrate().catch(e => console.error(e));
   // 0.6.9.6: settings kept with the rest (sections, language, look); on the website, the keys the phone sent
   try { if (window.__sagaWeb) keysIn(Native.load("keys.json")); if (prefsIn()) render(); } catch (e) { logError("settings", e.message); }
+  try { const nz = fixImdbPageNoise(); if (nz && (nz.films || nz.games)) { render(); setTimeout(() => toast(`Removed ${fmt(nz.films)} title${nz.films === 1 ? "" : "s"}${nz.games ? ` and ${fmt(nz.games)} games` : ""} IMDb's page had wrongly marked watched. A copy from before is in Settings › Data.`), 1500); } } catch (e) { logError("fix", e.message); }
   try { const fx = fixListedWatched(); if (fx && (fx.films || fx.games)) { render(); setTimeout(() => toast(`${fmt(fx.films)} titles and ${fmt(fx.games)} games were only on a list, not rated: back to To watch / Wishlist`), 1200); } } catch (e) { logError("fixlisted", e.message); }
   applyPending();
   setTimeout(() => window.__sharePoll(), 400);
@@ -4602,5 +4633,5 @@
   const last = parseFloat(db.get("last_sync", "0")) || 0;
   const hasSources = db.get("username") || db.get("imdb_user") || db.get("canon_urls") || db.get("imdb_lists");
   if (db.get("auto_sync") === "1" && hasSources && Date.now() / 1000 - last > AUTO_SYNC_HOURS * 3600) { db.set("sync_open", "0"); doSync(); db.set("sync_open", "1"); }
-  window.__app = { libSave, openHistory, behindCheck, libSyncOne, fixListedWatched, webApi, webWhy, prefsIn, prefsOut, keysIn, keysText, notDropped, openLib, wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS: P_rules().RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle: P_backup().bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
+  window.__app = { fixImdbPageNoise, libSave, openHistory, behindCheck, libSyncOne, fixListedWatched, webApi, webWhy, prefsIn, prefsOut, keysIn, keysText, notDropped, openLib, wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS: P_rules().RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle: P_backup().bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
 })();

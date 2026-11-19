@@ -1209,7 +1209,8 @@ window.BANTA_IT = {
 "Merge exact duplicates": "Unisci i duplicati esatti",
 "Nothing yet: it runs after each sync.": "Ancora niente: parte dopo ogni sincronizzazione.",
 "Check the weekly copy": "Controlla la copia settimanale",
-"IMDb changed something Saga reads": "IMDb ha cambiato qualcosa che Saga legge"
+"IMDb changed something Saga reads": "IMDb ha cambiato qualcosa che Saga legge",
+"Not mine: remove": "Non mio: rimuovi"
 };
 window.BANTA_IT_PAT = [
 [

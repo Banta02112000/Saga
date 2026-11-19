@@ -190,10 +190,11 @@ async function main() {
                         ["imdb_lists", "https://www.imdb.com/list/ls222/"],
                         ["canon_urls", "Matrix | https://www.imdb.com/list/ls111/\nMatrix | https://trakt.tv/users/someone/lists/matrix"]]) db3.set(k, v);
   const rep = await C.syncAll(db3, syncHttp, noop);
-  assert.ok(!rep.report.includes("FAIL") && rep.ok === 4 && /PART IMDb ratings/.test(rep.report) && rep.failed.includes("IMDb ratings"), rep.report);
+  // 0.7.4: a ratings page without readable ratings gives nothing (it used to give every title on it as "watched")
+  assert.ok(rep.report.split("\n").filter(l => l.startsWith("FAIL")).length === 1 && /FAIL IMDb ratings: IMDb wants you signed in/.test(rep.report) && rep.ok === 4 && rep.failed.includes("IMDb ratings") && !db3.items("imdb", ["watched"]).length, rep.report);
   assert.ok(rep.report.indexOf("Trakt account") < rep.report.indexOf("IMDb ratings") && db3.get("sync_state").includes("Trakt account"), "report order and per-source state");
   assert.ok(rep.report.includes("IMDb API") && rep.report.includes("page") && rep.report.includes("Trakt API"), rep.report);
-  eqSet(db3.items("imdb").map(i => i.title), ["Page Movie", "The Shawshank Redemption"]);
+  eqSet(db3.items("imdb").map(i => i.title), ["The Shawshank Redemption"]); // 0.7.4: nothing from a page without ratings
   assert.strictEqual(db3.items("trakt")[0].title, "Heat");
   eqSet(db3.canon().map(c => c.title), ["The Matrix Reloaded", "The Matrix"]);
   assert.ok(parseFloat(db3.get("last_sync")) > 0);
