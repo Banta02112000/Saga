@@ -276,7 +276,7 @@
   function undoChange(...a) { return P_website().undoChange(...a); }
   function syncWithWebServer(...a) { return P_website().syncWithWebServer(...a); }
   const C = window.Core;
-  const VERSION = "0.7.7";
+  const VERSION = "0.7.8";
   const AUTO_SYNC_HOURS = 12;
   Object.assign(C.PROFILES, (window.CANONSYNC_PRESET || {}).traktProfiles || {});
   const DEFAULT_PROFILE = (window.CANONSYNC_PRESET || {}).traktDefault || "PKCE (your own Trakt app)";
@@ -572,7 +572,7 @@
     toastTimer = setTimeout(() => { t.classList.remove("show"); undoFn = null; }, undoFn ? 10000 : 3200); // 0.6.1: 10 s to undo
   }
   // ---- look: theme, accent, text size (kept in this browser's storage so they apply before the first paint)
-  const THEMES = [["night", "Night", "#0B0A10", "#F5F1E8"], ["amoled", "Black", "#000", "#F5F1E8"], ["slate", "Slate", "#10151C", "#EEF3F8"], ["sepia", "Sepia", "#1E1913", "#F3E9DA"], ["light", "Light", "#F5F2EC", "#1B1720"]];
+  const THEMES = [["night", "Night", "#0B0A10", "#F5F1E8"], ["amoled", "Black", "#000", "#F5F1E8"], ["slate", "Slate", "#10151C", "#EEF3F8"], ["sepia", "Sepia", "#1E1913", "#F3E9DA"], ["light", "Light", "#F5F2EC", "#1B1720"], ["vortex", "Vortex", "linear-gradient(135deg,#0B1236,#2A0F4A)", "#E6ECFF"], ["cinema", "Cinema", "radial-gradient(circle at 50% 120%,#5A0F1E,#14060A)", "#F4DFA8"], ["synth", "Synthwave", "linear-gradient(180deg,#12061F 55%,#FF3EA5 130%)", "#F6E9FF"], ["moss", "Forest", "linear-gradient(160deg,#0D1A12,#1F2E1A)", "#E5F0DD"], ["paper", "Paper", "#F2EBDA", "#2A2118"], ["crt", "Arcade", "repeating-linear-gradient(0deg,#041006 0 2px,#07180A 2px 4px)", "#9DFFB0"]];
   const ACCENTS = [["", "Each tab its own colour"], ["amber", "Amber"], ["teal", "Teal"], ["rose", "Rose"], ["violet", "Violet"], ["green", "Green"], ["blue", "Blue"]];
   const lsGet = k => { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } };
   function setLook(k, v, fromSync) {
@@ -581,10 +581,19 @@
     if (!fromSync && typeof db !== "undefined" && db) { db.set("look_" + k, v || "-"); }
     const map = { saga_theme: "theme", saga_accent: "accent", saga_text: "text" }, de = document.documentElement;
     if (v && !(k === "saga_theme" && v === "night")) de.dataset[map[k]] = v; else delete de.dataset[map[k]];
-    if (Native.native && window.Android && Android.setBars) try { Android.setBars(getComputedStyle(de).getPropertyValue("--night").trim() || "#0B0A10", de.dataset.theme === "light"); } catch (e) { /* older app */ }
+    if (Native.native && window.Android && Android.setBars) try { Android.setBars(getComputedStyle(de).getPropertyValue("--night").trim() || "#0B0A10", de.dataset.theme === "light" || de.dataset.theme === "paper"); } catch (e) { /* older app */ }
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.7.8", ["Upcoming shows only the series you're watching (status Watching). To watch and canon releases have their own filters.",
+      "Refresh everything on every title, on every page: details, rating, watched, episodes and its canon universe. On games it also checks IMDb, the series, remakes/remasters and the AI details.",
+      "Games always show the original, with its remakes, remasters and re-releases listed on its page, each with its own status; tap one to open its page. When one version is finished, the whole bundle counts as finished.",
+      "Refresh this universe (and every games franchise): the AI checks that the titles in it really belong there and looks for the ones missing.",
+      "Search starts as you type, no Enter needed. Links (IMDb, TMDB, stores) show only when they actually exist for that title.",
+      "Doctor Who: with Doctor Who on in Settings, the timeline's novels go to Books, its films to Watch and its games to Games. Turn Doctor Who off or take a story off the timeline and the ones added that way leave again unless finished; finished ones stay. Audio, comics, short stories and webcasts have no tab of their own and stay on the timeline.",
+      "Music: stats work with Spotify alone too (they needed Last.fm scrobbles before); the stat tiles wrap instead of running off the screen.",
+      "Less stutter while syncing: the comparison with the website is done in small pieces with pauses in between, instead of all at once.",
+      "New themes (Vortex, Cinema, Synthwave, Forest, Paper, Arcade), multiverse banners, posters the same shape everywhere (tap a title's poster to see it whole) and a tidier website Settings page (two panes on a wide screen). Patch notes follow the app language."]],
     ["0.7.7", ["Games › Franchises follows the canon scans: every game a scan placed in a franchise is grouped in it, instead of in a series guessed from its own title. Where games of yours in that franchise have a multiverse from your list, your name is used; games from your own list keep what it says. It updates whenever the canon or your games change."]],
     ["0.7.6", ["Canon for films and series no longer brings games: the AI scan lists games only for franchises that began as video games (story games, each once), and a film or TV universe no longer shows tie-in games (Doctor Who still does).",
       "Games › Missing leaves out tie-ins to film or TV series, and, after the new AI canon check, games that aren't canon, have no campaign or story, or are a remake, remaster or re-release of another game (listed under their original). What it left out, and why, is listed at the top.",
@@ -809,6 +818,12 @@
     return v;
   }
   function updateUrl() { const u = webBase(); return u ? u + "/download" : ""; }
+  // 0.7.8: patch notes in the app language (Italian from changes-it.js; a version not translated stays in English)
+  function notesIn(v, notes) {
+    if (lang() !== "it") return { notes };
+    const it = (window.SAGA_CHANGES_IT || {})[v];
+    return it && it.length === notes.length ? { notes: it } : { notes, en: true };
+  }
   function whatsNew(force) {
     const seen = db.get("seen_version", "");
     const fresh = !seen && !lib.all().length && !db.items(null, null).length;
@@ -817,7 +832,7 @@
     const list = force ? CHANGES.slice(0, 3) : CHANGES.slice(0, idx < 0 ? 1 : Math.max(1, idx));
     db.set("seen_version", VERSION);
     sheet(`<div class="kicker">Saga ${esc(VERSION)} · pre-alpha</div><h3 style="font:800 28px/1.1 var(--display);margin:6px 0 12px">What's new</h3>
-      ${list.map(([v, notes]) => `<h4 style="margin:14px 0 4px">${esc(v)}</h4><ul class="whatsnew">${notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul>`).join("")}
+      ${list.map(([v, notes]) => { const tr = notesIn(v, notes); return `<h4 style="margin:14px 0 4px">${esc(v)}</h4>${tr.en ? `<p class="small muted">Not translated yet: in English.</p>` : ""}<ul class="whatsnew${tr.en || lang() !== "it" ? "" : " notr"}">${tr.notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul>`; }).join("")}
       <button class="btn primary block" data-action="close" style="margin-top:14px">Got it</button>`, "whatsnew");
   }
   // ---- error log: what went wrong, kept on the phone, shown in Settings › Data and about
@@ -1046,7 +1061,8 @@
     const c = sheetItems.get(id);
     if (!c) return;
     const acts = [];
-    acts.push(`<button class="sheetbtn" data-action="open" data-url="${esc(imdbUrl(c.kind === "episode" ? { imdb: c.imdb, title: c.show } : c))}">${icon("open")}Open on IMDb</button>`);
+    if (c.imdb) acts.push(`<button class="sheetbtn" data-action="open" data-url="${esc(imdbUrl(c))}">${icon("open")}Open on IMDb</button>`); // 0.7.8: links only where the title is known
+    if (c.franchise && c.kind !== "episode") acts.push(`<button class="sheetbtn" data-action="urefresh" data-mv="${esc(c.franchise)}">${icon("sync")}Refresh ${esc(c.franchise)} (check its entries, find missing ones)</button>`);
     if (c.sheetKind === "canon" || (c.sheetKind === "up" && c.kind === "canon")) {
       if (!c.have) acts.push(`<button class="sheetbtn" data-action="seen" ${keyAttrs(c)}>${icon("check")}Mark as seen</button>`);
       acts.push(`<button class="sheetbtn" data-action="canon1" ${keyAttrs(c)}>${icon("eye")}Check canon for this title (AI)</button>`);
@@ -1631,7 +1647,7 @@
 
   function renderToWatch() {
     const cw = C.continueWatching(db);
-    const chips = [["all", "Everything"], ["towatch", "To watch"], ["episodes", "Episodes"], ["releases", "Canon releases"]].map(([k, l]) =>
+    const chips = [["all", "Watching"], ["towatch", "To watch"], ["releases", "Canon releases"]].map(([k, l]) =>
       `<button class="chip" data-action="upfilter" data-v="${k}" aria-pressed="${k === "towatch"}">${l}</button>`).join("");
     return `<section><div class="chips">${chips}</div>
       <p class="small muted" style="margin:10px 0 0">Shows with aired episodes after the last one you watched on Trakt. "New" means episodes came out since you last watched.</p>
@@ -1647,26 +1663,33 @@
     const ids = new Set(dr.flatMap(it => [it.imdb, it.tmdb ? "tv:" + it.tmdb : null].filter(Boolean))), names = new Set(dr.map(it => L.norm(it.title)));
     return eps.filter(e => !(ids.has(e.imdb) || ids.has(String(e.hideKey || "").replace(/^show\|/, "")) || names.has(L.norm(e.show || ""))));
   }
+  // 0.7.8: only what you're watching: episodes of series set to Watching in your library (canon releases and games
+  // are under their own chips)
+  function watchingOnly(eps) {
+    const ids = new Set(), names = new Set();
+    for (const it of lib.all()) if (it.type === "show" && it.status === "watching") { if (it.imdb) ids.add(it.imdb); names.add(C.norm(it.title)); }
+    return eps.filter(e => (e.imdb && ids.has(e.imdb)) || names.has(C.norm(e.show || "")));
+  }
   function renderUpcoming() {
     const today = new Date().toISOString().slice(0, 10);
-    const eps = notDropped(C.upcomingEpisodes(db, today));
+    const eps = watchingOnly(notDropped(C.upcomingEpisodes(db, today)));
     const rel = C.upcomingEvents(db, status(), today).filter(e => e.kind === "canon");
     const f = ui.upFilter || "all";
     if (f === "towatch") return renderToWatch();
     let rows = [];
-    if (f !== "releases") rows = rows.concat(eps.map(e => Object.assign({ sort: e.date }, e)));
-    if (f !== "episodes" && f !== "games") rows = rows.concat(rel.map(e => Object.assign({ sort: e.date || `${e.year}-13` }, e)));
+    if (f === "all" || f === "episodes") rows = rows.concat(eps.map(e => Object.assign({ sort: e.date }, e)));
+    if (f === "releases") rows = rows.concat(rel.map(e => Object.assign({ sort: e.date || `${e.year}-13` }, e)));
     const gi = gamesIdx();
     const gameRel = gi && gi.upcoming ? gi.upcoming.filter(g => g.date >= today) : [];
-    if (f === "all" || f === "games") rows = rows.concat(gameRel.map(g => ({ kind: "game", sort: g.date, date: g.date, title: g.t, id: g.id, franchise: g.f })));
+    if (f === "games") rows = rows.concat(gameRel.map(g => ({ kind: "game", sort: g.date, date: g.date, title: g.t, id: g.id, franchise: g.f })));
     if (f === "games") rows = rows.filter(r => r.kind === "game");
     rows.sort((a, b) => a.sort.localeCompare(b.sort) || String(a.title).localeCompare(String(b.title)));
-    const chips = [["all", "Everything"], ["towatch", "To watch"], ["episodes", "Episodes"], ["releases", "Canon releases"]].concat(gameRel.length ? [["games", "Games"]] : []).map(([k, l]) =>
+    const chips = [["all", "Watching"], ["towatch", "To watch"], ["releases", "Canon releases"]].concat(gameRel.length ? [["games", "Games"]] : []).map(([k, l]) =>
       `<button class="chip" data-action="upfilter" data-v="${k}" aria-pressed="${f === k}">${l}</button>`).join("");
     const nHidden = Object.keys(db.upHidden()).length;
     const head = `<section>
         <div class="chips">${chips}</div>
-        <p class="small muted" style="margin:10px 0 0">${db.get("tmdb_key") ? `Episodes of shows you've watched, from TMDB, plus missing canon with a release date.` : "Add a TMDB key in Settings to see upcoming episodes."}</p>
+        <p class="small muted" style="margin:10px 0 0">${db.get("tmdb_key") ? (f === "releases" ? "Missing canon with a release date." : f === "games" ? "Games coming out." : "New episodes of the series you're watching (status Watching).") : "Add a TMDB key in Settings to see upcoming episodes."}</p>
         <div class="row wrap" style="margin-top:8px"><button class="btn small" data-action="refreshshows" ${ui.job || !db.get("tmdb_key") ? "disabled" : ""}>${icon("sync")}Refresh shows</button>
         <span class="grow"></span>${nHidden ? `<button class="btn quiet small" data-action="tab" data-tab="settings">${icon("eyeoff")}${nHidden} hidden</button>` : ""}</div>
         <div class="small" id="status">${esc(ui.job ? ui.status : "")}</div>
@@ -2005,16 +2028,13 @@
       <label class="field"><span>Text size</span><select data-setting="widget_size">${[["12", "Small"], ["14", "Normal"], ["16", "Large"], ["18", "Extra large"]].map(([v, l]) => `<option value="${v}" ${db.get("widget_size", "14") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <p class="small muted">At low opacity, pick the look that reads best on your wallpaper: light text for dark wallpapers, dark text for light ones.</p></section>`;
   }
+  try { matchMedia("(min-width: 1100px)").addEventListener("change", () => { if (ui.sec === "settings") render(); }); } catch (e) { /* older browser */ }
   function renderSettings() {
     const secs = settingsSections();
-    // everything on one page, group by group
-    if (ui.setGroup === "*") return `<div class="row" style="margin-bottom:6px"><button class="btn quiet small" data-action="setgroup" data-v="">${icon("back")}Settings</button></div>` +
-      SET_GROUPS.map(g => `<div class="kicker" style="margin:22px 0 4px">${esc(g[1])}</div>${secs[g[0]].join("")}${g[0] === "alerts" ? widgetHelp() : ""}`).join("");
-    const grp = ui.setGroup && SET_GROUPS.find(g => g[0] === ui.setGroup);
-    if (grp) {
-      return `<div class="row" style="margin-bottom:6px"><button class="btn quiet small" data-action="setgroup" data-v="">${icon("back")}Settings</button></div>
-        <h2 style="font-size:26px;margin:4px 0 14px">${esc(grp[1])}</h2>${secs[grp[0]].join("")}${grp[0] === "alerts" ? widgetHelp() : ""}`;
-    }
+    // 0.7.8: one block (the page grid no longer scatters its parts), and on a wide screen two panes: the groups on the
+    // left, the open group on the right (the first one when none is open)
+    const wide = matchMedia("(min-width: 1100px)").matches;
+    const back = wide ? "" : `<div class="row" style="margin-bottom:6px"><button class="btn quiet small" data-action="setgroup" data-v="">${icon("back")}Settings</button></div>`;
     const q = (ui.setQ || "").trim().toLowerCase();
     let found = "";
     if (q.length >= 2) {
@@ -2027,11 +2047,19 @@
       }
       found = hits.length ? `<div class="setlist">${hits.join("")}</div>` : `<p class="muted">No setting matches “${esc(ui.setQ)}”.</p>`;
     }
-    return `<input type="search" class="setsearch" id="setQ" placeholder="Find a setting (e.g. Steam, backup, Gemini)" value="${esc(ui.setQ || "")}" data-input="setq" autocomplete="off">
-      ${found || `<div class="setlist">${SET_GROUPS.map(g => `<button class="setrow" data-action="setgroup" data-v="${g[0]}"><span class="seticon">${icon(g[2])}</span><span class="grow"><b>${esc(g[1])}</b><small>${esc(g[3])}</small></span>${icon("chev")}</button>`).join("")}</div>
-      <div style="text-align:center;margin-top:14px"><button class="btn quiet small" data-action="setgroup" data-v="*">Show every setting on one page</button></div>
-      <p class="small muted" style="text-align:center;margin-top:10px">Saga ${VERSION}${Native.native ? "" : " (browser preview)"}</p>`}`;
+    let cur = ui.setGroup || "";
+    if (wide && !cur && !found) cur = SET_GROUPS[0][0];
+    const nav = `<input type="search" class="setsearch" id="setQ" placeholder="Find a setting (e.g. Steam, backup, Gemini)" value="${esc(ui.setQ || "")}" data-input="setq" autocomplete="off">
+      ${found || `<div class="setlist">${SET_GROUPS.map(g => `<button class="setrow" data-action="setgroup" data-v="${g[0]}" ${cur === g[0] ? 'aria-current="true"' : ""}><span class="seticon">${icon(g[2])}</span><span class="grow"><b>${esc(g[1])}</b><small>${esc(g[3])}</small></span>${icon("chev")}</button>`).join("")}</div>`}
+      <div style="text-align:center;margin-top:14px"><button class="btn quiet small" data-action="setgroup" data-v="*" ${cur === "*" ? 'aria-pressed="true"' : ""}>Show every setting on one page</button></div>
+      <p class="small muted" style="text-align:center;margin-top:10px">Saga ${VERSION}${Native.native ? "" : " (browser preview)"}</p>`;
+    let body = "";
+    if (cur === "*") body = back + SET_GROUPS.map(g => `<div class="kicker" style="margin:22px 0 4px">${esc(g[1])}</div>${secs[g[0]].join("")}${g[0] === "alerts" ? widgetHelp() : ""}`).join("");
+    else { const grp = cur && SET_GROUPS.find(g => g[0] === cur); if (grp) body = `${back}<h2 class="sethead">${esc(grp[1])}</h2>${secs[grp[0]].join("")}${grp[0] === "alerts" ? widgetHelp() : ""}`; }
+    if (!wide) return `<div class="setpage">${body || nav}</div>`;
+    return `<div class="setpage two"><aside class="setnav">${nav}</aside><div class="setbody">${body || (found ? `<p class="muted">Pick a result on the left.</p>` : "")}</div></div>`;
   }
+
 
   // ============================================================ 4.0: across tabs, backups, Trakt, watch order
   const SH = BantaShell.shared;
@@ -2305,6 +2333,7 @@
     if (canonFiles.length) {
       libAdopt(); invalidate();
       // 0.6.9.4: games in an IMDb file go to Games here too (rated: finished; listed: wishlist), as after a sync
+      try { const dm = dwMirror(); if (dm.books + dm.films + dm.games + dm.removed) lines.push(`Doctor Who timeline: ${fmt(dm.books)} books, ${fmt(dm.films)} films, ${fmt(dm.games)} games added${dm.removed ? `, ${fmt(dm.removed)} taken out` : ""}`); } catch (e) { logError("dw mirror", e.message); }
       if (feat("games")) { const im = gamesFromImdb(); if (im.added || im.rated) { games.save(); changed("games"); lines.push(`Games from IMDb: ${fmt(im.added)} new, ${fmt(im.rated)} rated`); } }
     }
     db.set("hub_last", `Last import ${new Date().toLocaleDateString()}: ${lines.join(" · ")}`);
@@ -2587,12 +2616,12 @@
     return lib.all().filter(it => { if (yours(it)) return false; const o = originsOf(it, ix); return o.length > 0 && o.every(r => originKey(r) === k); });
   }
   // 0.6.9.8: where a title came from, always shown: every site, sync and import that has it, and what you did here
-  const IMPORT_NAME = { myanimelist: "MyAnimeList", anilist: "AniList", tvtime: "TV Time", netflix: "Netflix", letterboxd: "Letterboxd", simkl: "Simkl", kitsu: "Kitsu", serializd: "Serializd", refract: "Refract", csv: "a CSV import", sync: "a sync", trakt: "Trakt", imdb: "IMDb", steam: "Steam", added: "you", manual: "you", itunes: "iTunes", plex: "Plex", jellyfin: "Jellyfin", justwatch: "JustWatch", goodreads: "Goodreads", storygraph: "StoryGraph" };
+  const IMPORT_NAME = { myanimelist: "MyAnimeList", anilist: "AniList", tvtime: "TV Time", netflix: "Netflix", letterboxd: "Letterboxd", simkl: "Simkl", kitsu: "Kitsu", serializd: "Serializd", refract: "Refract", csv: "a CSV import", sync: "a sync", trakt: "Trakt", imdb: "IMDb", steam: "Steam", added: "you", manual: "you", itunes: "iTunes", plex: "Plex", jellyfin: "Jellyfin", justwatch: "JustWatch", goodreads: "Goodreads", storygraph: "StoryGraph", dw: "Doctor Who timeline" };
   function sourceLine(it) {
     const seen = new Set(), out = [];
     const add = s => { if (s && !seen.has(s)) { seen.add(s); out.push(s); } };
     for (const r of originsOf(it)) add(`${SRC_NAME[r.source] || r.source} ${r.kind === "list" && r.list_name ? `list “${r.list_name}”` : KIND_NAME[r.kind] || r.kind}`);
-    if (it.src && it.src !== "sync") add(`${IMPORT_NAME[String(it.src).toLowerCase()] || String(it.src).replace(/^./, c => c.toUpperCase())} import`.replace(/^you import$/, "added by you"));
+    if (it.src && it.src !== "sync") add(`${IMPORT_NAME[String(it.src).toLowerCase()] || String(it.src).replace(/^./, c => c.toUpperCase())} import`.replace(/^you import$/, "added by you").replace(/^Doctor Who timeline import$/, "the Doctor Who timeline"));
     if (it.ratedHere) add("your rating in Saga");
     if (Object.keys(it.er || {}).length) add("episode ratings (IMDb/Trakt)");
     if (it.mal) add("MyAnimeList link");
@@ -2994,6 +3023,66 @@
     return !!db.get("ai_key");
   }
   // One title through the AI canon finder, whatever was checked before; says what its franchise now holds.
+  // 0.7.8: the AI you've set up, for one prompt at a time: the Gemini API, another AI key, or the Gemini app (copy and paste)
+  function aiProvider(note) {
+    if (db.get("gemini_key")) return C.geminiProvider(db, Native.http, db.get("gemini_key"), db.get("gemini_model") || "auto", { search: db.get("gemini_search", "0") === "1" });
+    if (aiReady() && C.compatProvider) return C.compatProvider(Native.http, { preset: db.get("ai_preset", "openai"), key: db.get("ai_key"), model: db.get("ai_model"), base: db.get("ai_base") });
+    return { label: "Gemini app", call: (prompt, o) => gappAsk(prompt, Object.assign({ note }, o)) };
+  }
+  // finds more entries of a franchise with the AI scan you've set up, seeded with these titles; → how many were added
+  async function canonSeedScan(seeds, p) {
+    const only = seeds.slice(0, 30).map(c => ({ title: c.title, year: c.year || null, medium: c.medium || "Movie", norm: C.norm(c.title), key: `one|${C.norm(c.title)}|${c.year || ""}` }));
+    if (db.get("gemini_key")) return C.multiverseScan(db, Native.http, db.get("gemini_key"), db.get("gemini_model") || "auto", p, 40, 1, { search: db.get("gemini_search", "0") === "1", only });
+    if (db.get("claude_key")) return C.claudeScan(db, Native.http, db.get("claude_key"), db.get("claude_model") || "auto", p, { webSearch: db.get("claude_web", "1") === "1", only });
+    if (aiReady()) return C.compatScan(db, Native.http, { preset: db.get("ai_preset", "openai"), key: db.get("ai_key"), model: db.get("ai_model"), base: db.get("ai_base") }, p, only);
+    return 0;
+  }
+  // 0.7.8: a universe (or a TMDB collection) refreshed: the AI looks for entries that are missing, then checks every
+  // entry it has (canon or not, a duplicate, real at all, its release date); what it flags is hidden, dates are fixed
+  function universeRefresh(name) {
+    const n = C.norm(name);
+    const rowsOf = () => status().filter(c => C.norm(c.franchise) === n).concat(secOn("games") ? C.gameCanon(db, games.visible()).filter(c => C.norm(c.franchise) === n) : []);
+    const seeds = rowsOf();
+    if (!seeds.length) { toast(`Nothing in ${name} yet: add a title of it first`); return; }
+    return runJob(`Refresh ${name}`, async p => {
+      let added = 0;
+      try { added = (await canonSeedScan(seeds, f => p(f * 0.5, `${name}: looking for missing entries`))) || 0; } catch (e) { if (isCancel(e)) return "Stopped"; logError("universe refresh", e.message); }
+      invalidate();
+      const rows = rowsOf().slice(0, 90);
+      p(0.6, `${name}: checking ${fmt(rows.length)} entries`);
+      let hidden = 0, dated = 0;
+      try {
+        const res = C.parseVerify(await aiProvider(`Checking ${name}`).call(C.verifyPrompt(rows), { title: `Check ${name}` }), rows);
+        for (const r of res) {
+          if (r.verdict === "not_canon" || r.verdict === "duplicate" || r.verdict === "not_real") { if (r.c.medium === "Video Game") { games.meta.canonCheck = games.meta.canonCheck || {}; games.meta.canonCheck[GC.checkKey(r.c)] = { canon: false, story: true, tiein: false, versionOf: "", at: Date.now() }; } else db.setNotCanon(r.c, true); hidden++; }
+          else if (r.date && r.date !== r.c.date) dated += db.setCanonDates([{ franchise: r.c.franchise, title: r.c.title, year: r.c.year, date: r.date }]);
+        }
+      } catch (e) { if (isCancel(e)) return "Stopped"; logError("universe refresh", e.message); }
+      games.save(); invalidate(); db.flush(); changed("games");
+      return `${name}: ${fmt(added)} entries found, ${fmt(hidden)} hidden as not canon or duplicates, ${fmt(dated)} dates corrected`;
+    });
+  }
+  // 0.7.8: one game, everything: your IMDb rating and finished state (and IMDb's rating), its series from the canon
+  // scans, its versions, its details from your prompt (release, platform, remakes, HLTB), and its franchise's canon
+  async function gameRefreshOne(id) {
+    let g = games.get(id); if (!g) return;
+    const title = g.title, year = +String(g.date || "").slice(0, 4) || null;
+    toast(`Refreshing ${title}…`);
+    try {
+      const mine = db.items(null, ["rated", "watched", "watchlist", "list"]).filter(r => r.medium === "Video Game");
+      await GC.imdbCheckMissing(games, [{ title, year, franchise: g.franchise, imdb: g.imdb || null }], mine, C.robust(Native.http, { timeout: 30000, tries: 2 }), q => C.imdbGql(Native.http, q), { gap: 0 });
+      const k = (games.meta.canonImdb || {})[GC.checkKey({ title, year })];
+      g = games.get(id) || games.find({ title }); if (g && k) { if (k.imdb && !g.imdb) g.imdb = k.imdb; if (k.r) g.imdbR = k.r; }
+    } catch (e) { logError("game refresh", `${title} on IMDb: ${e.message}`); }
+    games.followCanon(C.gameCanon(db, games.visible())); games.resolveFranchises(); games.bundleVersions();
+    games.save(); changed("games"); render();
+    g = games.get(id) || games.find({ title });
+    if (!g) return;
+    g.aiAt = 0;
+    await gameInfoRun([g.id]);
+    if (db.get("gemini_key") || db.get("claude_key") || aiReady()) await runJob("Canon check", async p => { const n = await canonSeedScan([{ title: g.title, year, medium: "Video Game" }], p); invalidate(); games.followCanon(C.gameCanon(db, games.visible())); games.save(); changed("games"); return `${g.title}: ${fmt(n || 0)} canon entries found for its series`; });
+    if (ui.sec === "games") render();
+  }
   function libCanonOne(it) {
     const medium = it.type === "show" ? "TV Series" : "Movie";
     const only = [{ title: it.title, year: it.year || null, medium, norm: C.norm(it.title), key: `one|${C.norm(it.title)}|${it.year || ""}` }];
@@ -3125,9 +3214,9 @@
         ${sourceLine(it)}
         ${whyHtml(it)}
         <button class="sheetbtn" data-action="libwhere">${icon("eye")}Where to watch and details</button>
-        <button class="sheetbtn" data-action="open" data-url="${esc(it.imdb ? `https://www.imdb.com/title/${it.imdb}/` : `https://www.imdb.com/find/?q=${encodeURIComponent(it.title + " " + (it.year || ""))}`)}">${icon("open")}Open on IMDb</button>
+        ${it.imdb ? `<button class="sheetbtn" data-action="open" data-url="https://www.imdb.com/title/${esc(it.imdb)}/">${icon("open")}Open on IMDb</button>` : ""}${it.tmdb ? `<button class="sheetbtn" data-action="open" data-url="https://www.themoviedb.org/${it.type === "show" ? "tv" : "movie"}/${esc(it.tmdb)}">${icon("open")}Open on TMDB</button>` : ""}
         <button class="sheetbtn" data-action="mlistadd" data-k="lib:${esc(it.id)}">${icon("plus")}Add to a list</button>
-        <button class="sheetbtn" data-action="libsync1">${icon("sync")}Sync this title (rating, watched, episodes, details)</button>
+        <button class="sheetbtn" data-action="libsync1">${icon("sync")}Refresh everything (details, rating, watched, episodes, canon)</button>
         <button class="sheetbtn" data-action="libcanon1">${icon("eye")}Check canon for this title (AI)</button>
         <div class="tagrow" style="margin:6px 0 10px">${(it.tags || []).map(t => `<button class="tagchip" data-action="libtagdel" data-v="${esc(t)}" aria-label="Remove tag ${esc(t)}">${esc(t)} ✕</button>`).join("")}
           <input type="text" id="libTag" list="libTags" placeholder="Add a tag or list…" autocomplete="off" style="flex:1;min-width:130px;height:34px"><datalist id="libTags">${allTags().map(([t]) => `<option value="${esc(t)}">`).join("")}</datalist>
@@ -3187,7 +3276,7 @@
       case "libtagadd": { const v = (($("#libTag") || {}).value || "").trim().slice(0, 30); if (!v) return true; it.tags = [...new Set([...(it.tags || []), v])]; it.updated = Date.now(); libSave(); openLib(it.id); return true; }
       case "libtagdel": it.tags = (it.tags || []).filter(t => t !== el.dataset.v); libSave(); openLib(it.id); return true;
       case "librefresh": libDetails(it, true); toast("Loading episodes…"); return true;
-      case "libsync1": toast(`Syncing ${it.title}…`); libSyncOne(it); return true;
+      case "libsync1": toast(`Refreshing ${it.title}…`); (async () => { await libSyncOne(it); if (db.get("gemini_key") || db.get("claude_key") || aiReady()) libCanonOne(it); })(); return true; // 0.7.8: and its canon
       case "libcanon1": closeOverlay(); libCanonOne(it); return true;
       case "libwhere": { const c = { title: it.title, year: it.year, medium: it.type === "show" ? "TV Series" : "Movie", imdb: it.imdb || null, franchise: "" }; closeOverlay(); openSheet(sid(c, "lib")); return true; }
       case "libremove": if (el.dataset.sure) { const u = libUndo(it); lib.remove(it.id); libSave(); closeOverlay(); ui.libOpen = null; toast(`Removed ${it.title}`, u); render(); } else { el.dataset.sure = "1"; el.lastChild.textContent = "Tap again to remove"; } return true;
@@ -3379,7 +3468,8 @@
         <div class="small muted ell">${e.soon ? "<b>Not out yet</b> · " : ""}${esc({ movie: "Film", show: "Series", game: "Game", book: "Book" }[e.medium])}${e.sub ? " · " + esc(e.sub) : ""}${e.tier ? ` · <b>${esc(TIER_SHORT[e.tier])}</b>` : ""}${e.canon && C.canonFrom(e.canon) ? " · from " + esc(C.canonFrom(e.canon)) : ""}</div></div>
       ${u.edit ? `<button class="btn quiet small" data-action="utier" data-k="${esc(e.key)}" aria-label="Change tier">${esc(e.tier ? TIER_SHORT[e.tier] : "Tier")}</button>
         <button class="iconbtn" data-action="umove" data-k="${esc(e.key)}" data-v="-1" aria-label="Move up">↑</button><button class="iconbtn" data-action="umove" data-k="${esc(e.key)}" data-v="1" aria-label="Move down">↓</button>` : ""}</div>`;
-    return `<section><div class="kicker">Universe</div><h2 style="font-size:30px;margin:6px 0">${esc(name)}</h2>
+    const bimgs = [...all.filter(e => e.img && e.done), ...all.filter(e => e.img && !e.done)].map(e => e.img);
+    return `<section>${Kit.banner({ name, kicker: "Universe", imgs: [...new Set(bimgs)], pct: 100 * done / Math.max(1, counted.length), line: `${fmt(done)} of ${fmt(counted.length)} · ${Math.round(100 * done / Math.max(1, counted.length))}%` })}
       <p class="muted">${done} of ${counted.length} · ${Math.round(100 * done / Math.max(1, counted.length))}%${soon ? ` · ${fmt(soon)} not out yet` : ""}${ess.length ? ` · essential: ${ess.filter(e => e.done).length} of ${ess.length}` : ""}</p>
       ${bars.length > 1 ? `<div class="card" style="margin:10px 0">${bars.map(b => `<div class="row small" style="gap:8px;margin:4px 0"><span style="width:56px">${b.l}</span><div class="grow" style="height:8px;border-radius:4px;background:var(--line);overflow:hidden"><i style="display:block;height:100%;width:${Math.round(100 * b.done / b.n)}%;background:var(--accent)"></i></div><span class="muted" style="width:64px;text-align:right">${b.done}/${b.n}</span></div>`).join("")}</div>` : ""}
       ${next ? `<div class="nextbox" style="margin:10px 0"><div class="grow" ${next.attrs}><div class="kicker">Next</div><b>${esc(next.title)}</b><div class="small muted">${esc(next.sub || "")}</div></div></div>` : ""}
@@ -3389,7 +3479,7 @@
       ${u.mode === "custom" ? `<p class="small muted">Tap Edit, then the arrows, to put entries in your own order.</p>` : ""}
       <div class="chips">${chip("utierf", "all", u.tier, "100% (everything)")}${chip("utierf", "canon", u.tier, "Without not-canon")}${chip("utierf", "core", u.tier, "Essential + recommended")}${chip("utierf", "essential", u.tier, "Essential only")}
         <button class="chip" data-action="umissing" aria-pressed="${u.missing}">Missing only</button><button class="chip" data-action="uedit" aria-pressed="${u.edit}">${icon("edit")}Edit tiers and order</button></div>
-      <div class="row wrap" style="margin:10px 0 14px"><button class="btn small" data-action="order" data-mv="${esc(name)}">${icon("list")}Watch order</button><button class="btn small" data-action="mvshare" data-mv="${esc(name)}">${icon("upload")}Share this list</button></div>
+      <div class="row wrap" style="margin:10px 0 14px"><button class="btn small" data-action="urefresh" data-mv="${esc(name)}" ${ui.job ? "disabled" : ""}>${icon("sync")}Refresh this universe</button><button class="btn small" data-action="order" data-mv="${esc(name)}">${icon("list")}Watch order</button><button class="btn small" data-action="mvshare" data-mv="${esc(name)}">${icon("upload")}Share this list</button></div>
       ${list.length ? `<div class="listcard">${list.slice(0, ui.uLim || 200).map(rowHtml).join("")}</div>${list.length > (ui.uLim || 200) ? `<button class="btn block" data-action="umore">Show more</button>` : ""}` : `<p class="muted">Nothing here with these filters.${u.tier !== "all" && !Object.keys(tiers).length ? " No tiers set yet: tap Edit tiers and order." : ""}</p>`}</section>`;
   }
   function universeAct(a, el) {
@@ -4143,6 +4233,25 @@
   // live number next to a slider (inline handlers are blocked by the content security policy)
   document.addEventListener("input", e => { const el = e.target; if (el && el.dataset && el.dataset.setting === "widget_alpha") { const v = document.getElementById("walphaV"); if (v) v.textContent = el.value + "%"; } });
 
+  // 0.7.8: tap the poster at the top of a title to see it whole, at full size (tap anywhere or Back/Esc to close)
+  const bigImg = u => String(u || "").replace(/\/t\/p\/w\d+\//, "/t/p/original/").replace(/\._V1_[^.]*\./, "._V1_.").replace(/\/cover\/[^/]+\//, "/cover/").replace(/t_cover_big/, "t_1080p");
+  function viewPoster(src, title) {
+    const v = document.createElement("div"); v.className = "postview"; v.setAttribute("role", "dialog"); v.setAttribute("aria-label", title || "Poster");
+    v.innerHTML = `<img alt="" src="${esc(bigImg(src))}"><button class="iconbtn" aria-label="Close">×</button>`;
+    const im = v.querySelector("img"); im.onerror = () => { if (im.src !== src) im.src = src; };
+    const close = () => { v.remove(); document.removeEventListener("keydown", key, true); };
+    const key = ev => { if (ev.key === "Escape") { ev.stopPropagation(); close(); } };
+    v.addEventListener("click", ev => { ev.stopPropagation(); close(); });
+    document.addEventListener("keydown", key, true);
+    document.body.appendChild(v);
+  }
+  document.addEventListener("click", e => {
+    const p = e.target.closest && e.target.closest(".cover-hero .poster");
+    if (!p) return;
+    const im = p.querySelector("img"); if (!im || !im.getAttribute("src")) return;
+    e.preventDefault(); e.stopPropagation();
+    viewPoster(im.getAttribute("src"), (p.closest(".cover-hero").querySelector("h3") || {}).textContent);
+  }, true);
   document.addEventListener("click", e => {
     let el = e.target.closest("[data-action]");
     // 0.6.8: the title and year under a cover open it too (only the picture used to)
@@ -4154,7 +4263,7 @@
     if (a.startsWith("lib") && libAct(a, el)) { if (a === "libseasonopen") return; e.preventDefault(); return; }
     if ((a.startsWith("mlist") || a.startsWith("mrule")) && myListAct(a, el)) { e.preventDefault(); return; }
     if (a === "imdbfull") { e.preventDefault(); doSync(false, true); return; }
-    for (const m of Object.values(Kit.mods)) if (m.act && m.act(a, el, e)) { e.preventDefault(); return; }
+    for (const m of Object.values(Kit.mods)) if (m.act && m.act(a, el, e)) { e.preventDefault(); if (/^tl/.test(a)) dwSoon(); return; }
     switch (a) {
       case "search": openSearch(); break;
       case "person": openPerson(el.dataset.name); break;
@@ -4419,6 +4528,7 @@
         break;
       }
       case "order": openOrder(el.dataset.mv); break;
+      case "urefresh": universeRefresh(el.dataset.mv); break;
       case "ordermode": openOrder(ui.order.mv, el.dataset.v); break;
       case "orderget": orderGet(el.dataset.via); break;
       case "trakt": { const c = ui.sheetC; closeOverlay(); if (c) traktDo(c, el.dataset.k); break; }
@@ -4507,6 +4617,33 @@
     if (e.key === "/" && !typing && !$("#overlay").innerHTML) { e.preventDefault(); openSearch(); return; }
     if (e.key === "Escape" && $("#overlay").innerHTML) { e.preventDefault(); closeOverlay(); }
   });
+  // 0.7.8: online searches start by themselves once you stop typing (no Enter needed), and the text box keeps the
+  // keyboard and the cursor while the results come in
+  const LIVE = el => el && el.dataset && (el.dataset.input === "libQ" || el.dataset.gsq || el.dataset.bsq);
+  let liveT = null, focusKeep = null;
+  document.addEventListener("input", e => {
+    const el = e.target;
+    if (el && el.type === "search" && el.dataset && el.dataset.input) focusKeep = { key: el.dataset.input, pos: el.selectionStart, at: Date.now() };
+    if (!LIVE(el)) return;
+    clearTimeout(liveT);
+    const v = el.value.trim();
+    if (v.length < 2) return;
+    liveT = setTimeout(() => {
+      if (el.value.trim() !== v) return;
+      for (const m of Object.values(Kit.mods)) if (m.enter && m.enter(el)) return;
+      if (el.dataset.input === "libQ") { ui.libQ = el.value; libSearch(); }
+    }, 650);
+  });
+  try {
+    new MutationObserver(() => {
+      if (!focusKeep || Date.now() - focusKeep.at > 20000) return;
+      const a = document.activeElement;
+      if (a && a.dataset && a.dataset.input === focusKeep.key) return;
+      if (a && a !== document.body && a.tagName !== "BUTTON") return; // you moved on
+      const el = document.querySelector(`input[data-input="${focusKeep.key}"]`);
+      if (el) { el.focus({ preventScroll: true }); try { const p = focusKeep.pos != null ? focusKeep.pos : el.value.length; el.setSelectionRange(p, p); } catch (x) { /* not a text field */ } }
+    }).observe(document.getElementById("view") || document.body, { childList: true, subtree: true });
+  } catch (e) { /* older browser */ }
   document.addEventListener("keydown", e => {
     if (e.key !== "Enter" || !e.target.dataset) return;
     for (const m of Object.values(Kit.mods)) if (m.enter && m.enter(e.target)) { e.preventDefault(); return; }
@@ -4524,6 +4661,7 @@
     if (el.dataset && el.dataset.lang) { BantaShell.setLang(el.value); prefsOut(); toast(el.value === "it" ? "Italiano attivo" : "English on"); render(); return; }
     if (el.dataset && el.dataset.feature) {
       BantaShell.setFeature(el.dataset.feature, el.checked); prefsOut();
+      if (el.dataset.feature === "dw") dwSoon(true);
       db.set("features_seen", "1");
       if (el.dataset.feature === "streamAlerts") { db.set("stream_alerts", el.checked ? "1" : "0"); db.flush(); }
       toast(`${FEATURES.find(f => f[0] === el.dataset.feature)[1]}: ${el.checked ? "on" : "off"}`);
@@ -4564,6 +4702,54 @@
   // 0.7.6: the night refresh (around 03:30, Android starts the app off-screen with ?night=1): a full sync (every IMDb
   // rating again, not just the newest), your website, the jobs Saga does by itself, then every series' episodes and
   // details, the longest-unchecked first, until the system's 10 minutes are nearly up. Sync › Done by itself lists it.
+  // 0.7.8: Doctor Who timeline → the other tabs. With Doctor Who on, every novel goes to Books, every film to Watch and every
+  // game to Games (tagged dw:<key>). A tagged item that isn't finished leaves again when Doctor Who is turned off or the story
+  // is hidden/removed from the timeline; finished ones stay (that's your history). Audio, comics, short stories, webcasts
+  // and the like have no tab of their own, so they stay on the timeline. TV episodes are already covered by the series.
+  function dwMirror() {
+    const tl = Kit.mods && Kit.mods.timeline;
+    const on = secOn("timeline") && tl && tl.allWorks && window.DW_DATA;
+    const want = new Map();
+    if (on) for (const w of tl.allWorks()) if (w.type === "novel" || w.type === "film" || w.type === "game") want.set(w.k, w);
+    const r = { books: 0, films: 0, games: 0, removed: 0 };
+    if (window.__sagaWeb && window.__sagaPhoneSeen !== false) return r;
+    let bCh = false, gCh = false; const lCh = [];
+    // books
+    for (const b of books.books.slice()) if (b.dw && !want.has(b.dw)) { if (b.dwAuto && b.status !== "read" && b.status !== "reading") { books.books = books.books.filter(x => x !== b); r.removed++; bCh = true; } }
+    for (const it of lib.all()) if (it.dw && !want.has(it.dw) && it.dwAuto && it.status !== "watched" && it.status !== "watching") { delete lib.items[it.id]; lCh.push(it.id); r.removed++; }
+    for (const g of games.games.slice()) if (g.dw && !want.has(g.dw) && g.dwAuto && g.status !== "done" && g.status !== "playing") { games.games = games.games.filter(x => x !== g); r.removed++; gCh = true; }
+    for (const w of want.values()) {
+      if (w.type === "novel") {
+        let b = books.books.find(x => x.dw === w.k);
+        if (!b) { const res = books.add({ title: w.title, authors: [], series: "Doctor Who", src: "dw" }, w.done ? "read" : "want"); b = res.book; if (!res.existed) { b.dwAuto = 1; r.books++; } b.dw = w.k; bCh = true; }
+        if (w.done && b.status !== "read") { BC.setStatus(b, "read", w.at || Date.now()); bCh = true; }
+        if (w.rating && !b.rating) { b.rating = w.rating; bCh = true; }
+      } else if (w.type === "film") {
+        let it = lib.all().find(x => x.dw === w.k);
+        if (!it) { const res = lib.add({ type: "movie", title: w.title, src: "dw" }, w.done ? "watched" : "watchlist"); it = res.item; if (!res.existed) { it.dwAuto = 1; r.films++; } it.dw = w.k; lCh.push(it.id); }
+        if (w.done && it.status !== "watched") { lib.setStatus(it, "watched", w.at || Date.now()); lCh.push(it.id); }
+        if (w.rating && !it.rating) { it.rating = w.rating; lCh.push(it.id); }
+      } else {
+        let g = games.games.find(x => x.dw === w.k);
+        if (!g) { const res = games.add({ title: w.title, franchise: "Doctor Who", multiverse: "Doctor Who", src: "dw" }, w.done ? "done" : "backlog"); g = res.game; if (!res.existed) { g.dwAuto = 1; r.games++; } g.dw = w.k; gCh = true; }
+        if (w.done && g.status !== "done") { GC.setStatus(g, "done"); gCh = true; }
+        if (w.rating && !g.rating) { g.rating = w.rating; gCh = true; }
+      }
+    }
+    if (bCh) { books.save(); changed("books"); }
+    if (gCh) { games.save(); changed("games"); }
+    if (lCh.length) { libSave([...new Set(lCh)]); libMirror(); }
+    return r;
+  }
+
+  // the phone does it (the website gets the result with the next sync), a moment after you mark or hide a story
+  let dwT = null;
+  function dwSoon(now) {
+    if (window.__sagaWeb && window.__sagaPhoneSeen !== false) return;
+    clearTimeout(dwT);
+    dwT = setTimeout(() => { try { const r = dwMirror(); const n = r.books + r.films + r.games; if (now && (n || r.removed)) toast(`Doctor Who: ${fmt(n)} added to Books, Watch and Games${r.removed ? `, ${fmt(r.removed)} taken out` : ""}`); } catch (e) { logError("dw mirror", e.message); } }, now ? 300 : 2500);
+  }
+
   async function nightRun() {
     const t0 = Date.now(), left = () => 8.5 * 60000 - (Date.now() - t0), out = [];
     const idle = async ms => { const end = Date.now() + ms; while (ui.job && Date.now() < end) await new Promise(r => setTimeout(r, 1000)); };
@@ -4630,7 +4816,7 @@
   window.__sagaAuto = Auto && { run: why => ((navigator.webdriver && !window.__wantAuto) || window.__sagaWeb ? Promise.resolve() : Auto.run(why)) }; // the phone does them; the website gets the result
   // also when the app opens and they haven't run for 12 hours (no sync needed); a failed part from before is retried later
   setTimeout(() => { try { if (window.__sagaAuto && !window.__sagaWeb && Date.now() - (+db.get("auto_at", "0") || 0) > 12 * 3600e3 && !ui.job) window.__sagaAuto.run("app opened"); } catch (e) { /* next time */ } }, 90000);
-  const Saga = window.Saga = { gameCanonCheck: () => gameCanonCheck(), gameImdbCheck: () => gameImdbCheck(), gameInfo: ids => gameInfoRun(ids), http: C.robust(Native.http, { timeout: 30000, tries: 2 }), Native, db, games, books, lib, lang, feat, render, sheet, go, changed,
+  const Saga = window.Saga = { universeRefresh: n => universeRefresh(n), gameRefresh: id => gameRefreshOne(id), gameCanonCheck: () => gameCanonCheck(), gameImdbCheck: () => gameImdbCheck(), gameInfo: ids => gameInfoRun(ids), http: C.robust(Native.http, { timeout: 30000, tries: 2 }), Native, db, games, books, lib, lang, feat, render, sheet, go, changed,
     close: () => { if (Kit.mods.books && Kit.mods.books.stopScan) Kit.mods.books.stopScan(); closeOverlay(); } };
   Kit.toast = toast; Kit.icon = icon; Kit.sheet = sheet; Kit.close = Saga.close;
   ui.sec = "home"; ui.tab = "library";
@@ -4652,6 +4838,7 @@
   try { const fx = fixListedWatched(); if (fx && (fx.films || fx.games)) { render(); setTimeout(() => toast(`${fmt(fx.films)} titles and ${fmt(fx.games)} games were only on a list, not rated: back to To watch / Wishlist`), 1200); } } catch (e) { logError("fixlisted", e.message); }
   applyPending();
   setTimeout(() => window.__sharePoll(), 400);
+  setTimeout(() => { if (!navigator.webdriver || window.__wantDw) dwSoon(); }, 6000);
   applyBackground();
   if (/[?&]night=1\b/.test(location.search) && window.Android) setTimeout(() => nightRun(), 4000);
   try { autoBackup(); } catch (e) { /* tried again next start */ }
@@ -4692,5 +4879,5 @@
   const last = parseFloat(db.get("last_sync", "0")) || 0;
   const hasSources = db.get("username") || db.get("imdb_user") || db.get("canon_urls") || db.get("imdb_lists");
   if (db.get("auto_sync") === "1" && hasSources && Date.now() / 1000 - last > AUTO_SYNC_HOURS * 3600) { db.set("sync_open", "0"); doSync(); db.set("sync_open", "1"); }
-  window.__app = { nightRun, fixImdbPageNoise, libSave, openHistory, behindCheck, libSyncOne, fixListedWatched, webApi, webWhy, prefsIn, prefsOut, keysIn, keysText, notDropped, openLib, wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS: P_rules().RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle: P_backup().bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
+  window.__app = { viewPoster, dwMirror, nightRun, fixImdbPageNoise, libSave, openHistory, behindCheck, libSyncOne, fixListedWatched, webApi, webWhy, prefsIn, prefsOut, keysIn, keysText, notDropped, openLib, wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS: P_rules().RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle: P_backup().bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
 })();

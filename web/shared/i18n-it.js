@@ -1216,7 +1216,29 @@ window.BANTA_IT = {
 "By newest version (remakes, remasters)": "Per versione più recente (remake, remaster)",
 "By original release": "Per uscita originale",
 "Versions": "Versioni",
-"Bundle game versions, follow your multiverses": "Raggruppa le versioni dei giochi, segui i tuoi multiversi"
+"Bundle game versions, follow your multiverses": "Raggruppa le versioni dei giochi, segui i tuoi multiversi",
+"Open on TMDB": "Apri su TMDB",
+"Refresh everything (IMDb, series, versions, details, canon)": "Aggiorna tutto (IMDb, serie, versioni, dettagli, canon)",
+"Refresh everything (details, rating, watched, episodes, canon)": "Aggiorna tutto (dettagli, voto, visto, episodi, canon)",
+"Refresh this universe": "Aggiorna questo universo",
+"Games coming out.": "Giochi in uscita.",
+"Missing canon with a release date.": "Canon mancante con una data d'uscita.",
+"New episodes of the series you're watching (status Watching).": "Nuovi episodi delle serie che stai guardando (stato In corso).",
+"Not played": "Non giocato",
+"Universe": "Universo",
+"Vortex": "Vortice",
+"Cinema": "Cinema",
+"Synthwave": "Synthwave",
+"Forest": "Foresta",
+"Arcade": "Arcade",
+"Finishing any version counts the whole game as finished.": "Finire una qualsiasi versione conta tutto il gioco come finito.",
+"Not translated yet: in English.": "Non ancora tradotto: in inglese.",
+"Pick a result on the left.": "Scegli un risultato a sinistra.",
+"Original": "Originale",
+"Remaster": "Remaster",
+"Re-release": "Riedizione",
+"Refresh: check its games, find missing ones": "Aggiorna: controlla i suoi giochi, trova quelli mancanti",
+"Poster": "Locandina"
 };
 window.BANTA_IT_PAT = [
 [
@@ -2160,11 +2182,11 @@ window.BANTA_IT_PAT = [
 "$1 ascolti dal $2"
 ],
 [
-"You have (\\d[\\d,.]*) of (\\d[\\d,.]*) canon games \\\\((\\d[\\d,.]*)%\\\\), in (\\d[\\d,.]*) series\\\\. Your Games tab is what counts: IMDb lists are only a source\\\\.",
+"You have (\\d[\\d,.]*) of (\\d[\\d,.]*) canon games \\((\\d[\\d,.]*)%\\), in (\\d[\\d,.]*) series\\. Your Games tab is what counts: IMDb lists are only a source\\.",
 "Hai $1 di $2 giochi canonici ($3%), in $4 serie. Conta la tua scheda Giochi: le liste IMDb sono solo una fonte."
 ],
 [
-"Fill missing details with AI \\\\((\\d[\\d,.]*) games\\\\)",
+"Fill missing details with AI \\((\\d[\\d,.]*) games\\)",
 "Completa i dettagli mancanti con l'IA ($1 giochi)"
 ],
 [
@@ -2194,5 +2216,37 @@ window.BANTA_IT_PAT = [
 [
 "Your website runs Saga (.+)",
 "Il tuo sito usa Saga $1"
+],
+[
+"Refresh (.+) \\(check its entries, find missing ones\\)",
+"Aggiorna $1 (controlla i titoli, trova quelli mancanti)"
+],
+[
+"Back to (.+)",
+"Torna a $1"
+],
+[
+"(\\d[\\d,.]*) of (\\d[\\d,.]*) finished",
+"$1 di $2 finiti"
+],
+[
+"(\\d[\\d,.]*) series · (\\d[\\d,.]*) of (\\d[\\d,.]*) finished",
+"$1 serie · $2 di $3 finiti"
+],
+[
+"Doctor Who: (\\d[\\d,.]*) added to Books, Watch and Games",
+"Doctor Who: $1 aggiunti a Libri, Guarda e Giochi"
+],
+[
+"Doctor Who: (\\d[\\d,.]*) added to Books, Watch and Games, (\\d[\\d,.]*) taken out",
+"Doctor Who: $1 aggiunti a Libri, Guarda e Giochi, $2 tolti"
+],
+[
+"Doctor Who timeline: (\\d[\\d,.]*) books, (\\d[\\d,.]*) films, (\\d[\\d,.]*) games added",
+"Timeline di Doctor Who: aggiunti $1 libri, $2 film, $3 giochi"
+],
+[
+"Doctor Who timeline: (\\d[\\d,.]*) books, (\\d[\\d,.]*) films, (\\d[\\d,.]*) games added, (\\d[\\d,.]*) taken out",
+"Timeline di Doctor Who: aggiunti $1 libri, $2 film, $3 giochi, $4 tolti"
 ]
 ];

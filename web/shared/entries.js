@@ -93,7 +93,24 @@
     if (file === "canonsync.json" && f === "settings") return "Setting: " + sub;
     return sub ? `${f}: ${sub}` : f;
   }
-  const API = { split, join, hash, hashes, digest, diff, apply, keyFor, isDevice, fieldOf, label, KEYS, DEVICE_RX, T };
+  // 0.7.8: the same, a few milliseconds at a time (a big library is thousands of entries: done at once, the screen
+  // froze for a second or more on the phone after every sync)
+  const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+  const rest = () => new Promise(r => setTimeout(r, 0));
+  async function hashesAsync(file, m, slice = 8) {
+    const h = {}; let t = now();
+    for (const [k, v] of m) { if (!isDevice(file, k)) h[k] = hash(v); if (now() - t > slice) { await rest(); t = now(); } }
+    return h;
+  }
+  // → { patch, h }: the changes since `before`, and every entry's hash now (kept for the next sync)
+  async function diffAsync(file, before, m, slice = 8) {
+    const h = await hashesAsync(file, m, slice), out = [];
+    for (const k of Object.keys(h)) if (before[k] !== h[k]) out.push([k, m.get(k)]);
+    for (const k of Object.keys(before)) if (!(k in h) && !isDevice(file, k)) out.push([k]);
+    return { patch: out, h };
+  }
+  const digestOf = h => { const ks = Object.keys(h).sort(); return hash(ks.map(k => k + "=" + h[k]).join("\n")); };
+  const API = { hashesAsync, diffAsync, digestOf, split, join, hash, hashes, digest, diff, apply, keyFor, isDevice, fieldOf, label, KEYS, DEVICE_RX, T };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   else root.SagaEntries = API;
 })(typeof window !== "undefined" ? window : this);

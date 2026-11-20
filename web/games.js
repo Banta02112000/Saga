@@ -290,6 +290,18 @@
   }
   // a game whose series came from your list (not guessed from its title, not given by a canon scan)
   const trustedGame = g => !!(g.fImported || (g.franchise && !g.fCanon && !g.fGuess && !(g.franchise === franchiseGuess(g.title) && (g.multiverse || g.franchise) === g.franchise)));
+  // 0.7.8: a version's progress; finishing any version counts the whole game (the bundle) as finished
+  function setVersionStatus(lib, g, i, st, date) {
+    const v = (g.versions || [])[i]; if (!v) return null;
+    v.status = st === "done" || st === "playing" ? st : "";
+    if (st === "done") { v.plays = (v.plays || []).concat([date || today()]); }
+    let nx = null;
+    if (st === "done" && g.status !== "done") { const was = g.status; setStatus(g, "done", date); nx = lib.statusChanged(g, was); }
+    else if (st === "playing" && g.status !== "playing" && g.status !== "done") setStatus(g, "playing");
+    lib.save();
+    return nx;
+  }
+  const versionDone = g => g.status === "done" || (g.versions || []).some(v => v.status === "done");
   function franchiseGuess(t) {
     let s = String(t || "").split(/\s*[:–—]\s+|\s+-\s+/)[0];
     s = s.replace(/\s+(Remastered|Remake|HD|Deluxe|Edition|Definitive Edition|GOTY|Reloaded)$/i, "").replace(/\s+(\d+|[IVX]{1,4})$/i, "").trim();
@@ -655,7 +667,7 @@
   }
   const hrs = m => (m >= 120 ? `${Math.round(m / 60)} h` : m >= 60 ? `${Math.round(m / 6) / 10} h` : `${Math.round(m)} min`);
   // where a game came from, and what it's linked to
-  const SRC = { list: "your games list (spreadsheet)", imdb: "IMDb", canon: "canon (Games › Missing)", itad: "IsThereAnyDeal waitlist", added: "added by you", steam: "Steam", "steam library": "Steam", howlongtobeat: "HowLongToBeat", grouvee: "Grouvee", backloggd: "Backloggd", gamecheck: "GameCheck", "": "" };
+  const SRC = { list: "your games list (spreadsheet)", imdb: "IMDb", canon: "canon (Games › Missing)", itad: "IsThereAnyDeal waitlist", added: "added by you", steam: "Steam", "steam library": "Steam", howlongtobeat: "HowLongToBeat", grouvee: "Grouvee", backloggd: "Backloggd", gamecheck: "GameCheck", dw: "the Doctor Who timeline", "": "" };
   function sourceOf(g) {
     const from = SRC[String(g.src || "").toLowerCase()] != null ? SRC[String(g.src || "").toLowerCase()] : String(g.src || "");
     const linked = [g.imdb ? "IMDb" : "", g.steam ? "Steam" : "", g.itad ? "IsThereAnyDeal" : "", g.aiAt ? "details from AI" : "", g.steamMins ? "Steam playtime" : "", g.playedMins ? `${g.playedSrc || "HowLongToBeat"} playtime` : ""].filter(Boolean);
@@ -855,7 +867,9 @@ ${rows.map(c => `${c.title} (${c.year || "?"}) — ${c.franchise || ""}`).join("
   function linkRemake(lib, base, rem) {
     if (!base || !rem || base === rem) return base;
     // 0.7.6: every version is kept (base.versions); base.remake stays the newest, as before
-    const v = { title: rem.title, date: rem.date || "", platform: rem.platform || "", kind: versionKind(rem.title) };
+    // 0.7.8: a version keeps its own progress (finished or not, when, your rating) and its links
+    const v = { title: rem.title, date: rem.date || "", platform: rem.platform || "", kind: versionKind(rem.title), status: rem.status === "done" || rem.status === "playing" ? rem.status : "",
+      plays: (rem.plays || []).slice(), rating: rem.rating || 0, steam: rem.steam || null, imdb: rem.imdb || null, cover: rem.cover || "" };
     if (base.remake && base.remake.title && !(base.versions || []).some(y => norm(y.title) === norm(base.remake.title))) base.versions = (base.versions || []).concat([Object.assign({ kind: "remake" }, base.remake)]);
     base.versions = (base.versions || []).filter(x => norm(x.title) !== norm(v.title) || x.date !== v.date).concat([v]);
     for (const x of rem.versions || []) if (!base.versions.some(y => norm(y.title) === norm(x.title))) base.versions.push(x);
@@ -1023,13 +1037,16 @@ ${rows.map(c => `${c.title} (${c.year || "?"}) — ${c.franchise || ""}`).join("
     }
     return { added, rated, matched, promoted };
   }
+  // 0.7.8: only links to the game's own page where Saga knows it (no searches); the shops with prices come from
+  // IsThereAnyDeal (their own links)
   function storeLinks(g) {
-    const q = encodeURIComponent(g.title);
-    return [g.steam ? ["Steam", `https://store.steampowered.com/app/${g.steam}/`] : ["Steam", `https://store.steampowered.com/search/?term=${q}`],
-      ["GOG", `https://www.gog.com/en/games?query=${q}`], ["Epic Games Store", `https://store.epicgames.com/it/browse?q=${q}`],
-      ["Compare prices (GG.deals)", `https://gg.deals/search/?title=${q}`], ["PlayStation Store", `https://store.playstation.com/it-it/search/${q}`],
-      ["Nintendo eShop", `https://www.nintendo.com/it-it/Cerca/Cerca-299117.html?q=${q}`], ["Xbox / Game Pass", `https://www.xbox.com/it-IT/search/results/games?q=${q}`],
-      ["HowLongToBeat", `https://howlongtobeat.com/?q=${q}`], ["IMDb", g.imdb ? `https://www.imdb.com/title/${g.imdb}/` : `https://www.imdb.com/find/?q=${q}&s=tt&ttype=vg`]];
+    const out = [];
+    if (g.steam) out.push(["Steam", `https://store.steampowered.com/app/${g.steam}/`]);
+    if (g.gog) out.push(["GOG", String(g.gog).startsWith("http") ? g.gog : `https://www.gog.com/en/game/${g.gog}`]);
+    if (g.hltbId) out.push(["HowLongToBeat", `https://howlongtobeat.com/game/${g.hltbId}`]);
+    if (g.imdb) out.push(["IMDb", `https://www.imdb.com/title/${g.imdb}/`]);
+    for (const x of g.stores || []) if (x.url && x.shop && !out.some(o => o[0] === x.shop)) out.push([x.shop, x.url]);
+    return out;
   }
   function indexFor(lib) {
     const t = today();
@@ -1038,7 +1055,7 @@ ${rows.map(c => `${c.title} (${c.year || "?"}) — ${c.franchise || ""}`).join("
       games: lib.visible().map(g => ({ id: g.id, t: g.title, f: g.franchise, m: g.multiverse, done: g.status === "done", date: g.date })) };
   }
 
-  const API = { missingRows, canonCheckPrompt, applyCanonCheck, checkKey, storyKey, hasEdition, verDate, versionKind, MY_INFO_PROMPT, infoPromptOne, parseInfoText, imdbCheckMissing, timePlayed, hrs, sourceOf, wordDate, longDate, infoPrompt, parseInfo, applyInfo, steamPlay, backlogHours, findDuplicates, mergeGames, linkRemake, mergeInto, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
+  const API = { setVersionStatus, versionDone, missingRows, canonCheckPrompt, applyCanonCheck, checkKey, storyKey, hasEdition, verDate, versionKind, MY_INFO_PROMPT, infoPromptOne, parseInfoText, imdbCheckMissing, timePlayed, hrs, sourceOf, wordDate, longDate, infoPrompt, parseInfo, applyInfo, steamPlay, backlogHours, findDuplicates, mergeGames, linkRemake, mergeInto, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
     steamSearch, linkSteam, steamPrices, storePrices, steamDates, importRows, fromImdb, storeLinks, indexFor, yearOf, NA };
   if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
   root.GamesCore = API;

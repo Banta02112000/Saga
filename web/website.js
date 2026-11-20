@@ -66,6 +66,7 @@
   // undo what the newer did) and updates itself when it can; it says so on every screen
   async function behindCheck(m) {
     const pv = m && m.phone && m.phone.version;
+    window.__sagaPhoneSeen = !!pv; // 0.7.8: with a phone, the phone does the Doctor Who mirroring (no double adds)
     if (!pv || A.verNum(pv) <= A.verNum(A.VERSION)) return;
     window.__sagaWeb.pause(true);
     const bar = (html) => { let b = document.getElementById("behindbar"); if (!b) { b = document.createElement("div"); b.id = "behindbar"; document.body.prepend(b); } b.innerHTML = html; };
@@ -223,7 +224,7 @@
       // the two disagree) the whole file goes, as before. A copy of everything is kept before the first one.
       const SE = window.SagaEntries, v2 = !!(mj.sync2 && SE), S2 = (WS.get().v2) || {};
       if (v2 && !WS.get().v2) { try { A.snapshot("before the website sync that sends only changes"); } catch (e) { /* no copy */ } }
-      const saveV2 = (n, rev) => { try { S2[n] = { rev, h: SE.hashes(n, SE.split(n, JSON.parse(A.Native.load(n) || "{}"))) }; WS.set({ v2: S2 }); } catch (e) { A.logError("website sync", n + ": " + e.message); } };
+      const saveV2 = async (n, rev, h) => { try { S2[n] = { rev, h: h || (SE.hashesAsync ? await SE.hashesAsync(n, SE.split(n, JSON.parse(A.Native.load(n) || "{}"))) : SE.hashes(n, SE.split(n, JSON.parse(A.Native.load(n) || "{}")))) }; WS.set({ v2: S2 }); } catch (e) { A.logError("website sync", n + ": " + e.message); } };
       for (const n of WEB_FILES) {
         // 0.6.9.6: keys.json is made here when you send your keys (from the phone's encrypted store, never a file here)
         if (n === "keys.json" && !KEYS_OUT()) continue;
@@ -231,17 +232,23 @@
           const local = A.Native.load(n) || "";
           if (local) {
             await A.C.breathe(0);
-            const m = SE.split(n, JSON.parse(local)), patch = SE.diff(n, S2[n].h, m);
+            // 0.7.8: worked out a few milliseconds at a time, so the screen stays free
+            const m = SE.split(n, JSON.parse(local)); await A.C.breathe(0);
+            const dd = SE.diffAsync ? await SE.diffAsync(n, S2[n].h, m) : { patch: SE.diff(n, S2[n].h, m), h: null }, patch = dd.patch;
             if (!patch.length && mj.revs && mj.revs[n] === S2[n].rev) continue;
             const r = await http("POST", base + "/api/sync2/" + n, { headers: Object.assign({ "Content-Type": "application/json" }, H), body: JSON.stringify({ since: S2[n].rev, patch, version: A.VERSION }) });
             if (r.status !== 200) throw new Error(`${n}: ${webWhy(r)}`);
             const j = JSON.parse(r.body);
             if (!j.full) {
               SE.apply(m, j.changes || []);
-              if (SE.digest(n, m) === j.digest) {
+              let hNow = dd.h;
+              if (hNow) { hNow = Object.assign({}, hNow); for (const c of j.changes || []) { if (SE.isDevice(n, c[0])) continue; if (c.length < 2) delete hNow[c[0]]; else hNow[c[0]] = SE.hash(c[1]); }
+                // a container marker the server added with its records
+                for (const c of j.changes || []) { const t = c[0].indexOf("\t"); if (t > 0) { const f = c[0].slice(0, t); if (m.has(f) && !(f in hNow)) hNow[f] = SE.hash(m.get(f)); } } }
+              if ((hNow && SE.digestOf ? SE.digestOf(hNow) : SE.digest(n, m)) === j.digest) {
                 sent++;
                 if ((j.changes || []).length) { applyWebFile(n, JSON.stringify(SE.join(m))); got++; changedHere.push(n); }
-                saveV2(n, j.rev);
+                await saveV2(n, j.rev, hNow);
                 last[n] = { local: fileStamp(A.Native.load(n) || ""), server: null }; WS.set({ state: last });
                 continue;
               }
@@ -261,7 +268,7 @@
         if (j.text !== local) { applyWebFile(n, j.text); got++; changedHere.push(n); }
         last[n] = { local: fileStamp((n === "keys.json" ? keysText() : A.Native.load(n)) || j.text), server: j.sha256 }; // what's on the phone now, as the phone wrote it
         WS.set({ state: last });
-        if (v2 && j.rev != null && n !== "keys.json") saveV2(n, j.rev);
+        if (v2 && j.rev != null && n !== "keys.json") await saveV2(n, j.rev);
       }
       const msg = !sent ? "nothing to do" : `${sent} file${sent === 1 ? "" : "s"} compared${got ? `, changes from the website in ${changedHere.map(n => n.replace(".json", "")).join(", ")}` : ""}`;
       WS.set({ at: Date.now(), msg });

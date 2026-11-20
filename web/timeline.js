@@ -442,5 +442,17 @@
     return n;
   }
   const statesFor = () => load();
-  K.mods.timeline = { title: "Doctor Who", restoreMine, parseNote, matchNote, importNote, statsOf, canonEntries, render, act, change, input, migrate, next, recent, openStory, state: statesFor, reset: () => { st = null; ver++; }, waitsFor, deleteEntry, moveEntry, itemsOf, data: () => D(), mine: () => load(), saveMine: () => save() };
+  // 0.7.8: every story on the timeline (not hidden, not in "skipped / not canon"), with its type and your marks, for the
+  // other tabs (novels to Books, films to Watch, games to Games)
+  function allWorks() {
+    const out = [], seen = new Set();
+    for (const g of D().groups) { if (/skipped|not canon/i.test(g.name)) continue; for (const t of g.tabs) for (const it of itemsOf(g, t)) {
+      if (seen.has(it.k)) continue; seen.add(it.k);
+      const w = workOf(it); if (w.hidden) continue;
+      const m = load().works[it.k] || {};
+      out.push({ k: it.k, title: w.title, type: w.type, done: !!m.done, rating: m.rating || null, at: m.at || null, era: t.name });
+    } }
+    return out;
+  }
+  K.mods.timeline = { allWorks, title: "Doctor Who", restoreMine, parseNote, matchNote, importNote, statsOf, canonEntries, render, act, change, input, migrate, next, recent, openStory, state: statesFor, reset: () => { st = null; ver++; }, waitsFor, deleteEntry, moveEntry, itemsOf, data: () => D(), mine: () => load(), saveMine: () => save() };
 })();

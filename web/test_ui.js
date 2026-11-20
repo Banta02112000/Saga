@@ -259,7 +259,8 @@ const mock = () => {
   if (!(await page.textContent("#missingList")).includes(victim)) throw new Error("undo did not restore the entry");
   console.log("not canon + undo: OK (" + victim + ")");
 
-  // Upcoming tab: episodes from TMDB after Refresh shows
+  // Upcoming tab: episodes from TMDB after Refresh shows (0.7.8: only series you're watching)
+  await page.evaluate(() => { const it = __app.lib.all().find(x => x.title === "Doctor Who"); __app.lib.setStatus(it, "watching"); __app.libSave(); });
   await page.evaluate(() => __app.go("upcoming"));
   await page.click('[data-action=refreshshows]');
   await page.waitForFunction(() => !window.__app.ui.job, null, { timeout: 15000 });

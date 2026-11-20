@@ -292,7 +292,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.7.7", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.7.8", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();
@@ -943,6 +943,27 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   // 0.7.6: the night refresh: a full sync, the jobs, every series; written down in Done by itself
   const nr = await A(async () => { await __app.nightRun(); return JSON.parse(__app.db.get("auto_log", "[]")).find(x => x.k === "night"); });
   ok(nr && /Night refresh: full sync/.test(nr.what) && /series refreshed/.test(nr.what), "night refresh runs and says what it did: " + JSON.stringify(nr));
+  // 0.7.8: Doctor Who timeline → Books, Watch, Games; out again when Doctor Who is off (unless finished)
+  const dwm = await A(() => {
+    const T = Kit.mods.timeline, all = T.allWorks(), by = t => all.filter(w => w.type === t);
+    const r1 = __app.dwMirror();
+    const nb = __app.books.books.filter(b => b.dw).length, nf = __app.lib.all().filter(i => i.dw).length, ng = __app.games.games.filter(g => g.dw).length;
+    const r2 = __app.dwMirror(); // nothing twice
+    // finish one novel, then switch Doctor Who off
+    const fin = __app.books.books.find(b => b.dw && b.dwAuto); BantaShell.setFeature && BantaShell.setFeature("dw", false); fin.status = "read";
+    const r3 = __app.dwMirror();
+    const left = __app.books.books.filter(b => b.dw).length + __app.lib.all().filter(i => i.dw).length + __app.games.games.filter(g => g.dw).length;
+    BantaShell.setFeature("dw", true);
+    return { novels: by("novel").length, films: by("film").length, games: by("game").length, r1, nb, nf, ng, r2, r3, left, finKept: __app.books.books.includes(fin) };
+  });
+  ok(dwm.novels > 0 && dwm.nb >= dwm.novels * 0.8 && dwm.nf > 0 && dwm.r2.books + dwm.r2.films + dwm.r2.games === 0 && dwm.finKept && dwm.r3.removed > 0 && dwm.left >= 1,
+    "Doctor Who media mirrored to Books/Watch/Games, nothing twice, unfinished ones out when Doctor Who is off: " + JSON.stringify(Object.assign({}, dwm, { r1: dwm.r1, r3: dwm.r3 })));
+  // 0.7.8: settings in two panes on a wide screen; the title's poster opens whole
+  await pg.setViewportSize({ width: 1500, height: 900 });
+  const sp = await A(() => { __app.ui.setGroup = ""; __app.go("settings"); return { two: !!document.querySelector(".setpage.two .setnav") && !!document.querySelector(".setbody h2"), cur: (document.querySelector('.setrow[aria-current="true"]') || {}).textContent || "" }; });
+  ok(sp.two && /Accounts/.test(sp.cur), "website settings: two panes, first group open: " + JSON.stringify(sp));
+  const pview = await A(() => { __app.viewPoster("https://image.tmdb.org/t/p/w342/x.jpg", "X"); const v = document.querySelector(".postview img"); const src = v && v.getAttribute("src"); document.querySelector(".postview").click(); return { src, gone: !document.querySelector(".postview") }; });
+  ok(/\/original\//.test(pview.src) && pview.gone, "poster viewer opens the full size and closes: " + JSON.stringify(pview));
   await pg.setViewportSize({ width: 390, height: 844 });
   console.log("SAGA 5 UI TESTS PASSED");
   await browser.close(); srv.close();

@@ -545,8 +545,8 @@ D.update({"Oldest first (original release)": "Prima i più vecchi (uscita origin
 "Send my keys and sign-ins to my website": "Invia le mie chiavi e gli accessi al mio sito"})
 D.update({"Missing": "Mancanti", "No canon games yet": "Ancora nessun gioco canonico", "Wishlist": "Lista desideri", "Not canon": "Non canonico",
 "Fill missing details with AI (release, platform, remake, HLTB)": "Completa i dettagli mancanti con l'IA (uscita, piattaforma, remake, HLTB)", "Fill missing details with AI": "Completa i dettagli mancanti con l'IA"})
-P += [(rf"You have {N} of {N} canon games \\({N}%\\), in {N} series\\. Your Games tab is what counts: IMDb lists are only a source\\.", "Hai $1 di $2 giochi canonici ($3%), in $4 serie. Conta la tua scheda Giochi: le liste IMDb sono solo una fonte."),
-  (rf"Fill missing details with AI \\({N} games\\)", "Completa i dettagli mancanti con l'IA ($1 giochi)"), (rf"{N} games filled in(.*)", "$1 giochi completati$2")]
+P += [(rf"You have {N} of {N} canon games \({N}%\), in {N} series\. Your Games tab is what counts: IMDb lists are only a source\.", "Hai $1 di $2 giochi canonici ($3%), in $4 serie. Conta la tua scheda Giochi: le liste IMDb sono solo una fonte."),
+  (rf"Fill missing details with AI \({N} games\)", "Completa i dettagli mancanti con l'IA ($1 giochi)"), (rf"{N} games filled in(.*)", "$1 giochi completati$2")]
 
 # 0.6.9.8: sources and time played
 D.update({
@@ -648,3 +648,32 @@ D.update({
   "Versions": "Versioni",
   "Bundle game versions, follow your multiverses": "Raggruppa le versioni dei giochi, segui i tuoi multiversi",
 })
+D.update({
+  "Open on TMDB": "Apri su TMDB",
+  "Refresh everything (IMDb, series, versions, details, canon)": "Aggiorna tutto (IMDb, serie, versioni, dettagli, canon)",
+  "Refresh everything (details, rating, watched, episodes, canon)": "Aggiorna tutto (dettagli, voto, visto, episodi, canon)",
+  "Refresh this universe": "Aggiorna questo universo",
+  "Games coming out.": "Giochi in uscita.",
+  "Missing canon with a release date.": "Canon mancante con una data d'uscita.",
+  "New episodes of the series you're watching (status Watching).": "Nuovi episodi delle serie che stai guardando (stato In corso).",
+  "Not played": "Non giocato",
+  "Universe": "Universo",
+  "Vortex": "Vortice", "Cinema": "Cinema", "Synthwave": "Synthwave", "Forest": "Foresta", "Arcade": "Arcade",
+  "Finishing any version counts the whole game as finished.": "Finire una qualsiasi versione conta tutto il gioco come finito.",
+  "Not translated yet: in English.": "Non ancora tradotto: in inglese.",
+  "Pick a result on the left.": "Scegli un risultato a sinistra.",
+  "Original": "Originale", "Remaster": "Remaster", "Re-release": "Riedizione",
+  "Refresh: check its games, find missing ones": "Aggiorna: controlla i suoi giochi, trova quelli mancanti",
+  "Poster": "Locandina",
+  "Saved": "Salvato",
+})
+P += [
+  (r"Refresh (.+) \(check its entries, find missing ones\)", "Aggiorna $1 (controlla i titoli, trova quelli mancanti)"),
+  (r"Back to (.+)", "Torna a $1"),
+  (rf"{N} of {N} finished", "$1 di $2 finiti"),
+  (rf"{N} series · {N} of {N} finished", "$1 serie · $2 di $3 finiti"),
+  (rf"Doctor Who: {N} added to Books, Watch and Games", "Doctor Who: $1 aggiunti a Libri, Guarda e Giochi"),
+  (rf"Doctor Who: {N} added to Books, Watch and Games, {N} taken out", "Doctor Who: $1 aggiunti a Libri, Guarda e Giochi, $2 tolti"),
+  (rf"Doctor Who timeline: {N} books, {N} films, {N} games added", "Timeline di Doctor Who: aggiunti $1 libri, $2 film, $3 giochi"),
+  (rf"Doctor Who timeline: {N} books, {N} films, {N} games added, {N} taken out", "Timeline di Doctor Who: aggiunti $1 libri, $2 film, $3 giochi, $4 tolti"),
+]

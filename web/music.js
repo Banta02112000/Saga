@@ -102,13 +102,20 @@
     const rp = await sp(http, tok, "/me/player/recently-played?limit=50");
     d.spRecent = ((rp && rp.items) || []).map(x => ({ track: (x.track || {}).name || "", artist: ((x.track || {}).artists || []).map(y => y.name).join(", "), album: ((x.track || {}).album || {}).name || "",
       img: ((((x.track || {}).album || {}).images || [])[2] || {}).url || "", ms: (x.track || {}).duration_ms || 0, at: Date.parse(x.played_at) / 1000 || 0 }));
+    // 0.7.8: Spotify only ever gives the last 50 plays: Saga keeps every one it sees, so the stats grow with each sync
+    // even without Last.fm (up to 10,000, newest first; first artist only, like Last.fm)
+    const seen = new Set((d.spHist || []).map(x => x.at + "|" + x.track));
+    d.spHist = d.spRecent.filter(x => x.at && !seen.has(x.at + "|" + x.track)).map(x => ({ at: x.at, track: x.track, artist: String(x.artist || "").split(",")[0].trim(), album: x.album, ms: x.ms }))
+      .concat(d.spHist || []).sort((a, b) => b.at - a.at).slice(0, 10000);
     d.spotifyAt = Date.now();
     return d;
   }
 
   // ---- numbers from the scrobbles: plays per day (last 30), by hour, streak, this week
+  // the plays the stats count: Last.fm's scrobbles when there are any, otherwise the Spotify plays Saga has kept
+  const plays = d => ((d.recent || []).length ? d.recent : d.spHist || []).filter(x => x.at);
   function stats(d, now = Date.now()) {
-    const rec = (d.recent || []).filter(x => x.at), dayOf = t => new Date(t * 1000).toISOString().slice(0, 10);
+    const rec = plays(d), dayOf = t => new Date(t * 1000).toISOString().slice(0, 10);
     const days = [];
     for (let k = 29; k >= 0; k--) days.push(new Date(now - k * 864e5).toISOString().slice(0, 10));
     const perDay = Object.fromEntries(days.map(x => [x, 0]));
@@ -224,9 +231,9 @@
     const st = stats(d), i = d.info, wk = st.week[0];
     const n = d.now;
     return `${n ? `<div class="nextbox" style="margin:8px 0"><div class="grow"><div class="kicker">Playing now</div><b>${esc(n.track)}</b><div class="small muted">${esc(n.artist)}${n.album ? " · " + esc(n.album) : ""}</div></div></div>` : ""}
-      ${i ? `<div class="sstrip"><div><b>${fmt(i.playcount)}</b><span>scrobbles${i.since ? ` since ${new Date(i.since * 1000).getFullYear()}` : ""}</span></div><div><b>${fmt(i.artists)}</b><span>artists</span></div><div><b>${fmt(i.tracks)}</b><span>tracks</span></div><div><b>${fmt(st.total7)}</b><span>this week</span></div></div>` : ""}
-      ${i ? `<div class="sstrip"><div><b>${fmt(st.avgDay)}</b><span>a day (30 days)</span></div><div><b>${fmt(st.streak)}</b><span>day streak</span></div><div><b class="ell">${wk ? esc(wk[0]) : "–"}</b><span>top artist this week${wk ? ` (${wk[1]})` : ""}</span></div></div>` : ""}
-      ${(d.recent || []).length ? `<div class="sstrip"><div><b>${hm(st.mins7)}</b><span>listened this week*</span></div><div><b>${hm(st.mins30)}</b><span>in 30 days*</span></div><div><b>${fmt(st.artists30)}</b><span>artists in 30 days</span></div>${st.lifeAvg ? `<div><b>${fmt(st.lifeAvg)}</b><span>a day, all time</span></div>` : ""}</div>
+      ${i ? `<div class="sstrip"><div><b>${fmt(i.playcount)}</b><span>scrobbles${i.since ? ` since ${new Date(i.since * 1000).getFullYear()}` : ""}</span></div>${i.artists ? `<div><b>${fmt(i.artists)}</b><span>artists</span></div>` : ""}${i.tracks ? `<div><b>${fmt(i.tracks)}</b><span>tracks</span></div>` : ""}<div><b>${fmt(st.total7)}</b><span>this week</span></div></div>` : ""}
+      ${st.kept ? `<div class="sstrip"><div><b>${fmt(st.avgDay)}</b><span>a day (30 days)</span></div><div><b>${fmt(st.streak)}</b><span>day streak</span></div><div><b class="ell">${wk ? esc(wk[0]) : "–"}</b><span>top artist this week${wk ? ` (${wk[1]})` : ""}</span></div></div>` : ""}
+      ${st.kept ? `${(d.recent || []).length ? "" : `<p class="small muted" style="margin:0 0 8px">From the ${fmt(st.kept)} Spotify plays Saga has kept so far (Spotify gives the last 50 at each sync; Last.fm gives your whole history).</p>`}<div class="sstrip"><div><b>${hm(st.mins7)}</b><span>listened this week*</span></div><div><b>${hm(st.mins30)}</b><span>in 30 days*</span></div><div><b>${fmt(st.artists30)}</b><span>artists in 30 days</span></div>${st.lifeAvg ? `<div><b>${fmt(st.lifeAvg)}</b><span>a day, all time</span></div>` : ""}</div>
         <div class="sstrip"><div><b>${fmt(st.longest)}</b><span>longest streak (days)</span></div>${st.busiest ? `<div><b>${fmt(st.busiest[1])}</b><span>busiest day: ${esc(K.when(Date.parse(st.busiest[0]), S().lang()))}</span></div>` : ""}<div><b>${st.nightPct}%</b><span>after midnight (30 days)</span></div>${st.top10Share ? `<div><b>${st.top10Share}%</b><span>of this month is your top 10 artists</span></div>` : ""}</div>
         ${st.topRepeat && st.topRepeat.plays > 2 ? `<p class="small" style="margin:6px 0">On repeat: <b>${esc(st.topRepeat.track)}</b> by ${esc(st.topRepeat.artist)}, ${fmt(st.topRepeat.plays)} plays in 30 days</p>` : ""}
         ${K.head("Last 30 days")}${bars(st.days.map(([x, v]) => [x.slice(8), v]), 5)}${K.head("By hour (30 days)")}${bars(st.hours.map((v, h) => [String(h), v]), 3)}

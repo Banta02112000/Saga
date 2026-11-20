@@ -125,7 +125,7 @@
       ${facts.length ? `<h4>Details</h4><div class="listcard">${facts.map(([k, v]) => `<div class="row small" style="min-height:38px;border-bottom:1px solid var(--line)"><span class="muted" style="width:36%">${esc(k)}</span><span class="grow">${esc(v)}</span></div>`).join("")}</div>` : ""}
       ${b.description ? `<details class="report"><summary>Description (may contain spoilers)</summary><p class="small">${esc(b.description)}</p></details>` : ""}
       <label class="field" style="margin-top:12px"><span>Notes</span><textarea rows="2" data-bnotes="1" placeholder="Thoughts, quotes, who recommended it…">${esc(b.notes)}</textarea></label>
-      <h4>Where to get it</h4>${B.storeLinks(b).map(([n, u]) => `<button class="sheetbtn" data-action="open" data-url="${esc(u)}">${K.icon("open")}${esc(n)}</button>`).join("")}
+      ${B.storeLinks(b).length ? "<h4>Where to get it</h4>" : ""}${B.storeLinks(b).map(([n, u]) => `<button class="sheetbtn" data-action="open" data-url="${esc(u)}">${K.icon("open")}${esc(n)}</button>`).join("")}
       <div style="margin-top:8px"><button class="sheetbtn" data-action="mlistadd" data-k="book:${esc(b.id)}">${K.icon("plus")}Add to a list</button><button class="sheetbtn" data-action="bsync1">${K.icon("sync")}Sync this book (missing details, cover, price)</button><button class="sheetbtn" data-action="bedit">${K.icon("edit")}Edit details</button><button class="sheetbtn" data-action="bremove">${K.icon("notcanon")}Remove from your books</button></div>`;
   }
   function open(id) { const b = lib().get(id); if (!b) return; ui.open = id; Saga.sheet(sheetHtml(b), "bsheet", id); }

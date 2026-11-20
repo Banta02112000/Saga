@@ -6,7 +6,7 @@
   const DAY = 864e5;
   const GB = "https://www.googleapis.com/books/v1/volumes";
   const OL = "https://openlibrary.org";
-  const UA = { "User-Agent": "Saga/0.7.7 (+https://github.com/Banta02112000/Saga)", Accept: "application/json" };
+  const UA = { "User-Agent": "Saga/0.7.8 (+https://github.com/Banta02112000/Saga)", Accept: "application/json" };
   const STATUSES = ["reading", "paused", "want", "read", "dnf"];
   const STATUS_LABEL = { reading: "Reading", paused: "Paused", want: "Want to read", read: "Read", dnf: "Did not finish" };
   const FORMATS = ["Paper", "Ebook", "Audio"];
@@ -258,8 +258,10 @@
   function hashId(s) { let h = 7; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h) % 2000000000; }
 
   // Stores without a price API: opened as searches by ISBN (or title).
+  // 0.7.8: shops only when the book's ISBN is known (they open that book, not a guess)
   function storeLinks(b) {
-    const q = encodeURIComponent(bookIsbn(b) || `${b.title} ${(b.authors || [])[0] || ""}`.trim());
+    if (!bookIsbn(b)) return [];
+    const q = encodeURIComponent(bookIsbn(b));
     return [["Amazon.it", `https://www.amazon.it/s?k=${q}&i=stripbooks`], ["IBS", `https://www.ibs.it/search/?ts=as&query=${q}`],
       ["laFeltrinelli", `https://www.lafeltrinelli.it/search/?query=${q}`], ["Kobo", `https://www.kobo.com/it/it/search?query=${q}`],
       ["Libraccio (new & used)", `https://www.libraccio.it/src/?xy=${q}`], ["AbeBooks (used)", `https://www.abebooks.it/servlet/SearchResults?kn=${q}`],
