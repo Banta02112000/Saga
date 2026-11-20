@@ -276,7 +276,7 @@
   function undoChange(...a) { return P_website().undoChange(...a); }
   function syncWithWebServer(...a) { return P_website().syncWithWebServer(...a); }
   const C = window.Core;
-  const VERSION = "0.7.9";
+  const VERSION = "0.8.0";
   const AUTO_SYNC_HOURS = 12;
   Object.assign(C.PROFILES, (window.CANONSYNC_PRESET || {}).traktProfiles || {});
   const DEFAULT_PROFILE = (window.CANONSYNC_PRESET || {}).traktDefault || "PKCE (your own Trakt app)";
@@ -585,6 +585,9 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.8.0", ["Games › Franchises: one entry per multiverse. Every game that isn't from your list goes where its name says (Total War: Warhammer III, Space Marine II, Dawn of War… in Warhammer; Marvel's Spider-Man 2 and Miles Morales in Marvel › Spider-Man), instead of a series of its own per canon scan. All its games are in one row, by release; Show its series opens it into its sub-series (Dawn of War, Space Hulk, Total War…).",
+      "Copies merged: the same game added again by a canon scan, IMDb or Steam (Marvel's Spider-Man 2 and Spider-Man 2 of the same year, II and 2) becomes one, your list's entry kept. Two games of your list with one name (another platform) both stay, and show their platform and year.",
+      "Your games list's series put back where earlier versions had moved them, and rows whose columns had slid in the spreadsheet (Red Dead, The Dark Pictures, BS Zelda) read right. Done once; Sync › Done by itself says how many."]],
     ["0.7.9", ["Copy-and-paste prompts for everything (Settings › Canon finder and AI): every AI step (canon search and checks, multiverses, game details, the games canon check, refreshing a title or a universe, watch order) shows you the prompt to paste into any AI chat (Gemini, Claude, ChatGPT…), and reads the answer you paste back. No API key needed.",
       "When an API key fails (a broken key, quota, Google turning it away), that step now carries on as copy and paste instead of stopping, and says why. The copy-and-paste sheet works with any AI chat, with buttons for Gemini, Claude and ChatGPT.",
       "Fixed: game details by copy and paste refused answers that weren't a table."]],
@@ -4873,6 +4876,18 @@
   migrate().catch(e => console.error(e));
   // 0.6.9.6: settings kept with the rest (sections, language, look); on the website, the keys the phone sent
   try { if (window.__sagaWeb) keysIn(Native.load("keys.json")); if (prefsIn()) render(); } catch (e) { logError("settings", e.message); }
+  // 0.7.9: your games list's series put back where earlier versions moved them, then every other game sorted by its
+  // name into your series, and copies of the same game merged (once, on the phone: your list ships only with your app)
+  (async () => {
+    try {
+      if (window.__sagaWeb || db.get("fix_gamelist_v1") || !games.games.length) return;
+      const okLoad = window.GC_MINE ? true : await loadScript("gc-mine.js");
+      const n = okLoad && window.GC_MINE ? GC.repairFromList(games, window.GC_MINE) : 0;
+      const moved = games.resolveFranchises();
+      games.save(); db.set("fix_gamelist_v1", "1"); db.flush(); changed("games");
+      if (n || moved.length) { try { const a = JSON.parse(db.get("auto_log", "[]")); a.unshift({ at: Date.now(), k: "bundle", what: `Games sorted: ${fmt(n)} games of your list back in their series, ${fmt(moved.length)} others moved into your series or merged as copies` }); db.set("auto_log", JSON.stringify(a.slice(0, 60))); } catch (e) { /* log only */ } if (ui.sec === "games") render(); }
+    } catch (e) { logError("fix", "games list: " + e.message); }
+  })();
   try { const nz = fixImdbPageNoise(); if (nz && (nz.films || nz.games)) { render(); setTimeout(() => toast(`Removed ${fmt(nz.films)} title${nz.films === 1 ? "" : "s"}${nz.games ? ` and ${fmt(nz.games)} games` : ""} IMDb's page had wrongly marked watched. A copy from before is in Settings › Data.`), 1500); } } catch (e) { logError("fix", e.message); }
   try { const fx = fixListedWatched(); if (fx && (fx.films || fx.games)) { render(); setTimeout(() => toast(`${fmt(fx.films)} titles and ${fmt(fx.games)} games were only on a list, not rated: back to To watch / Wishlist`), 1200); } } catch (e) { logError("fixlisted", e.message); }
   applyPending();

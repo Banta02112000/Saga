@@ -2,6 +2,11 @@
    as CHANGES in app.js; a version missing here is shown in English with a note. */
 (function () {
   window.SAGA_CHANGES_IT = {
+    "0.8.0": [
+      "Giochi › Franchise: una voce per multiverso. Ogni gioco che non viene dalla tua lista va dove dice il suo nome (Total War: Warhammer III, Space Marine II, Dawn of War… in Warhammer; Marvel's Spider-Man 2 e Miles Morales in Marvel › Spider-Man), invece di finire in una serie a sé per ogni ricerca canon. Tutti i suoi giochi stanno in una riga, per data d'uscita; Mostra le sue serie la apre nelle sottoserie (Dawn of War, Space Hulk, Total War…).",
+      "Copie unite: lo stesso gioco aggiunto di nuovo da una ricerca canon, IMDb o Steam (Marvel's Spider-Man 2 e Spider-Man 2 dello stesso anno, II e 2) diventa uno solo, tenendo la voce della tua lista. Due giochi della tua lista con lo stesso nome (un'altra piattaforma) restano entrambi e mostrano piattaforma e anno.",
+      "Le serie della tua lista di giochi sono tornate dove le versioni precedenti le avevano spostate, e le righe con le colonne slittate nel foglio (Red Dead, The Dark Pictures, BS Zelda) vengono lette bene. Fatto una volta; Sincronizza › Fatto da sé dice quante."
+    ],
     "0.7.9": [
       "Prompt da copiare e incollare per tutto (Impostazioni › Ricerca canon e AI): ogni passaggio AI (ricerca e controlli canon, multiversi, dettagli dei giochi, controllo canon dei giochi, aggiornamento di un titolo o di un universo, ordine di visione) ti mostra il prompt da incollare in una chat AI qualsiasi (Gemini, Claude, ChatGPT…) e legge la risposta che incolli. Nessuna chiave API necessaria.",
       "Quando una chiave API non funziona (chiave rotta, quota esaurita, Google che rifiuta), quel passaggio ora continua con copia e incolla invece di fermarsi, e dice perché. La scheda di copia e incolla funziona con qualsiasi chat AI, con pulsanti per Gemini, Claude e ChatGPT.",

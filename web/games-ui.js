@@ -140,12 +140,25 @@
     const q = G.norm(ui.q);
     // 0.7.6b: series as the canon scans found them (your list's names kept), whenever the canon or your games changed
     try { const C = window.Core, db = Saga.db, v = `${db.canon().length}|${lib().games.length}`; if (C && C.gameCanon && ui.fcVer !== v) { ui.fcVer = v; const ch = lib().followCanon(C.gameCanon(db, lib().visible())).concat(lib().resolveFranchises()); if (ch.length) ui.fcVer = `${db.canon().length}|${lib().games.length}`; } } catch (e) { /* as they are */ }
-    const mvs = lib().multiverses(ui.mvSort || "remake").filter(m => !q || G.norm(m.name).includes(q) || m.franchises.some(f => G.norm(f.name).includes(q)));
+    const all = lib().multiverses(ui.mvSort || "remake");
+    const mvs = all.filter(m => !q || G.norm(m.name).includes(q) || m.series.some(s => G.norm(s.name).includes(q)) || m.all.some(g => G.norm(g.title).includes(q)));
     const chip = (v, l) => `<button class="chip" data-action="gmvsort" data-v="${v}" aria-pressed="${(ui.mvSort || "remake") === v}">${l}</button>`;
-    return `<div class="chips" style="margin-bottom:10px">${chip("remake", "By newest version (remakes, remasters)")}${chip("date", "By original release")}${chip("size", "Biggest first")}</div>` + mvs.slice(0, ui.mvLim || 80).map(m => `<section>
-      ${K.banner({ name: m.name, small: true, imgs: [...new Set(m.franchises.flatMap(fr => fr.games).map(cover).filter(Boolean))], pct: 100 * m.done / Math.max(1, m.total), line: `${m.franchises.length > 1 ? `${m.franchises.length} series · ` : ""}${m.done} of ${m.total} finished`,
+    const open = ui.mvOpen || (ui.mvOpen = {});
+    // 0.7.9: one entry per multiverse, all its games in one row; "Series" opens it into its sub-series. The same title
+    // twice in a row (two platforms, two games of one name) shows its platform and year.
+    const rail = gs => { const n = new Map(); for (const g of gs) n.set(G.norm(g.title), (n.get(G.norm(g.title)) || 0) + 1);
+      return K.rail(gs.map(g => tileOf(g, n.get(G.norm(g.title)) > 1 ? [g.platform, String(g.date || "").slice(0, 4)].filter(Boolean).join(" · ") : ""))); };
+    const LIM = 60;
+    return `<div class="chips" style="margin-bottom:10px">${chip("remake", "By newest version (remakes, remasters)")}${chip("date", "By original release")}${chip("size", "Biggest first")}</div>` + mvs.slice(0, ui.mvLim || 80).map(m => {
+      const isOpen = !!open[m.name] || (q && !G.norm(m.name).includes(q)), many = m.series.length > 1;
+      const games = q && !G.norm(m.name).includes(q) ? m.all.filter(g => G.norm(g.title).includes(q) || G.norm(g.franchise).includes(q)) : m.all;
+      return `<section>
+      ${K.banner({ name: m.name, small: true, imgs: [...new Set(m.all.map(cover).filter(Boolean))], pct: 100 * m.done / Math.max(1, m.total), line: `${many ? `${m.series.length} series · ` : ""}${m.done} of ${m.total} finished`,
         right: `<span class="count">${m.done}/${m.total}</span><button class="iconbtn" data-action="gmvrefresh" data-mv="${esc(m.name)}" aria-label="Refresh ${esc(m.name)}" title="Refresh: check its games, find missing ones">${K.icon("sync")}</button>` })}
-      ${m.franchises.map(fr => `${m.franchises.length > 1 || fr.name !== m.name ? `<div class="small muted" style="margin:0 0 8px">${esc(fr.name)}</div>` : ""}${K.rail(fr.games.map(g => tileOf(g)))}`).join('<div style="height:12px"></div>')}</section>`).join("") + (mvs.length > (ui.mvLim || 80) ? `<button class="btn block" data-action="gmvmore">Show more</button>` : "") + (mvs.length ? "" : `<p class="muted">Nothing matches.</p>`);
+      ${many ? `<div class="row" style="margin:-4px 0 8px"><button class="chip" data-action="gmvopen" data-mv="${esc(m.name)}" aria-pressed="${isOpen}">${isOpen ? "All in one row" : `Show its ${m.series.length} series`}</button></div>` : ""}
+      ${isOpen && many ? m.series.map(sr => { const gs = sr.games.filter(g => games.includes(g)); return gs.length ? `<div class="small muted" style="margin:0 0 8px"><b>${esc(sr.name)}</b> · ${gs.filter(g => g.status === "done").length}/${gs.length}</div>${rail(gs)}` : ""; }).filter(Boolean).join('<div style="height:12px"></div>')
+        : rail(games.slice(0, open["+" + m.name] ? 9999 : LIM)) + (games.length > LIM && !open["+" + m.name] ? `<button class="btn quiet small" data-action="gmvall" data-mv="${esc(m.name)}">Show all ${games.length}</button>` : "")}</section>`;
+    }).join("") + (mvs.length > (ui.mvLim || 80) ? `<button class="btn block" data-action="gmvmore">Show more</button>` : "") + (mvs.length ? "" : `<p class="muted">Nothing matches.</p>`);
   }
   function renderSearch() {
     const lim = ui.res || [];
@@ -304,6 +317,8 @@
         const d = el.dataset; Saga.db.setNotCanon({ title: d.t, year: d.y ? parseInt(d.y, 10) : null, medium: "Video Game", imdb: d.i || null, franchise: d.f }, true); Saga.db.flush(); ui.cMemo = null;
         K.toast(`${d.t} won't count as canon. Undo in Settings.`); Saga.render(); return true; }
       case "gmvsort": ui.mvSort = el.dataset.v; ui.mvLim = 80; Saga.render(); return true;
+      case "gmvopen": { const o = ui.mvOpen || (ui.mvOpen = {}); o[el.dataset.mv] = !o[el.dataset.mv]; Saga.render(); return true; }
+      case "gmvall": { const o = ui.mvOpen || (ui.mvOpen = {}); o["+" + el.dataset.mv] = true; Saga.render(); return true; }
       case "gmvmore": ui.mvLim = (ui.mvLim || 80) + 80; Saga.render(); return true;
       case "gmore": ui.lim += 120; Saga.render(); return true;
       case "gadd": ui.res = []; ui.sq = ""; Saga.render(); setTimeout(() => { const i = document.querySelector("[data-gsq]"); if (i) i.focus(); }, 30); return true;

@@ -1253,7 +1253,8 @@ window.BANTA_IT = {
 "Use copy-and-paste prompts for everything": "Usa i prompt da copiare e incollare per tutto",
 "Every AI step (canon search and checks, multiverses, game details and canon check, refreshing a title or a universe, watch order) shows you the prompt: paste it into any AI chat (Gemini, Claude, ChatGPT…), then paste the answer back. No API key is used.": "Ogni passaggio AI (ricerca e controlli canon, multiversi, dettagli e controllo canon dei giochi, aggiornamento di un titolo o di un universo, ordine di visione) ti mostra il prompt: incollalo in una chat AI qualsiasi (Gemini, Claude, ChatGPT…), poi incolla qui la risposta. Nessuna chiave API viene usata.",
 "Off: your API keys below are used, and if one fails (a broken key, quota, Google turning it away) that step carries on as copy and paste instead of stopping. Background jobs can't ask you, so with this on they skip AI work.": "Spento: si usano le tue chiavi API qui sotto, e se una non funziona (chiave rotta, quota esaurita, Google che rifiuta) quel passaggio continua con copia e incolla invece di fermarsi. I lavori in background non possono chiederti nulla, quindi con questo attivo saltano il lavoro AI.",
-"That doesn’t look like the answer the prompt asked for (lines with | between the parts). Copy the AI’s whole answer and paste it again.": "Non sembra la risposta che il prompt chiedeva (righe con | tra le parti). Copia tutta la risposta dell'AI e incollala di nuovo."
+"That doesn’t look like the answer the prompt asked for (lines with | between the parts). Copy the AI’s whole answer and paste it again.": "Non sembra la risposta che il prompt chiedeva (righe con | tra le parti). Copia tutta la risposta dell'AI e incollala di nuovo.",
+"All in one row": "Tutto in una riga"
 };
 window.BANTA_IT_PAT = [
 [
@@ -2271,5 +2272,17 @@ window.BANTA_IT_PAT = [
 [
 "Game details: (.+)",
 "Dettagli del gioco: $1"
+],
+[
+"Show its (\\d[\\d,.]*) series",
+"Mostra le sue $1 serie"
+],
+[
+"Show all (\\d[\\d,.]*)",
+"Mostra tutti e $1"
+],
+[
+"Other (.+) games",
+"Altri giochi di $1"
 ]
 ];

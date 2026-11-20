@@ -696,3 +696,5 @@ P += [
   (r"(.+) didn't answer \((.+)\)\. Paste the answer from any AI chat instead\.", "$1 non ha risposto ($2). Incolla invece la risposta da una chat AI qualsiasi."),
   (r"Game details: (.+)", "Dettagli del gioco: $1"),
 ]
+D.update({ "All in one row": "Tutto in una riga" })
+P += [(rf"Show its {N} series", "Mostra le sue $1 serie"), (rf"Show all {N}", "Mostra tutti e $1"), (r"Other (.+) games", "Altri giochi di $1")]
