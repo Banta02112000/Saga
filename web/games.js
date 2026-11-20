@@ -119,8 +119,9 @@
     }
     // Multiverse → franchise → games, release order, with progress.
     // 0.6.9.6: order "date" (default): series by the original release date of their first game; "size": biggest first
-    multiverses(order = "date") {
+    multiverses(order = "remake") {
       const m = new Map();
+      for (const g of this.visible()) verDate(g); // 0.7.6: each game remembers its newest version's date
       for (const g of this.visible()) {
         const mv = g.multiverse || g.franchise || "Other", fr = g.franchise || mv;
         if (!m.has(mv)) m.set(mv, { name: mv, franchises: new Map(), total: 0, done: 0 });
@@ -128,9 +129,12 @@
         if (!x.franchises.has(fr)) x.franchises.set(fr, []);
         x.franchises.get(fr).push(g); x.total++; if (g.status === "done") x.done++;
       }
-      const first = gs => gs.reduce((d, g) => (g.date && g.date < d ? g.date : d), "9999");
+      // 0.7.6: "remake" (the default): by the date of each game's newest remake, remaster or re-release (its original
+      // when it has none); "date": by original release; "size": biggest first
+      const dOf = g => (order === "remake" ? g.verDate || g.date : g.date) || "9999";
+      const first = gs => gs.reduce((d, g) => { const x = dOf(g); return x !== "9999" && x < d ? x : d; }, "9999");
       const out = [...m.values()].map(x => {
-        const franchises = [...x.franchises.entries()].map(([name, gs]) => ({ name, games: gs.sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999")) }))
+        const franchises = [...x.franchises.entries()].map(([name, gs]) => ({ name, games: gs.sort((a, b) => dOf(a).localeCompare(dOf(b)) || (a.date || "9999").localeCompare(b.date || "9999")) }))
           .sort((a, b) => first(a.games).localeCompare(first(b.games)) || a.name.localeCompare(b.name));
         return { name: x.name, total: x.total, done: x.done, first: franchises.length ? first(franchises.flatMap(f => f.games)) : "9999", franchises };
       });
@@ -143,7 +147,7 @@
       const t = today(), vis = this.visible(), why = this._why = new Map();
       const playing = vis.filter(g => g.status === "playing");
       const byF = new Map();
-      for (const g of vis) { const f = norm(g.franchise); if (!f) continue; if (!byF.has(f)) byF.set(f, []); byF.get(f).push(g); }
+      for (const g of vis) { const f = norm(g.franchise); if (!f || g.story === false) continue; if (!byF.has(f)) byF.set(f, []); byF.get(f).push(g); }
       const fnext = [];
       for (const list of byF.values()) {
         if (list.length < 2) continue;
@@ -163,6 +167,71 @@
         .concat(vis.filter(g => g.next && g.status !== "done" && g.status !== "playing"))
         .concat(vis.filter(g => g.status === "backlog" && g.owned && !NA(g.owned) && (!g.date || g.date <= t) && !g.next).sort((a, b) => (a.hours || 99) - (b.hours || 99)).slice(0, 4))
         .filter((g, i, a) => a.indexOf(g) === i).slice(0, limit);
+    }
+    // 0.7.6: finishing a game sets the next one of its series (by original release date: released, not finished, dropped
+    // or being played) as Up next; changing the finished one back takes that away again (unless you've started it).
+    // Returns the game set as next, or null.
+    statusChanged(g, prev) {
+      if (!g || prev === g.status) return null;
+      const f = norm(g.franchise || g.multiverse);
+      if (g.status === "done" && prev !== "done" && f && g.story !== false) {
+        const t = today();
+        const list = this.visible().filter(x => norm(x.franchise || x.multiverse) === f && x.story !== false && (x.date || x === g))
+          .sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999") || a.title.localeCompare(b.title));
+        const i = list.indexOf(g);
+        const nx = list.slice(i + 1).find(x => x.status !== "done" && x.status !== "dropped" && x.status !== "playing" && x.date && x.date <= t);
+        if (nx && !nx.next) { nx.next = true; nx.nextBy = g.id; this.save(); return nx; }
+        return null;
+      }
+      if (prev === "done" && g.status !== "done") {
+        let ch = false;
+        for (const x of this.games) if (x.nextBy === g.id) { if (x.status !== "playing" && x.status !== "done") x.next = false; delete x.nextBy; ch = true; }
+        if (ch) this.save();
+      }
+      return null;
+    }
+    // 0.7.6: remakes, remasters and re-releases bundled with their original (one entry, the versions listed in it):
+    // when the title is the same story with an edition word (Remastered, HD, Definitive Edition…), or when the
+    // original's details name it as its remake (from your prompt). Returns the bundled titles.
+    bundleVersions(dry = false) {
+      const out = [], vis = this.visible(), seen = new Set();
+      const byKey = new Map();
+      for (const g of vis) { const k = `${norm(g.multiverse || g.franchise || "")}|${storyKey(g.title)}`; if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(g); }
+      const join = (base, rem) => { if (!this.games.includes(base) || !this.games.includes(rem) || base === rem || seen.has(rem)) return; seen.add(rem); if (!dry) linkRemake(this, base, rem); out.push(`${rem.title} → ${base.title}`); };
+      for (const list of byKey.values()) {
+        if (list.length < 2) continue;
+        list.sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999"));
+        const base = list.find(g => !hasEdition(g.title)) || list[0];
+        for (const g of list) if (g !== base && hasEdition(g.title)) join(base, g);
+      }
+      for (const base of this.visible()) {
+        const r = base.remake; if (!r || !r.title) continue;
+        const ry = +String(r.date || "").slice(0, 4) || 0;
+        const other = this.visible().find(x => x !== base && norm(x.title) === norm(r.title) && (!ry || !x.date || Math.abs(+x.date.slice(0, 4) - ry) <= 1) && (x.date || "") >= (base.date || ""));
+        if (other) join(base, other);
+      }
+      if (out.length && !dry) { this._fi = null; this.save(); }
+      return out;
+    }
+    // 0.7.6: games whose series was only guessed from their title join the series and multiverse of your list (the
+    // one you imported) when their title starts with it, or when a game of yours tells the same story. Returns changes.
+    resolveFranchises() {
+      const vis = this.visible(), out = [];
+      const trusted = g => g.fImported || (g.franchise && !(g.franchise === franchiseGuess(g.title) && (g.multiverse || g.franchise) === g.franchise));
+      const known = new Map(), mvs = new Map(), byStory = new Map();
+      for (const g of vis) if (trusted(g)) { known.set(norm(g.franchise), { f: g.franchise, m: g.multiverse || g.franchise }); if (g.multiverse) mvs.set(norm(g.multiverse), g.multiverse); byStory.set(storyKey(g.title), g); }
+      const names = [...known.keys()].sort((a, b) => b.length - a.length), mnames = [...mvs.keys()].sort((a, b) => b.length - a.length);
+      const starts = (t, n) => n && n.length >= 4 && t.startsWith(n); // norm() has no spaces
+      for (const g of vis) {
+        if (trusted(g)) continue;
+        const t = norm(g.title), twin = byStory.get(storyKey(g.title));
+        let hit = twin && twin !== g ? { f: twin.franchise, m: twin.multiverse || twin.franchise } : null;
+        if (!hit) { const n = names.find(n => starts(t, n)); if (n) hit = known.get(n); }
+        if (!hit) { const n = mnames.find(n => starts(t, n)); if (n) hit = { f: g.franchise || franchiseGuess(g.title), m: mvs.get(n) }; }
+        if (hit && (hit.f !== g.franchise || hit.m !== g.multiverse)) { out.push(`${g.title}: ${hit.m}${hit.f !== hit.m ? " › " + hit.f : ""}`); g.franchise = hit.f; g.multiverse = hit.m; }
+      }
+      if (out.length) this.save();
+      return out;
     }
     // why a game is in nextUp() ("After Mega Man IV"), or ""
     whyNext(g) { return (this._why && this._why.get(g.id)) || ""; }
@@ -185,6 +254,18 @@
   }
   function logPlay(g, date) { g.plays.push(isoOf(date) || today()); g.plays.sort(); if (g.status !== "done") { g.status = "done"; g.next = false; } return g.plays.length; }
   function removePlay(g, i) { g.plays.splice(i, 1); if (!g.plays.length && g.status === "done") g.status = "backlog"; }
+  // 0.7.6: the edition words a remaster or re-release adds to its original's title (not "Collection": that's several games)
+  const EDITION_RX = /\s*[-:–(]*\s*\b(remastered|remaster|remake|hd remaster|hd|definitive edition|director'?s cut|complete edition|enhanced edition|game of the year edition|goty edition|goty|anniversary edition|deluxe edition|special edition|redux)\b\)?\s*$/i;
+  const hasEdition = t => EDITION_RX.test(String(t || ""));
+  function storyKey(t) { let x = String(t || ""); for (let i = 0; i < 3; i++) { const y = x.replace(EDITION_RX, "").trim(); if (y === x) break; x = y; } return norm(x); }
+  const versionKind = t => (/remake/i.test(t) ? "remake" : /remaster|\bhd\b|definitive|enhanced|redux|director/i.test(t) ? "remaster" : "re-release");
+  // the date of a game's newest version (its own when it has none), remembered on the game for ordering
+  function verDate(g) {
+    let d = g.date || "";
+    for (const v of [g.remake].concat(g.versions || [])) if (v && v.date && v.date > d) d = v.date;
+    if (d !== (g.verDate || "")) g.verDate = d;
+    return d;
+  }
   function franchiseGuess(t) {
     let s = String(t || "").split(/\s*[:–—]\s+|\s+-\s+/)[0];
     s = s.replace(/\s+(Remastered|Remake|HD|Deluxe|Edition|Definitive Edition|GOTY|Reloaded)$/i, "").replace(/\s+(\d+|[IVX]{1,4})$/i, "").trim();
@@ -656,6 +737,66 @@ ${titles.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
     lib.save();
     return out;
   }
+  // 0.7.6: Games › Missing, as it should be: no tie-ins to film or TV series (a franchise with films or series in your
+  // canon, except Doctor Who), nothing the AI canon check found non-canon, without a story, or a version of another
+  // game (that one is bundled with its original's row). Returns { rows, hidden: [{c, why}] }.
+  const checkKey = c => `${norm(c.title)}|${c.year || ""}`;
+  function missingRows(C, db, lib, today) {
+    const all = C.gameCanon(db, lib.visible(), today);
+    const screen = new Set();
+    for (const c of db.canon()) if (c.medium !== "Video Game" && !/doctor who/i.test(c.franchise || "")) screen.add(norm(c.franchise));
+    const chk = (lib.meta && lib.meta.canonCheck) || {}, rows = [], hidden = [];
+    for (const c of all) {
+      const k = chk[checkKey(c)];
+      const why = screen.has(norm(c.franchise)) ? "a tie-in to a film or TV series" : k && k.tiein ? "a tie-in" : k && k.canon === false ? "not canon" : k && k.story === false ? "no campaign or story" : "";
+      if (why) { hidden.push({ c, why }); continue; }
+      rows.push(c);
+    }
+    // versions: under their original's row (or gone, when you have the original)
+    const byN = new Map(rows.map(c => [norm(c.title), c]));
+    for (const c of rows.slice()) {
+      const k = chk[checkKey(c)], of = k && k.versionOf ? norm(k.versionOf) : "";
+      if (!of || of === norm(c.title)) continue;
+      const orig = byN.get(of), mine = lib.visible().find(g => norm(g.title) === of || storyKey(g.title) === storyKey(k.versionOf));
+      if (orig || mine) {
+        rows.splice(rows.indexOf(c), 1);
+        if (orig) (orig.versions = orig.versions || []).push({ title: c.title, year: c.year });
+        hidden.push({ c, why: `a version of ${k.versionOf}` });
+      }
+    }
+    return { rows, hidden };
+  }
+  function canonCheckPrompt(rows, multiverses) {
+    return `These are video games from franchises I play. For each one tell me:
+- canon: is it part of the main canon of its franchise (true or false)
+- story: does it have a campaign or story mode (false for multiplayer-only, party, puzzle, sports, racing-only or mobile spin-offs without a story)
+- tiein: is it a tie-in to a film, TV series, book or comic franchise (true or false)
+- versionOf: if it is a remake, remaster or re-release that covers the same story as another game, that game's title, otherwise ""
+- multiverse: which of my multiverses it belongs to, written exactly as in my list, or "" if none
+Answer with JSON only, one object per game, in this order: [{"title":"…","canon":true,"story":true,"tiein":false,"versionOf":"","multiverse":""}]
+My multiverses: ${multiverses.slice(0, 120).join(", ") || "-"}
+GAMES:
+${rows.map(c => `${c.title} (${c.year || "?"}) — ${c.franchise || ""}`).join("\n")}`;
+  }
+  // reads the answer and keeps it per game (lib.meta.canonCheck), so Missing follows it from now on
+  function applyCanonCheck(lib, rows, text) {
+    let arr = null;
+    const s = String(text || ""), a = s.indexOf("["), b = s.lastIndexOf("]");
+    if (a >= 0 && b > a) { try { arr = JSON.parse(s.slice(a, b + 1)); } catch (e) { arr = null; } }
+    if (!Array.isArray(arr)) throw new Error("the answer has no JSON list in it");
+    lib.meta.canonCheck = lib.meta.canonCheck || {};
+    const byN = new Map(rows.map(c => [norm(c.title), c]));
+    let n = 0, out = { notCanon: 0, noStory: 0, tiein: 0, versions: 0 };
+    arr.forEach((x, i) => {
+      if (!x || typeof x !== "object") return;
+      const c = byN.get(norm(x.title)) || rows[i]; if (!c) return;
+      const k = { canon: x.canon !== false, story: x.story !== false, tiein: !!x.tiein, versionOf: String(x.versionOf || "").trim(), multiverse: String(x.multiverse || "").trim(), at: Date.now() };
+      lib.meta.canonCheck[checkKey(c)] = k; n++;
+      if (!k.canon) out.notCanon++; else if (!k.story) out.noStory++; else if (k.tiein) out.tiein++; else if (k.versionOf) out.versions++;
+    });
+    lib.save();
+    return Object.assign(out, { checked: n });
+  }
   function parseInfo(text) {
     const s = String(text || ""), a = s.indexOf("["), b = s.lastIndexOf("]");
     if (a < 0 || b < a) throw new Error("the answer has no list of games in it");
@@ -689,7 +830,15 @@ ${titles.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
   // remake's), your status, rating, plays, sessions and notes from both. The original's title and date stay.
   function linkRemake(lib, base, rem) {
     if (!base || !rem || base === rem) return base;
-    base.remake = { title: rem.title, date: rem.date || "", platform: rem.platform || "" };
+    // 0.7.6: every version is kept (base.versions); base.remake stays the newest, as before
+    const v = { title: rem.title, date: rem.date || "", platform: rem.platform || "", kind: versionKind(rem.title) };
+    if (base.remake && base.remake.title && !(base.versions || []).some(y => norm(y.title) === norm(base.remake.title))) base.versions = (base.versions || []).concat([Object.assign({ kind: "remake" }, base.remake)]);
+    base.versions = (base.versions || []).filter(x => norm(x.title) !== norm(v.title) || x.date !== v.date).concat([v]);
+    for (const x of rem.versions || []) if (!base.versions.some(y => norm(y.title) === norm(x.title))) base.versions.push(x);
+    if (rem.remake && rem.remake.title && !base.versions.some(y => norm(y.title) === norm(rem.remake.title))) base.versions.push(Object.assign({ kind: versionKind(rem.remake.title) }, rem.remake));
+    base.versions.sort((a, b) => String(a.date || "9999").localeCompare(String(b.date || "9999")));
+    base.remake = Object.assign({}, base.versions[base.versions.length - 1]); delete base.remake.kind;
+    verDate(base);
     if (rem.hours != null && base.hoursRemake == null) base.hoursRemake = rem.hours;
     if ((GRANK[rem.status] || 0) > (GRANK[base.status] || 0)) base.status = rem.status;
     if (!base.rating && rem.rating) base.rating = rem.rating;
@@ -795,6 +944,7 @@ ${titles.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
         owned: txt(r, "owned"), hours: NA(get(r, "hours")) ? null : num(get(r, "hours")), hoursRemake: NA(get(r, "hb")) ? null : num(get(r, "hb")),
         imdbR: NA(get(r, "imdbR")) ? null : num(get(r, "imdbR")), franchise: txt(r, "franchise"), multiverse: txt(r, "multiverse") || txt(r, "franchise"),
         next: col.next !== undefined ? /^(x|y|yes|true|1|✓|✔)$/i.test(txt(r, "next")) : undefined,
+        fImported: txt(r, "franchise") || txt(r, "multiverse") ? true : undefined, // 0.7.6: your list's series, kept as the reference
       };
       let g = exact.get(key(title, date, platform));
       if (g && claimed.has(g)) g = null;
@@ -843,7 +993,7 @@ ${titles.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
       if (!game.imdb && r.imdb) game.imdb = r.imdb;
       if (r.rating && !game.rating) { game.rating = +r.rating; rated++; }
       // 0.5.9: rated or watched on IMDb means played: a game still on the backlog or wishlist moves to Finished
-      if (existed && isRated && before && (before._st === "backlog" || before._st === "wishlist")) { if (game.status !== "done") setStatus(game, "done", String(r.rated_at || r.date || "").slice(0, 10) || undefined); promoted++; }
+      if (existed && isRated && before && (before._st === "backlog" || before._st === "wishlist")) { if (game.status !== "done") { const was = game.status; setStatus(game, "done", String(r.rated_at || r.date || "").slice(0, 10) || undefined); if (lib.statusChanged) lib.statusChanged(game, was); } promoted++; }
       if (before) delete before._st;
       if (!existed) added++; else matched++;
     }
@@ -864,7 +1014,7 @@ ${titles.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
       games: lib.visible().map(g => ({ id: g.id, t: g.title, f: g.franchise, m: g.multiverse, done: g.status === "done", date: g.date })) };
   }
 
-  const API = { MY_INFO_PROMPT, infoPromptOne, parseInfoText, imdbCheckMissing, timePlayed, hrs, sourceOf, wordDate, longDate, infoPrompt, parseInfo, applyInfo, steamPlay, backlogHours, findDuplicates, mergeGames, linkRemake, mergeInto, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
+  const API = { missingRows, canonCheckPrompt, applyCanonCheck, checkKey, storyKey, hasEdition, verDate, versionKind, MY_INFO_PROMPT, infoPromptOne, parseInfoText, imdbCheckMissing, timePlayed, hrs, sourceOf, wordDate, longDate, infoPrompt, parseInfo, applyInfo, steamPlay, backlogHours, findDuplicates, mergeGames, linkRemake, mergeInto, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
     steamSearch, linkSteam, steamPrices, storePrices, steamDates, importRows, fromImdb, storeLinks, indexFor, yearOf, NA };
   if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
   root.GamesCore = API;

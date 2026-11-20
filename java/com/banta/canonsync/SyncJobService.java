@@ -18,7 +18,10 @@ public class SyncJobService extends JobService {
     @Override
     public boolean onStartJob(JobParameters p) {
         // the app is open, or a step is waiting for an answer from the Gemini app: it owns the data; try at the next interval
-        if (MainActivity.foreground || Shared.busy) return false;
+        if (MainActivity.foreground || Shared.busy) {
+            if (p.getJobId() == Scheduler.NIGHT) Scheduler.night(this, true); // the app is open at night: the next night then
+            return false;
+        }
         params = p;
         handler = new Handler(Looper.getMainLooper());
         try {
@@ -30,7 +33,11 @@ public class SyncJobService extends JobService {
             web.addJavascriptInterface(new Bridge(this, null, web, this), "Android");
             web.addJavascriptInterface(new Shared(this, "canon-bg"), "Banta");
             web.setWebViewClient(new OtaClient(this));
-            web.loadUrl("file:///android_asset/bg.html");
+            // 0.7.6: the night refresh runs the whole app off-screen (a full sync, your website, the jobs Saga does by
+            // itself, every series' episodes); then the next night is set
+            boolean night = p.getJobId() == Scheduler.NIGHT;
+            if (night) Scheduler.night(this, true);
+            web.loadUrl(night ? "file:///android_asset/index.html?night=1" : "file:///android_asset/bg.html");
             timeout = new Finish(this);
             handler.postDelayed(timeout, 9 * 60 * 1000L); // stay inside the system's 10-minute job limit
             return true;

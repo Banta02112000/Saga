@@ -1012,6 +1012,7 @@
       put(norm(g.title), parseYear(g.date), g);
       if (g.remake && g.remake.title) put(norm(g.remake.title), parseYear(g.remake.date), g);
       for (const t of g.aka || []) put(norm(t), parseYear(g.date), g); // 0.7.1: the canon list's name for it (matched on IMDb)
+      for (const v of g.versions || []) if (v && v.title) put(norm(v.title), parseYear(v.date), g); // 0.7.6: every version bundled with it
     }
     const kept = new Map(), out = [];
     for (const c0 of db.canon()) {
@@ -2845,7 +2846,10 @@ fragment T on MovieOrShowOrSeasonOrEpisode {
   const mediumOf = t => CODE_TYPE[String(t || "").trim().toUpperCase()] || mediumFromText(t);
   const promptLine = (title, year, medium, extra) => `${title} (${year || "?"}) [${typeCode(medium)}]${extra ? ` {${extra}}` : ""}`;
   const TYPES_LEGEND = "Types: F film, S series (any TV, animated, limited, anthology, web series), P special/short/one-off, G video game.";
-  const CANON_RULES = `Include: films, series, spin-offs, prequels, sequels, crossovers, TV films, specials (holiday, anniversary), shorts, webisodes, canon games, officially announced future entries.
+  // 0.7.6: games only for franchises that began as video games (story games only, each once: no remakes, remasters or
+  // re-releases as separate lines); film and TV franchises get no games at all (tie-ins live in the Games tab, not here)
+  const CANON_RULES = `Include: films, series, spin-offs, prequels, sequels, crossovers, TV films, specials (holiday, anniversary), shorts, webisodes, officially announced future entries.
+Video games: ONLY for franchises that began as video games, and then only canon games with a campaign or story (no multiplayer-only, party, puzzle, mobile or compilation spin-offs); list each story once, under its original release (a remake, remaster or re-release that covers the same story is not a separate line). For franchises that began as films, series, books or comics, list NO video games, not even official tie-ins.
 Exclude: compilations, recaps, re-edits, re-releases, documentaries, making-ofs, fan works, non-canon material.
 Accuracy over volume: list only works you are certain exist or are officially announced. Title exactly as on IMDb. Year = first release. Date only if you are sure, otherwise "-".`;
   const LINES_OUT = "OUTPUT: plain lines, no JSON, no markdown, no commentary.";

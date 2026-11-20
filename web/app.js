@@ -276,7 +276,7 @@
   function undoChange(...a) { return P_website().undoChange(...a); }
   function syncWithWebServer(...a) { return P_website().syncWithWebServer(...a); }
   const C = window.Core;
-  const VERSION = "0.7.5";
+  const VERSION = "0.7.6";
   const AUTO_SYNC_HOURS = 12;
   Object.assign(C.PROFILES, (window.CANONSYNC_PRESET || {}).traktProfiles || {});
   const DEFAULT_PROFILE = (window.CANONSYNC_PRESET || {}).traktDefault || "PKCE (your own Trakt app)";
@@ -393,6 +393,7 @@
       clearStatus: () => (A && A.clearStatus ? A.clearStatus() : null),
       notify: (id, title, text, tab) => (A && A.notify ? A.notify(id, title, text, tab || "home") : console.log("NOTIFY", title, text)),
       setBackground: (on, hours) => (A && A.setBackground ? A.setBackground(!!on, hours) : false),
+      setNight: on => (A && A.setNight ? A.setNight(!!on) : false),
       requestNotifications: () => (A && A.requestNotifications ? A.requestNotifications() : null),
       // a data file that can't be read as JSON falls back to yesterday's copy (kept by the phone as name.bak)
       load: n => {
@@ -584,6 +585,12 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.7.6", ["Canon for films and series no longer brings games: the AI scan lists games only for franchises that began as video games (story games, each once), and a film or TV universe no longer shows tie-in games (Doctor Who still does).",
+      "Games › Missing leaves out tie-ins to film or TV series, and, after the new AI canon check, games that aren't canon, have no campaign or story, or are a remake, remaster or re-release of another game (listed under their original). What it left out, and why, is listed at the top.",
+      "Remakes, remasters and re-releases are bundled with their original: one game, every version listed in it, its newest version's date remembered. Series are ordered by that date by default (By newest version); By original release is still there.",
+      "Finishing a game sets the next one of its series (by original release, out, not finished) as Up next; changing the finished one back takes that away again. Games without a story (a new switch on each game) are skipped.",
+      "Games follow your imported multiverses: a game whose series was only guessed from its title joins the series and multiverse of your list when its title starts with it, or when it's a version of one of your games.",
+      "Night refresh (Settings › Background): around 3:30 the phone runs a full sync (every IMDb rating, not just the newest), your website, the jobs Saga does by itself and every series' episodes. Sync › Done by itself says what it did."]],
     ["0.7.5", ["Everything on both: the website can now sign in to Spotify, IsThereAnyDeal and AniList (they come back to <your website>/oauth/…: add that address to the app you made with each of them, next to the phone's; AniList allows one, so there use Paste the address instead). The website also tries your IMDb ratings itself (when IMDb turns it away, the phone brings them as before), shows notifications while it's open (new episodes, price alerts), takes things shared to it once installed as an app, and shows Done by itself (your phone runs those jobs, the switches work from both).",
       "The phone gets the website's two-pane view too: on an opened Fold or a tablet (from 880px), a title opens beside the list."]],
     ["0.7.4", ["Fixed: series (and a few films and games) shown as \"From: IMDb watched\" that you never saw and never rated. When IMDb's data service didn't answer, Saga read your ratings page itself, and that page also lists suggestions and other titles: those without a rating were saved as watched. Now only titles with your rating are taken from it. The ones it added are removed once (only if you hadn't rated, tagged or noted them, and they're on no other list or source of yours), with a copy kept first; removed titles don't come back with a sync.",
@@ -1412,6 +1419,30 @@
 
   // 0.6.9.7: game details from an AI with your rules (OG release date and best platform, the remake that tells the
   // same story, HLTB); only empty fields are filled. Gemini API when there's a key, otherwise the Gemini app.
+  // 0.7.6: Games › Missing checked by the AI, like Verify for films and series: canon or not, a campaign or story or not,
+  // a tie-in to a film or TV series or not, a version of another game or not, and which of your multiverses it's in.
+  // The answer is kept per game; Missing follows it from then on (and lists what it left out, and why).
+  function gameCanonCheck() {
+    const rows = GC.missingRows(C, db, games).rows.filter(c => !c.have && !(games.meta.canonCheck || {})[GC.checkKey(c)]);
+    if (!rows.length) { toast("Every missing canon game has been checked"); return; }
+    const viaApp = !db.get("gemini_key");
+    let stopped = false;
+    const mvs = [...new Set(games.visible().map(g => g.multiverse || g.franchise).filter(Boolean))].sort();
+    return runJob(`Canon check${viaApp ? " (Gemini app)" : ""}`, async p => {
+      const prov = viaApp ? { label: "Gemini app", call: (prompt, o) => gappAsk(prompt, Object.assign({ note: "Canon check of your missing games." }, o)).catch(e => { if (isCancel(e)) stopped = true; throw e; }) }
+        : C.geminiProvider(db, Native.http, db.get("gemini_key"), db.get("gemini_model") || "auto", { search: db.get("gemini_search", "0") === "1" });
+      if (prov.prepare) await prov.prepare();
+      const size = viaApp ? 60 : 40, tot = { checked: 0, notCanon: 0, noStory: 0, tiein: 0, versions: 0 };
+      for (let i = 0; i < rows.length && !stopped && !C.CONFIG.cancelled; i += size) {
+        const part = rows.slice(i, i + size);
+        p(i / rows.length, `Canon check ${Math.floor(i / size) + 1}/${Math.ceil(rows.length / size)}`);
+        try { const r = GC.applyCanonCheck(games, part, await prov.call(GC.canonCheckPrompt(part, mvs), { title: "Canon check of your games", step: Math.floor(i / size) + 1, steps: Math.ceil(rows.length / size) })); for (const k of Object.keys(tot)) tot[k] += r[k] || 0; }
+        catch (e) { if (stopped || isCancel(e)) break; logError("canon check", e.message); if (rows.length <= size) throw e; }
+      }
+      changed("games");
+      return `Checked ${fmt(tot.checked)}: ${fmt(tot.notCanon)} not canon, ${fmt(tot.noStory)} without a story, ${fmt(tot.tiein)} tie-ins, ${fmt(tot.versions)} versions of another game. They're left out of Missing (listed at its top).`;
+    });
+  }
   function gameInfoRun(ids) {
     const list = (ids || []).map(id => games.get(id)).filter(Boolean);
     if (!list.length) { toast("Every game already has its details"); return; }
@@ -1877,6 +1908,7 @@
         <label class="switch"><input type="checkbox" data-setting="bg_enabled" ${db.get("bg_enabled", "1") === "1" ? "checked" : ""}><span>Check for new releases in the background</span></label>
         <label class="field"><span>How often</span><select data-setting="bg_hours">${[["6", "Every 6 hours"], ["12", "Every 12 hours"], ["24", "Once a day"]].map(([v, l]) =>
           `<option value="${v}" ${db.get("bg_hours", "12") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+        <label class="switch"><input type="checkbox" data-setting="bg_night" ${db.get("bg_night", "1") === "1" ? "checked" : ""}><span>Refresh everything at night (around 3:30: a full sync, your website, every series; the phone must be on)</span></label>
         <label class="switch"><input type="checkbox" data-setting="bg_tv" ${db.get("bg_tv", "1") === "1" ? "checked" : ""}><span>Include new seasons of shows I've watched</span></label>
         <label class="switch"><input type="checkbox" data-setting="bg_eps" ${db.get("bg_eps", "0") === "1" ? "checked" : ""}><span>Also notify for every new episode on its air day</span></label>
         <p class="small muted">In the background Saga syncs Trakt and checks TMDB for new films in your collections and new seasons. IMDb and Gemini only run with the app open. Android picks the exact time to save battery, so a check can run a little late.</p>
@@ -3290,7 +3322,9 @@
       img: cImg(c), attrs: `data-action="sheet" data-sid="${sid(c, "canon")}"`, sub: [spanOf(c), c.medium].filter(Boolean).join(" · "), canon: c });
     // 0.6.9.6: your games are listed (a universe opened from the Games tab was empty in 0.6.9.5); they count toward
     // completion only where the universe has no films or series, or in Doctor Who (see renderMv)
-    if (secOn("games")) for (const g of games.visible()) if (C.norm(g.multiverse) === n || C.norm(g.franchise) === n) out.push({ key: "game:" + g.id, title: g.title, medium: "game", date: g.date || "", done: g.status === "done",
+    // 0.7.6: …but not in a film or TV universe (tie-in games live in the Games tab), except Doctor Who
+    const screen = out.length > 0 && !/doctor who/.test(n);
+    if (secOn("games") && !screen) for (const g of games.visible()) if (g.story !== false && (C.norm(g.multiverse) === n || C.norm(g.franchise) === n)) out.push({ key: "game:" + g.id, title: g.title, medium: "game", date: g.date || "", done: g.status === "done",
       img: g.cover || (g.steam ? GC.COVER(g.steam) : ""), attrs: `data-action="gopen" data-id="${esc(g.id)}"`, sub: [G_YEAR(g), g.platform].filter(Boolean).join(" · ") });
     if (secOn("books")) for (const b of books.books) if (b.series && (C.norm(b.series).includes(n) || n.includes(C.norm(b.series)))) out.push({ key: "book:" + b.id, title: b.title, medium: "book", date: String(b.published || "").slice(0, 10), done: b.status === "read",
       img: (b.cover || "").replace(/^http:/, "https:"), attrs: `data-action="bopen" data-id="${esc(b.id)}"`, sub: [(b.authors || [])[0], b.seriesNum ? `#${b.seriesNum}` : ""].filter(Boolean).join(" · ") });
@@ -4524,6 +4558,27 @@
 
   function applyBackground() {
     Native.setBackground(db.get("bg_enabled", "1") === "1", parseInt(db.get("bg_hours", "12"), 10) || 12);
+    Native.setNight(db.get("bg_night", "1") === "1");
+  }
+  // 0.7.6: the night refresh (around 03:30, Android starts the app off-screen with ?night=1): a full sync (every IMDb
+  // rating again, not just the newest), your website, the jobs Saga does by itself, then every series' episodes and
+  // details, the longest-unchecked first, until the system's 10 minutes are nearly up. Sync › Done by itself lists it.
+  async function nightRun() {
+    const t0 = Date.now(), left = () => 8.5 * 60000 - (Date.now() - t0), out = [];
+    const idle = async ms => { const end = Date.now() + ms; while (ui.job && Date.now() < end) await new Promise(r => setTimeout(r, 1000)); };
+    try {
+      db.set("night_at", String(t0));
+      await doSync(false, true); await idle(Math.max(0, left() - 150000)); out.push("full sync");
+      if (window.__sagaAuto && left() > 120000) { await window.__sagaAuto.run("night"); out.push("jobs done by itself"); }
+      const shows = lib.all().filter(it => it.type === "show" && !it.mal).sort((a, b) => (a.epChecked || 0) - (b.epChecked || 0));
+      let n = 0;
+      for (const it of shows) { if (left() < 45000) break; try { if (await L.details(Native.http, it, libOpt())) n++; } catch (e) { if (/429|401/.test(e.message)) break; } }
+      if (n) { libSave(); libMirror(); }
+      out.push(`${n} series refreshed`);
+    } catch (e) { logError("night refresh", e.message); out.push("stopped: " + e.message); }
+    try { let a = []; try { a = JSON.parse(db.get("auto_log", "[]")); } catch (e) { a = []; } a.unshift({ at: Date.now(), k: "night", what: `Night refresh: ${out.join(", ")} (${Math.round((Date.now() - t0) / 60000)} min)` }); db.set("auto_log", JSON.stringify(a.slice(0, 60))); } catch (e) { /* log only */ }
+    saveAllNow(); db.flush();
+    setTimeout(() => { try { if (window.Android && Android.done) Android.done("night: " + out.join(", ")); } catch (e) { /* finished */ } }, 3000);
   }
 
   // home-screen shortcuts (long-press the app icon) arrive as pseudo-tabs
@@ -4555,7 +4610,7 @@
   // ------------------------------------------------------------ start
   // 0.7.1: Games › Missing checked against IMDb (your ratings and lists there; IMDb's id and rating for the rest)
   function gameImdbCheck() {
-    const rows = C.gameCanon(db, games.visible()).filter(c => !c.have && !c.unreleased);
+    const rows = GC.missingRows(C, db, games).rows.filter(c => !c.have && !c.unreleased);
     if (!rows.length) { toast("No missing canon games to check"); return; }
     return runJob("Missing games on IMDb", async p => {
       const mine = db.items(null, ["rated", "watched", "watchlist", "list"]).filter(r => r.medium === "Video Game");
@@ -4574,7 +4629,7 @@
   window.__sagaAuto = Auto && { run: why => ((navigator.webdriver && !window.__wantAuto) || window.__sagaWeb ? Promise.resolve() : Auto.run(why)) }; // the phone does them; the website gets the result
   // also when the app opens and they haven't run for 12 hours (no sync needed); a failed part from before is retried later
   setTimeout(() => { try { if (window.__sagaAuto && !window.__sagaWeb && Date.now() - (+db.get("auto_at", "0") || 0) > 12 * 3600e3 && !ui.job) window.__sagaAuto.run("app opened"); } catch (e) { /* next time */ } }, 90000);
-  const Saga = window.Saga = { gameImdbCheck: () => gameImdbCheck(), gameInfo: ids => gameInfoRun(ids), http: C.robust(Native.http, { timeout: 30000, tries: 2 }), Native, db, games, books, lib, lang, feat, render, sheet, go, changed,
+  const Saga = window.Saga = { gameCanonCheck: () => gameCanonCheck(), gameImdbCheck: () => gameImdbCheck(), gameInfo: ids => gameInfoRun(ids), http: C.robust(Native.http, { timeout: 30000, tries: 2 }), Native, db, games, books, lib, lang, feat, render, sheet, go, changed,
     close: () => { if (Kit.mods.books && Kit.mods.books.stopScan) Kit.mods.books.stopScan(); closeOverlay(); } };
   Kit.toast = toast; Kit.icon = icon; Kit.sheet = sheet; Kit.close = Saga.close;
   ui.sec = "home"; ui.tab = "library";
@@ -4597,6 +4652,7 @@
   applyPending();
   setTimeout(() => window.__sharePoll(), 400);
   applyBackground();
+  if (/[?&]night=1\b/.test(location.search) && window.Android) setTimeout(() => nightRun(), 4000);
   try { autoBackup(); } catch (e) { /* tried again next start */ }
   try { backupToFile(false).catch(() => {}); } catch (e) { /* next time */ }
   setTimeout(() => livePull(), 4000);
@@ -4635,5 +4691,5 @@
   const last = parseFloat(db.get("last_sync", "0")) || 0;
   const hasSources = db.get("username") || db.get("imdb_user") || db.get("canon_urls") || db.get("imdb_lists");
   if (db.get("auto_sync") === "1" && hasSources && Date.now() / 1000 - last > AUTO_SYNC_HOURS * 3600) { db.set("sync_open", "0"); doSync(); db.set("sync_open", "1"); }
-  window.__app = { fixImdbPageNoise, libSave, openHistory, behindCheck, libSyncOne, fixListedWatched, webApi, webWhy, prefsIn, prefsOut, keysIn, keysText, notDropped, openLib, wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS: P_rules().RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle: P_backup().bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
+  window.__app = { nightRun, fixImdbPageNoise, libSave, openHistory, behindCheck, libSyncOne, fixListedWatched, webApi, webWhy, prefsIn, prefsOut, keysIn, keysText, notDropped, openLib, wipe, syncWithWebServer, whatsNew, setLook, icsText, forYou, picksToday, imgState, applyRule, RULE_PRESETS: P_rules().RULE_PRESETS, wrappedData, wrappedText, universeEntries, openWrapped, livePull, ownTraktChange, logError, widgetFiles, fillImages, lib, libAdopt, db, ui, render, setTab, go, Native, invalidate, games, books, migrate, doSync, bundle: P_backup().bundle, applyBackup, readBackup2, yearCounts, sealBackup, openBackup, restoreFrom, undoRestore, bundleOut };
 })();

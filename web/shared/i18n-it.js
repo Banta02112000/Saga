@@ -1210,7 +1210,13 @@ window.BANTA_IT = {
 "Nothing yet: it runs after each sync.": "Ancora niente: parte dopo ogni sincronizzazione.",
 "Check the weekly copy": "Controlla la copia settimanale",
 "IMDb changed something Saga reads": "IMDb ha cambiato qualcosa che Saga legge",
-"Not mine: remove": "Non mio: rimuovi"
+"Not mine: remove": "Non mio: rimuovi",
+"AI canon check": "Controllo canon con l'AI",
+"No campaign or story": "Nessuna campagna o storia",
+"By newest version (remakes, remasters)": "Per versione più recente (remake, remaster)",
+"By original release": "Per uscita originale",
+"Versions": "Versioni",
+"Bundle game versions, follow your multiverses": "Raggruppa le versioni dei giochi, segui i tuoi multiversi"
 };
 window.BANTA_IT_PAT = [
 [

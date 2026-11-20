@@ -640,3 +640,11 @@ D.update({
   "IMDb changed something Saga reads": "IMDb ha cambiato qualcosa che Saga legge",
 })
 D.update({ "Not mine: remove": "Non mio: rimuovi" })
+D.update({
+  "AI canon check": "Controllo canon con l'AI",
+  "No campaign or story": "Nessuna campagna o storia",
+  "By newest version (remakes, remasters)": "Per versione più recente (remake, remaster)",
+  "By original release": "Per uscita originale",
+  "Versions": "Versioni",
+  "Bundle game versions, follow your multiverses": "Raggruppa le versioni dei giochi, segui i tuoi multiversi",
+})

@@ -7,8 +7,37 @@ import android.content.Context;
 
 final class Scheduler {
     static final int PERIODIC = 7001;
+    static final int NIGHT = 7002;
 
     private Scheduler() {
+    }
+
+    // 0.7.6: the night refresh: once, between 03:30 and 05:30 (when the system lets it), then the next night again.
+    static boolean night(Context ctx, boolean on) {
+        try {
+            JobScheduler js = (JobScheduler) ctx.getSystemService("jobscheduler");
+            if (!on) {
+                js.cancel(NIGHT);
+                return true;
+            }
+            java.util.Calendar c = java.util.Calendar.getInstance();
+            long now = c.getTimeInMillis();
+            c.set(java.util.Calendar.HOUR_OF_DAY, 3);
+            c.set(java.util.Calendar.MINUTE, 30);
+            c.set(java.util.Calendar.SECOND, 0);
+            if (c.getTimeInMillis() <= now + 60000L) c.add(java.util.Calendar.DAY_OF_MONTH, 1);
+            long delay = c.getTimeInMillis() - now;
+            // setting it again replaces the one already set: always for the same next 03:30
+            JobInfo job = new JobInfo.Builder(NIGHT, new ComponentName(ctx, SyncJobService.class))
+                    .setMinimumLatency(delay)
+                    .setOverrideDeadline(delay + 2 * 3600000L)
+                    .setRequiredNetworkType(1)
+                    .setPersisted(true)
+                    .build();
+            return js.schedule(job) == 1;
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     // Schedules (or cancels) the periodic background check. Keeps an existing job with the same interval

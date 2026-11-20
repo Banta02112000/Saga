@@ -113,8 +113,9 @@
     if (!C || !C.gameCanon) return [];
     const st = db.ver ? db.ver() : 0;
     if (ui.cMemo && ui.cMemo.st === st && ui.cMemo.n === lib().games.length && ui.cMemo.at > Date.now() - 4000) return ui.cMemo.rows;
-    const rows = C.gameCanon(db, lib().visible());
-    ui.cMemo = { st, n: lib().games.length, at: Date.now(), rows };
+    // 0.7.6: without tie-ins, non-canon, story-less games and versions (see GC.missingRows)
+    const m = G.missingRows(C, db, lib()), rows = m.rows;
+    ui.cMemo = { st, n: lib().games.length, at: Date.now(), rows, hidden: m.hidden };
     return rows;
   }
   function renderCanon() {
@@ -124,20 +125,22 @@
     for (const c of rows) { if (q && !G.norm(c.title).includes(q) && !G.norm(c.franchise).includes(q)) continue; const f = fr.get(c.franchise) || { name: c.franchise, have: 0, total: 0, miss: [], soon: [] }; if (c.unreleased) f.soon.push(c); else { f.total++; if (c.have) f.have++; else f.miss.push(c); } fr.set(c.franchise, f); }
     const list = [...fr.values()].filter(f => f.miss.length || f.soon.length).sort((a, b) => b.miss.length - a.miss.length || a.name.localeCompare(b.name));
     const all = rows.filter(c => !c.unreleased), have = all.filter(c => c.have).length;
-    const row = c => `<div class="item"><div class="grow" style="min-width:0"><b class="ell" style="display:block">${esc(c.title)}</b><div class="small muted">${esc([c.date || c.year || "", c.sub, window.Core && Core.canonFrom ? "from " + Core.canonFrom(c) : ""].filter(Boolean).join(" · "))}${c.unreleased ? " · <b>Not out yet</b>" : ""}${(() => { const m = ((lib().meta || {}).canonImdb || {})[`${G.norm(c.title)}|${c.year || ""}`]; return m && m.imdb ? ` · IMDb${m.r ? ` ★ ${m.r}` : ""}${m.votes ? ` (${m.votes.toLocaleString()})` : ""}, not rated by you` : m && m.none ? " · not on IMDb" : ""; })()}</div></div>
+    const hid = (ui.cMemo && ui.cMemo.hidden) || [];
+    const row = c => `<div class="item"><div class="grow" style="min-width:0"><b class="ell" style="display:block">${esc(c.title)}</b>${c.versions && c.versions.length ? `<div class="small muted ell">also ${c.versions.map(v => `${esc(v.title)}${v.year ? ` (${v.year})` : ""}`).join(", ")}</div>` : ""}<div class="small muted">${esc([c.date || c.year || "", c.sub, window.Core && Core.canonFrom ? "from " + Core.canonFrom(c) : ""].filter(Boolean).join(" · "))}${c.unreleased ? " · <b>Not out yet</b>" : ""}${(() => { const m = ((lib().meta || {}).canonImdb || {})[`${G.norm(c.title)}|${c.year || ""}`]; return m && m.imdb ? ` · IMDb${m.r ? ` ★ ${m.r}` : ""}${m.votes ? ` (${m.votes.toLocaleString()})` : ""}, not rated by you` : m && m.none ? " · not on IMDb" : ""; })()}</div></div>
       <button class="btn small" data-action="gcanonadd" data-t="${esc(c.title)}" data-y="${esc(c.date || c.year || "")}" data-i="${esc(c.imdb || "")}" data-f="${esc(c.franchise)}">${K.icon("plus")}Wishlist</button>
       <button class="iconbtn" data-action="gcanonno" data-t="${esc(c.title)}" data-y="${esc(c.year || "")}" data-i="${esc(c.imdb || "")}" data-f="${esc(c.franchise)}" aria-label="Not canon" title="Not canon">${K.icon("notcanon")}</button></div>`;
     const gaps = lib().visible().filter(g => !g.aiAt && (!g.date || !g.platform || g.hours == null)).length;
-    return `<div class="row wrap" style="gap:8px;margin:4px 0"><button class="btn small" data-action="gcanonimdb">${K.icon("sync")}Check on IMDb (rating, finished)</button><button class="btn small" data-action="ginfoall">${K.icon("sync")}Fill missing details with AI${gaps ? ` (${fmt(gaps)} games)` : ""}</button></div>
+    return `<div class="row wrap" style="gap:8px;margin:4px 0"><button class="btn small" data-action="gcanoncheck">${K.icon("spark")}AI canon check</button><button class="btn small" data-action="gcanonimdb">${K.icon("sync")}Check on IMDb (rating, finished)</button><button class="btn small" data-action="ginfoall">${K.icon("sync")}Fill missing details with AI${gaps ? ` (${fmt(gaps)} games)` : ""}</button></div>
+      ${hid.length ? `<details class="small muted" style="margin:6px 0"><summary>${fmt(hid.length)} left out: tie-ins to film or TV series, not canon, no story, or another version of a game listed</summary>${hid.slice(0, 80).map(h => `<div>${esc(h.c.title)}${h.c.year ? ` (${h.c.year})` : ""}: ${esc(h.why)}</div>`).join("")}</details>` : ""}
       <p class="muted" style="margin:4px 0 12px">You have ${fmt(have)} of ${fmt(all.length)} canon games (${Math.round(100 * have / Math.max(1, all.length))}%), in ${fmt(fr.size)} series. Your Games tab is what counts: IMDb lists are only a source.</p>`
       + (list.length ? list.slice(0, ui.cLim || 40).map(f => `<section>${K.head(f.name, `${f.have} of ${f.total}`, f.miss.length)}<div class="listcard">${f.miss.map(row).join("")}${f.soon.map(row).join("")}</div></section>`).join("")
         + (list.length > (ui.cLim || 40) ? `<button class="btn block" data-action="gcanonmore">Show more</button>` : "") : `<p class="muted">You have every canon game${q ? " that matches" : ""}.</p>`);
   }
   function renderMv() {
     const q = G.norm(ui.q);
-    const mvs = lib().multiverses(ui.mvSort || "date").filter(m => !q || G.norm(m.name).includes(q) || m.franchises.some(f => G.norm(f.name).includes(q)));
-    const chip = (v, l) => `<button class="chip" data-action="gmvsort" data-v="${v}" aria-pressed="${(ui.mvSort || "date") === v}">${l}</button>`;
-    return `<div class="chips" style="margin-bottom:10px">${chip("date", "Oldest first (original release)")}${chip("size", "Biggest first")}</div>` + mvs.slice(0, ui.mvLim || 80).map(m => `<section>
+    const mvs = lib().multiverses(ui.mvSort || "remake").filter(m => !q || G.norm(m.name).includes(q) || m.franchises.some(f => G.norm(f.name).includes(q)));
+    const chip = (v, l) => `<button class="chip" data-action="gmvsort" data-v="${v}" aria-pressed="${(ui.mvSort || "remake") === v}">${l}</button>`;
+    return `<div class="chips" style="margin-bottom:10px">${chip("remake", "By newest version (remakes, remasters)")}${chip("date", "By original release")}${chip("size", "Biggest first")}</div>` + mvs.slice(0, ui.mvLim || 80).map(m => `<section>
       <div class="sechead"><h2>${esc(m.name)}</h2><span class="count">${m.done}/${m.total}</span></div>
       ${m.franchises.map(fr => `${m.franchises.length > 1 || fr.name !== m.name ? `<div class="small muted" style="margin:0 0 8px">${esc(fr.name)}</div>` : ""}${K.rail(fr.games.map(g => tileOf(g)))}`).join('<div style="height:12px"></div>')}</section>`).join("") + (mvs.length > (ui.mvLim || 80) ? `<button class="btn block" data-action="gmvmore">Show more</button>` : "") + (mvs.length ? "" : `<p class="muted">Nothing matches.</p>`);
   }
@@ -182,7 +185,8 @@
     const plays = g.plays.map((d, i) => `<div class="logrow"><span class="grow">${i + 1}. ${esc(K.when(d, L))}</span><button class="btn quiet small" data-action="gunplay" data-i="${i}" aria-label="Remove this playthrough">✕</button></div>`).join("");
     const dl = d => (Saga.lang() === "it" ? K.when(d, "it") : G.longDate(d)); // January 1, 1900
     const facts = [["Release", g.date ? dl(g.date) + (g.date > t ? " (upcoming)" : "") : g.dateText || "Not announced"], ["Platform", g.platform], ["Owned on", g.owned],
-      ["Remake", g.remake ? [g.remake.title, g.remake.platform, g.remake.date ? dl(g.remake.date) : ""].filter(Boolean).join(" · ") : ""],
+      // 0.7.6: every remake, remaster and re-release bundled with it
+      [g.versions && g.versions.length > 1 ? "Versions" : "Remake", g.versions && g.versions.length ? g.versions.map(v => [v.kind ? v.kind[0].toUpperCase() + v.kind.slice(1) + ":" : "", v.title, v.platform, v.date ? dl(v.date) : ""].filter(Boolean).join(" ")).join(" · ") : g.remake ? [g.remake.title, g.remake.platform, g.remake.date ? dl(g.remake.date) : ""].filter(Boolean).join(" · ") : ""],
       ["Time played", (() => { const tp = G.timePlayed(g); return tp.mins ? `${G.hrs(tp.mins)}${tp.parts.length > 1 || tp.parts[0][0] !== "your sessions" ? ` (${tp.parts.map(p => `${p[0]} ${G.hrs(p[1])}`).join(" · ")})` : ""}` : ""; })()],
       ["From", (() => { const so = G.sourceOf(g); return so.from + (so.linked.length ? ` · linked: ${so.linked.join(", ")}` : ""); })()],
       ["IMDb rating", g.imdbR ? `★ ${g.imdbR}` : ""], ["Time to beat", g.hours ? `${g.hours} h${g.hoursRemake ? ` (remake ${g.hoursRemake} h)` : ""}` : ""],
@@ -191,7 +195,8 @@
     return `${K.sheetHero({ title: g.title, img: cover(g), kind: "game" }, `<div class="small muted">${esc([G.yearOf(g), g.platform, g.franchise].filter(Boolean).join(" · "))}</div>`)}
       <div class="seg2" style="grid-template-columns:repeat(3,1fr);margin:6px 0 12px">${G.STATUSES.map(s => `<button data-action="gst" data-v="${s}" aria-pressed="${g.status === s}">${G.LABEL[s]}</button>`).join("")}</div>
       <div class="row" style="margin-bottom:6px"><span class="small muted grow">Your rating</span>${K.stars(g.rating, "grate")}</div>
-      <label class="switch"><input type="checkbox" data-gnext="1" ${g.next ? "checked" : ""}><span>Next up<small class="muted" style="display:block">Shows on Home and at the top of Games</small></span></label>
+      <label class="switch"><input type="checkbox" data-gnext="1" ${g.next ? "checked" : ""}><span>Next up<small class="muted" style="display:block">${g.nextBy && g.next ? `Set when you finished ${esc((lib().get(g.nextBy) || {}).title || "the one before")}` : "Shows on Home and at the top of Games"}</small></span></label>
+      <label class="switch"><input type="checkbox" data-action="gstory" ${g.story === false ? "checked" : ""}><span>No campaign or story<small class="muted" style="display:block">Left out of its series' order, Up next and canon counts</small></span></label>
       <h4>Play sessions <span class="muted small">${(g.sessions || []).length ? `· ${hm(G.playedMins(g))} in ${g.sessions.length}` : ""}</span></h4>
       ${(g.sessions || []).slice(-4).reverse().map((x, j) => `<div class="logrow"><span class="grow">${esc(K.when(x.d, L))} · ${hm(x.mins)}${x.note ? ` · ${esc(x.note)}` : ""}</span><button class="btn quiet small" data-action="gunsess" data-i="${g.sessions.length - 1 - j}" aria-label="Remove this session">✕</button></div>`).join("")}
       <div class="row" style="margin:6px 0 4px;flex-wrap:wrap;gap:6px">${[[30, "+30 min"], [60, "+1 h"], [120, "+2 h"]].map(([m, l]) => `<button class="btn small" data-action="gsess" data-m="${m}">${l}</button>`).join("")}
@@ -258,6 +263,8 @@
       case "gview": ui.view = el.dataset.v; Saga.render(); return true;
       case "ginfo": Saga.gameInfo([el.dataset.id]); return true;
       case "gcanonimdb": Saga.gameImdbCheck(); return true;
+      case "gcanoncheck": Saga.gameCanonCheck(); return true;
+      case "gstory": { g.story = g.story === false ? null : false; lib().save(); ui.cMemo = null; reopen(); return true; }
       case "ginfoone": { const g = lib().get(el.dataset.id); if (g) { g.aiAt = 0; Saga.gameInfo([g.id]); } return true; }
       case "ginfoall": Saga.gameInfo(lib().visible().filter(g => !g.aiAt && (!g.date || !g.platform || g.hours == null)).map(g => g.id)); return true;
       case "gcanonmore": ui.cLim = (ui.cLim || 40) + 40; Saga.render(); return true;
@@ -290,7 +297,7 @@
     }
     if (!g) return false;
     switch (a) {
-      case "gst": G.setStatus(g, el.dataset.v, (document.getElementById("gDate") || {}).value); reopen(); return true;
+      case "gst": { const was = g.status; G.setStatus(g, el.dataset.v, (document.getElementById("gDate") || {}).value); const nx = lib().statusChanged(g, was); reopen(); if (nx) K.toast(`Up next: ${nx.title}`); return true; }
       case "gsess": { const h = document.getElementById("gSessH"), mins = el.dataset.m ? +el.dataset.m : Math.round((parseFloat(String(h && h.value || "").replace(",", ".")) || 0) * 60);
         if (!mins) { K.toast("Type the hours played"); return true; }
         G.logSession(g, mins, (document.getElementById("gDate") || {}).value || today()); reopen(); K.toast(`Logged ${hm(mins)}`); return true; }
@@ -313,8 +320,8 @@
         save(); if (ui.open === g.id) open(g.id); K.toast(`${g.title}: ${said.join("; ")}`);
       })(); return true;
       case "gstores": (async () => { K.toast("Checking stores…"); try { await G.storePrices(g, Saga.http, { itadKey: Saga.db.get("itad_key"), country: lib().settings.region || "IT" }); save(); if (ui.open === g.id) open(g.id); K.toast(g.stores.length ? `${g.stores.length} store prices` : "No store prices found"); } catch (e) { K.toast(e.message); } })(); return true;
-      case "gplay": { const n = G.logPlay(g, (document.getElementById("gDate") || {}).value); K.toast(n > 1 ? `Finished ${n} times` : "Marked as finished"); reopen(); return true; }
-      case "gunplay": G.removePlay(g, +el.dataset.i); reopen(); return true;
+      case "gplay": { const was = g.status, n = G.logPlay(g, (document.getElementById("gDate") || {}).value); const nx = lib().statusChanged(g, was); K.toast((n > 1 ? `Finished ${n} times` : "Marked as finished") + (nx ? ` · Up next: ${nx.title}` : "")); reopen(); return true; }
+      case "gunplay": { const was = g.status; G.removePlay(g, +el.dataset.i); lib().statusChanged(g, was); reopen(); return true; }
       case "gedit": Saga.sheet(editHtml(g)); return true;
       case "glink": (async () => { K.toast("Looking on Steam…"); delete (L.meta.noSteam || {})[g.id]; const n = await G.linkSteam({ visible: () => [g], meta: L.meta, settings: L.settings }, Saga.http, 1, 0); if (n) { await refreshDate(g); K.toast("Linked to Steam"); } else K.toast("Not found on Steam"); reopen(); })(); return true;
       case "gremove": if (el.dataset.sure) { const key = Object.keys(L.removed).length; L.remove(g.id); save(); Saga.close(); ui.open = null;

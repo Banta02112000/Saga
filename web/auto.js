@@ -13,6 +13,7 @@
     ["gamecanon", "Canon games from your IMDb", "Missing canon games you rated on IMDb become Finished with your rating; listed ones go to the wishlist."],
     ["gameinfo", "Game details from your prompt", "New games get release dates, platforms, remakes and HLTB from your prompt (Gemini API key only, 5 per run)."],
     ["cast", "Length and cast for titles", "Films and series get their length and cast from TMDB in the background (12 per run)."],
+    ["bundle", "Bundle game versions, follow your multiverses", "Remakes, remasters and re-releases join their original (a copy is kept first); games whose series was only guessed join your list's multiverse."],
     ["dupes", "Merge exact duplicates", "Two entries with the same IMDb, TMDB or Steam id become one (a copy is kept first; History › Undo)."],
     ["backupcheck", "Check the weekly copy", "Once a week the newest automatic copy of your data is opened and compared with what you have, so a broken copy is found before you need it."],
   ];
@@ -48,7 +49,7 @@
     // ---- 2. canon games from your IMDb
     async function gameCanon() {
       if (!on("gamecanon") || !S.feat("games") || !S.C.gameCanon) return;
-      const rows = S.C.gameCanon(db(), S.games.visible()).filter(c => !c.have && !c.unreleased);
+      const rows = S.GC.missingRows(S.C, db(), S.games).rows.filter(c => !c.have && !c.unreleased);
       if (!rows.length) return;
       const mine = db().items(null, ["rated", "watched", "watchlist", "list"]).filter(r => r.medium === "Video Game");
       // your own rows for every missing game; IMDb's search for at most 10 not looked up before
@@ -103,6 +104,20 @@
       if (names.length) { S.libSave(); S.games.save(); S.changed("games"); log("dupes", `Merged duplicates: ${names.slice(0, 6).join(", ")}${names.length > 6 ? ` and ${names.length - 6} more` : ""}`); }
     }
 
+    // ---- 0.7.6: versions together; series from your list
+    function bundle() {
+      if (!on("bundle") || !S.feat("games")) return;
+      const fr = S.games.resolveFranchises();
+      if (fr.length) log("bundle", `Joined your multiverses: ${fr.slice(0, 5).join("; ")}${fr.length > 5 ? ` and ${fr.length - 5} more` : ""}`);
+      // only when something would be bundled: a copy first
+      let b = [];
+      if (S.games.bundleVersions(true).length) {
+        try { S.snapshot("before Saga bundled game versions by itself"); } catch (e) { if (fr.length) S.changed("games"); return; }
+        b = S.games.bundleVersions();
+        if (b.length) log("bundle", `Bundled with their original: ${b.slice(0, 5).join("; ")}${b.length > 5 ? ` and ${b.length - 5} more` : ""}`);
+      }
+      if (fr.length || b.length) S.changed("games");
+    }
     // ---- 6. the weekly copy opens and has everything in it
     function backupCheck() {
       if (!on("backupcheck") || !S.SH) return;
@@ -124,7 +139,7 @@
       if (running) return; running = true;
       try {
         retryLater();
-        for (const [name, fn] of [["backupcheck", backupCheck], ["dupes", dupes], ["gamecanon", gameCanon], ["cast", cast], ["gameinfo", gameInfo]]) {
+        for (const [name, fn] of [["backupcheck", backupCheck], ["bundle", bundle], ["dupes", dupes], ["gamecanon", gameCanon], ["cast", cast], ["gameinfo", gameInfo]]) {
           if (S.ui.job) break;
           try { await fn(); } catch (e) { S.logError("auto " + name, e.message); }
           await sleep(300);
