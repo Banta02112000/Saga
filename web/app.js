@@ -276,7 +276,7 @@
   function undoChange(...a) { return P_website().undoChange(...a); }
   function syncWithWebServer(...a) { return P_website().syncWithWebServer(...a); }
   const C = window.Core;
-  const VERSION = "0.7.8";
+  const VERSION = "0.7.9";
   const AUTO_SYNC_HOURS = 12;
   Object.assign(C.PROFILES, (window.CANONSYNC_PRESET || {}).traktProfiles || {});
   const DEFAULT_PROFILE = (window.CANONSYNC_PRESET || {}).traktDefault || "PKCE (your own Trakt app)";
@@ -585,6 +585,9 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.7.9", ["Copy-and-paste prompts for everything (Settings › Canon finder and AI): every AI step (canon search and checks, multiverses, game details, the games canon check, refreshing a title or a universe, watch order) shows you the prompt to paste into any AI chat (Gemini, Claude, ChatGPT…), and reads the answer you paste back. No API key needed.",
+      "When an API key fails (a broken key, quota, Google turning it away), that step now carries on as copy and paste instead of stopping, and says why. The copy-and-paste sheet works with any AI chat, with buttons for Gemini, Claude and ChatGPT.",
+      "Fixed: game details by copy and paste refused answers that weren't a table."]],
     ["0.7.8", ["Upcoming shows only the series you're watching (status Watching). To watch and canon releases have their own filters.",
       "Refresh everything on every title, on every page: details, rating, watched, episodes and its canon universe. On games it also checks IMDb, the series, remakes/remasters and the AI details.",
       "Games always show the original, with its remakes, remasters and re-releases listed on its page, each with its own status; tap one to open its page. When one version is finished, the whole bundle counts as finished.",
@@ -1442,12 +1445,10 @@
   function gameCanonCheck() {
     const rows = GC.missingRows(C, db, games).rows.filter(c => !c.have && !(games.meta.canonCheck || {})[GC.checkKey(c)]);
     if (!rows.length) { toast("Every missing canon game has been checked"); return; }
-    const viaApp = !db.get("gemini_key");
     let stopped = false;
+    const prov = aiProvider("Canon check of your missing games.", () => { stopped = true; }), viaApp = !aiApi();
     const mvs = [...new Set(games.visible().map(g => g.multiverse || g.franchise).filter(Boolean))].sort();
-    return runJob(`Canon check${viaApp ? " (Gemini app)" : ""}`, async p => {
-      const prov = viaApp ? { label: "Gemini app", call: (prompt, o) => gappAsk(prompt, Object.assign({ note: "Canon check of your missing games." }, o)).catch(e => { if (isCancel(e)) stopped = true; throw e; }) }
-        : C.geminiProvider(db, Native.http, db.get("gemini_key"), db.get("gemini_model") || "auto", { search: db.get("gemini_search", "0") === "1" });
+    return runJob(`Canon check${viaApp ? " (copy and paste)" : ""}`, async p => {
       if (prov.prepare) await prov.prepare();
       const size = viaApp ? 60 : 40, tot = { checked: 0, notCanon: 0, noStory: 0, tiein: 0, versions: 0 };
       for (let i = 0; i < rows.length && !stopped && !C.CONFIG.cancelled; i += size) {
@@ -1463,11 +1464,9 @@
   function gameInfoRun(ids) {
     const list = (ids || []).map(id => games.get(id)).filter(Boolean);
     if (!list.length) { toast("Every game already has its details"); return; }
-    const viaApp = !db.get("gemini_key");
     let stopped = false;
-    return runJob(`Game details${viaApp ? " (Gemini app)" : ""}`, async p => {
-      const prov = viaApp ? { label: "Gemini app", call: (prompt, o) => gappAsk(prompt, Object.assign({ note: "Game details: release dates, platforms, remakes, HLTB." }, o)).catch(e => { if (isCancel(e)) stopped = true; throw e; }) }
-        : C.geminiProvider(db, Native.http, db.get("gemini_key"), db.get("gemini_model") || "auto", { search: db.get("gemini_search", "0") === "1" });
+    const prov = aiProvider("Game details: release dates, platforms, remakes, HLTB.", () => { stopped = true; }), viaApp = !aiApi();
+    return runJob(`Game details${viaApp ? " (copy and paste)" : ""}`, async p => {
       if (prov.prepare) await prov.prepare();
       // 0.7.1: your prompt exactly as you wrote it, one game per question; Saga reads the answer however it's laid out
       // and keeps it with the game (Games › the game › AI answer)
@@ -1476,7 +1475,7 @@
         const g = list[b];
         p(b / list.length, `Game details ${b + 1}/${list.length}: ${g.title}`);
         try {
-          const text = await prov.call(GC.infoPromptOne(g.title), { title: "Game details", step: b + 1, steps: list.length });
+          const text = await prov.call(GC.infoPromptOne(g.title), { title: `Game details: ${g.title}`, step: b + 1, steps: list.length, validate: v => (v.trim().length >= 15 ? null : "Paste the AI’s whole answer.") });
           g.aiText = String(text || "").slice(0, 1500);
           const r = GC.applyInfo(games, [g], [GC.parseInfoText(text, g.title)]); filled += r.filled; same += r.same;
           games.save(); changed("games");
@@ -1488,12 +1487,13 @@
   // Runs step 1 or 2 through the API (via "auto") or the Gemini app; an API failure offers the Gemini app for the same step.
   function mvRun(kind, via, only) {
     ui.gemFail = "";
+    if (aiManual() || !db.get("gemini_key")) via = "app";
     let stopped = false;
     const manual = { label: "Gemini app", call: (prompt, o) => gappAsk(prompt, Object.assign({ note: o.note || (kind === "group" ? "Sorts your titles into multiverses." : "") }, o))
       .catch(e => { if (isCancel(e)) stopped = true; throw e; }) };
     const name = kind === "group" ? "Multiverse grouping" : "Multiverse search";
     return runJob(via === "app" ? `${name} (Gemini app)` : name, async p => {
-      const prov = via === "app" ? manual : C.geminiProvider(db, Native.http, db.get("gemini_key"), db.get("gemini_model") || "auto", { search: db.get("gemini_search", "0") === "1" });
+      const prov = via === "app" ? manual : withManual(C.geminiProvider(db, Native.http, db.get("gemini_key"), db.get("gemini_model") || "auto", { search: db.get("gemini_search", "0") === "1" }), kind === "group" ? "Sorts your titles into multiverses." : "Finds the canon entries missing from each multiverse.", () => { stopped = true; });
       try {
         if (kind === "group") {
           const n = await C.mvGroup(db, prov, p, via === "app" ? 200 : 150);
@@ -1533,7 +1533,7 @@
   function renderMissing() {
     const meds = ["All", "Movie", "TV Series", "Special"];
     const hasClaude = !!db.get("claude_key"), hasGemini = !!db.get("gemini_key");
-    const m = mvState(), via = hasGemini ? "auto" : "app";
+    const m = mvState(), via = hasGemini && !aiManual() ? "auto" : "app";
     const step = (n, k, title, sub, done) => `<button class="tool step${done ? " done" : ""}" data-action="mv" data-k="${k}" data-via="${via}" ${ui.job ? "disabled" : ""}>
         <span class="tool-ic">${done ? icon("check") : `<b>${n}</b>`}</span><span class="grow"><b>${title}</b><small>${sub}</small></span>${icon("chev")}</button>`;
     return `<section>
@@ -1855,6 +1855,11 @@
         <h2>Canon lists</h2>
         ${field("canon_urls", "One per line: franchise name | IMDb or Trakt list link", { area: true, placeholder: "Doctor Who | https://www.imdb.com/list/ls100000001/\nThe Walking Dead | https://trakt.tv/users/someone/lists/twd-canon" })}
       </section>
+      <section class="stack" id="aimanual">
+        <h2>Copy-and-paste prompts</h2>
+        <label class="switch"><input type="checkbox" data-setting="ai_manual" ${db.get("ai_manual", "0") === "1" ? "checked" : ""}><span>Use copy-and-paste prompts for everything<small class="muted" style="display:block">Every AI step (canon search and checks, multiverses, game details and canon check, refreshing a title or a universe, watch order) shows you the prompt: paste it into any AI chat (Gemini, Claude, ChatGPT…), then paste the answer back. No API key is used.</small></span></label>
+        <p class="small muted" style="margin:0">Off: your API keys below are used, and if one fails (a broken key, quota, Google turning it away) that step carries on as copy and paste instead of stopping. Background jobs can't ask you, so with this on they skip AI work.</p>
+      </section>
       <section class="stack">
         <h2>Gemini (free)</h2>
         ${field("gemini_key", "Gemini API key", { secret: true, hint: "Free from aistudio.google.com (Get API key). Saga only uses free models and paces itself to the free limits; if today's quota runs out it stops and continues tomorrow." })}
@@ -2167,7 +2172,7 @@
     const o = C.watchOrder(db, mv, status(), ui.order.mode);
     const out = o.rows.filter(c => !c.unreleased), have = out.filter(c => c.have && c.state !== "listed").length;
     const x = crossLine(mv, have, out.length);
-    const via = db.get("gemini_key") ? "auto" : "app";
+    const via = db.get("gemini_key") && !aiManual() ? "auto" : "app";
     $("#overlay").innerHTML = `<div class="scrim bottom" data-action="dismiss"><div class="sheet" role="dialog" aria-modal="true">
       <h3 style="margin:0">${esc(mv)}</h3>
       <p class="small muted" style="margin:2px 0 8px">${fmt(have)} of ${fmt(out.length)} seen${o.rows.length > out.length ? ` (${fmt(o.rows.length - out.length)} not out yet, not counted)` : ""}${x ? ` · ${esc(x.text)} · ${x.pct}% across all tabs` : ""}</p>
@@ -2189,7 +2194,7 @@
       const prompt = C.orderPrompt(mv, rows);
       let text;
       if (via === "app") text = await BantaAI.ask({ title: "In-universe order", note: `${mv} · ${rows.length} entries`, prompt, validate: v => { try { C.parseOrder(v, rows); return null; } catch (e) { return e.message + " Copy Gemini’s whole answer and paste it again."; } } });
-      else { const prov = C.geminiProvider(db, Native.http, db.get("gemini_key"), db.get("gemini_model") || "auto", { search: true }); await prov.prepare(); text = await prov.call(prompt); }
+      else { const prov = withManual(C.geminiProvider(db, Native.http, db.get("gemini_key"), db.get("gemini_model") || "auto", { search: true }), `${mv} · ${rows.length} entries`); await prov.prepare(); text = await prov.call(prompt, { title: "In-universe order" }); }
       C.saveOrder(db, mv, C.parseOrder(text, rows));
       ui.order.mode = "chrono";
       setTimeout(() => openOrder(mv, "chrono"), 50);
@@ -3023,20 +3028,56 @@
     return !!db.get("ai_key");
   }
   // One title through the AI canon finder, whatever was checked before; says what its franchise now holds.
-  // 0.7.8: the AI you've set up, for one prompt at a time: the Gemini API, another AI key, or the Gemini app (copy and paste)
-  function aiProvider(note) {
+  // 0.7.9: copy and paste for everything the AI does. Settings › Canon finder and AI › "Copy-and-paste prompts" makes
+  // every AI step hand you the prompt (for any AI chat: Gemini, Claude, ChatGPT…) and read the answer you paste back.
+  // Without it, an API key is used, and when that API fails (a broken key, quota, Google turning it away) the same step
+  // goes on as copy and paste instead of stopping.
+  const aiManual = () => db.get("ai_manual", "0") === "1";
+  const aiApi = () => !aiManual() && !!(db.get("gemini_key") || db.get("claude_key") || aiReady());
+  const MANUAL_EXTRA = "\nUse web search to check anything announced recently. Answer with the plain lines only.\n";
+  function manualProvider(note, onStop, why) {
+    return { origin: "gemini", label: "Copy & paste", model: "your AI chat", manual: true, extra: MANUAL_EXTRA, prepare: async () => {},
+      call: (prompt, o) => gappAsk(prompt, Object.assign({ note, warn: why ? `${why} Paste the answer from any AI chat instead.` : "" }, o || {})).catch(e => { if (isCancel(e) && onStop) onStop(); throw e; }) };
+  }
+  function apiProvider() {
     if (db.get("gemini_key")) return C.geminiProvider(db, Native.http, db.get("gemini_key"), db.get("gemini_model") || "auto", { search: db.get("gemini_search", "0") === "1" });
     if (aiReady() && C.compatProvider) return C.compatProvider(Native.http, { preset: db.get("ai_preset", "openai"), key: db.get("ai_key"), model: db.get("ai_model"), base: db.get("ai_base") });
-    return { label: "Gemini app", call: (prompt, o) => gappAsk(prompt, Object.assign({ note }, o)) };
+    if (db.get("claude_key") && C.claudeCall) { const key = db.get("claude_key"), m = db.get("claude_model") || "auto", model = m === "auto" ? C.CLAUDE_DEFAULT : m; return { origin: "claude", label: "Claude", model, prepare: async () => {}, call: prompt => C.claudeCall(Native.http, key, model, prompt, db.get("claude_web", "1") === "1").then(r => r.text) }; }
+    return null;
+  }
+  const apiWhy = (label, e) => `${label} didn't answer (${String((e && e.message) || e).slice(0, 140)}).`;
+  // the API, and copy and paste from the first step it fails on
+  function withManual(api, note, onStop) {
+    let why = "";
+    const man = () => manualProvider(note, onStop, why);
+    return { origin: api.origin, label: api.label, extra: api.extra, get manual() { return !!why; }, get model() { return why ? "your AI chat" : api.model; },
+      prepare: async () => { try { if (api.prepare) await api.prepare(); } catch (e) { why = apiWhy(api.label, e); logError("ai", why); } },
+      call: async (prompt, o) => {
+        if (!why) { try { return await api.call(prompt, o); } catch (e) { if (isCancel(e) || C.CONFIG.cancelled) throw e; why = apiWhy(api.label, e); logError("ai", why); } }
+        return man().call(prompt, o);
+      } };
+  }
+  // the AI you've set up, for one prompt at a time
+  function aiProvider(note, onStop) {
+    const api = aiApi() ? apiProvider() : null;
+    return api ? withManual(api, note, onStop) : manualProvider(note, onStop);
   }
   // finds more entries of a franchise with the AI scan you've set up, seeded with these titles; → how many were added
-  async function canonSeedScan(seeds, p) {
+  async function canonSeedScan(seeds, p, onStop) {
     const only = seeds.slice(0, 30).map(c => ({ title: c.title, year: c.year || null, medium: c.medium || "Movie", norm: C.norm(c.title), key: `one|${C.norm(c.title)}|${c.year || ""}` }));
-    if (db.get("gemini_key")) return C.multiverseScan(db, Native.http, db.get("gemini_key"), db.get("gemini_model") || "auto", p, 40, 1, { search: db.get("gemini_search", "0") === "1", only });
-    if (db.get("claude_key")) return C.claudeScan(db, Native.http, db.get("claude_key"), db.get("claude_model") || "auto", p, { webSearch: db.get("claude_web", "1") === "1", only });
-    if (aiReady()) return C.compatScan(db, Native.http, { preset: db.get("ai_preset", "openai"), key: db.get("ai_key"), model: db.get("ai_model"), base: db.get("ai_base") }, p, only);
-    return 0;
+    const byHand = why => C.canonScan(db, manualProvider("Finds the canon entries missing from this franchise.", onStop, why), p, 60, 5, only);
+    if (!aiApi()) return byHand();
+    try {
+      if (db.get("gemini_key")) return await C.multiverseScan(db, Native.http, db.get("gemini_key"), db.get("gemini_model") || "auto", p, 40, 1, { search: db.get("gemini_search", "0") === "1", only });
+      if (db.get("claude_key")) return await C.claudeScan(db, Native.http, db.get("claude_key"), db.get("claude_model") || "auto", p, { webSearch: db.get("claude_web", "1") === "1", only });
+      return await C.compatScan(db, Native.http, { preset: db.get("ai_preset", "openai"), key: db.get("ai_key"), model: db.get("ai_model"), base: db.get("ai_base") }, p, only);
+    } catch (e) {
+      if (isCancel(e) || C.CONFIG.cancelled) throw e;
+      const why = apiWhy(db.get("gemini_key") ? "Gemini" : db.get("claude_key") ? "Claude" : "Your AI", e); logError("ai", why);
+      return byHand(why);
+    }
   }
+
   // 0.7.8: a universe (or a TMDB collection) refreshed: the AI looks for entries that are missing, then checks every
   // entry it has (canon or not, a duplicate, real at all, its release date); what it flags is hidden, dates are fixed
   function universeRefresh(name) {
@@ -3080,7 +3121,7 @@
     if (!g) return;
     g.aiAt = 0;
     await gameInfoRun([g.id]);
-    if (db.get("gemini_key") || db.get("claude_key") || aiReady()) await runJob("Canon check", async p => { const n = await canonSeedScan([{ title: g.title, year, medium: "Video Game" }], p); invalidate(); games.followCanon(C.gameCanon(db, games.visible())); games.save(); changed("games"); return `${g.title}: ${fmt(n || 0)} canon entries found for its series`; });
+    if (feat("gemini")) await runJob("Canon check", async p => { const n = await canonSeedScan([{ title: g.title, year, medium: "Video Game" }], p); invalidate(); games.followCanon(C.gameCanon(db, games.visible())); games.save(); changed("games"); return `${g.title}: ${fmt(n || 0)} canon entries found for its series`; });
     if (ui.sec === "games") render();
   }
   function libCanonOne(it) {
@@ -3093,10 +3134,8 @@
       invalidate();
       return fr ? `${fr}: ${fmt(all.length)} entries known${n ? `, ${fmt(n)} new` : ", nothing new"}. See the Missing tab.` : `No franchise found for ${it.title}${n ? ` (${fmt(n)} entries added)` : ""}.`;
     };
-    if (db.get("gemini_key")) return runJob("Canon check", p => C.multiverseScan(db, Native.http, db.get("gemini_key"), db.get("gemini_model") || "auto", p, 40, 1, { search: db.get("gemini_search", "0") === "1", only }).then(done));
-    if (db.get("claude_key")) return runJob("Canon check", p => C.claudeScan(db, Native.http, db.get("claude_key"), db.get("claude_model") || "auto", p, { webSearch: db.get("claude_web", "1") === "1", only }).then(done));
-    if (aiReady()) return runJob("Canon check", p => C.compatScan(db, Native.http, { preset: db.get("ai_preset", "openai"), key: db.get("ai_key"), model: db.get("ai_model"), base: db.get("ai_base") }, p, only).then(done));
-    toast("Add an AI key in Settings › AI first");
+    let stopped = false;
+    return runJob("Canon check", p => canonSeedScan(only, p, () => { stopped = true; }).then(n => (stopped ? "Stopped. " : "") + done(n)).catch(e => { if (isCancel(e)) return "Stopped"; throw e; }));
   }
   // puts one title back exactly as it was (status, episodes, rating), and takes back what was queued for Trakt
   function libUndo(it) {
@@ -3276,7 +3315,7 @@
       case "libtagadd": { const v = (($("#libTag") || {}).value || "").trim().slice(0, 30); if (!v) return true; it.tags = [...new Set([...(it.tags || []), v])]; it.updated = Date.now(); libSave(); openLib(it.id); return true; }
       case "libtagdel": it.tags = (it.tags || []).filter(t => t !== el.dataset.v); libSave(); openLib(it.id); return true;
       case "librefresh": libDetails(it, true); toast("Loading episodes…"); return true;
-      case "libsync1": toast(`Refreshing ${it.title}…`); (async () => { await libSyncOne(it); if (db.get("gemini_key") || db.get("claude_key") || aiReady()) libCanonOne(it); })(); return true; // 0.7.8: and its canon
+      case "libsync1": toast(`Refreshing ${it.title}…`); (async () => { await libSyncOne(it); if (feat("gemini")) libCanonOne(it); })(); return true; // 0.7.8: and its canon
       case "libcanon1": closeOverlay(); libCanonOne(it); return true;
       case "libwhere": { const c = { title: it.title, year: it.year, medium: it.type === "show" ? "TV Series" : "Movie", imdb: it.imdb || null, franchise: "" }; closeOverlay(); openSheet(sid(c, "lib")); return true; }
       case "libremove": if (el.dataset.sure) { const u = libUndo(it); lib.remove(it.id); libSave(); closeOverlay(); ui.libOpen = null; toast(`Removed ${it.title}`, u); render(); } else { el.dataset.sure = "1"; el.lastChild.textContent = "Tap again to remove"; } return true;

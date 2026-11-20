@@ -62,7 +62,7 @@
 
     // ---- 3. game details from your prompt (API only)
     async function gameInfo() {
-      if (!on("gameinfo") || !S.feat("games") || !db().get("gemini_key")) return;
+      if (!on("gameinfo") || !S.feat("games") || !db().get("gemini_key") || db().get("ai_manual", "0") === "1") return;
       const todo = S.games.visible().filter(g => !g.aiAt && (!g.date || !g.platform || g.hours == null)).slice(0, 5);
       if (!todo.length) return;
       const prov = S.C.geminiProvider(db(), S.Native.http, db().get("gemini_key"), db().get("gemini_model") || "auto", { search: db().get("gemini_search", "0") === "1" });

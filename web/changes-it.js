@@ -2,6 +2,11 @@
    as CHANGES in app.js; a version missing here is shown in English with a note. */
 (function () {
   window.SAGA_CHANGES_IT = {
+    "0.7.9": [
+      "Prompt da copiare e incollare per tutto (Impostazioni › Ricerca canon e AI): ogni passaggio AI (ricerca e controlli canon, multiversi, dettagli dei giochi, controllo canon dei giochi, aggiornamento di un titolo o di un universo, ordine di visione) ti mostra il prompt da incollare in una chat AI qualsiasi (Gemini, Claude, ChatGPT…) e legge la risposta che incolli. Nessuna chiave API necessaria.",
+      "Quando una chiave API non funziona (chiave rotta, quota esaurita, Google che rifiuta), quel passaggio ora continua con copia e incolla invece di fermarsi, e dice perché. La scheda di copia e incolla funziona con qualsiasi chat AI, con pulsanti per Gemini, Claude e ChatGPT.",
+      "Corretto: i dettagli dei giochi con copia e incolla rifiutavano le risposte che non erano una tabella."
+    ],
     "0.7.8": [
       "In arrivo mostra solo le serie che stai guardando (stato In corso). Da guardare e le uscite canon hanno i loro filtri.",
       "Aggiorna tutto su ogni titolo, in ogni pagina: dettagli, voto, visto, episodi e il suo universo canon. Sui giochi controlla anche IMDb, la serie, i remake/remaster e i dettagli dall'AI.",

@@ -1238,7 +1238,22 @@ window.BANTA_IT = {
 "Remaster": "Remaster",
 "Re-release": "Riedizione",
 "Refresh: check its games, find missing ones": "Aggiorna: controlla i suoi giochi, trova quelli mancanti",
-"Poster": "Locandina"
+"Poster": "Locandina",
+"Copy and paste": "Copia e incolla",
+"Ask your AI": "Chiedi alla tua AI",
+"Use Claude": "Usa Claude",
+"Use ChatGPT": "Usa ChatGPT",
+"The AI’s answer": "Risposta dell'AI",
+"Long-press here and paste the AI’s answer": "Tieni premuto qui e incolla la risposta dell'AI",
+"Paste the AI’s answer first.": "Prima incolla la risposta dell'AI.",
+"Paste the AI’s whole answer.": "Incolla tutta la risposta dell'AI.",
+"When the AI has finished, tap": "Quando l'AI ha finito, tocca",
+"(or Claude, ChatGPT, any AI chat), start a new chat and paste it.": "(o Claude, ChatGPT, qualsiasi chat AI), apri una nuova chat e incollalo.",
+"Copy-and-paste prompts": "Prompt da copiare e incollare",
+"Use copy-and-paste prompts for everything": "Usa i prompt da copiare e incollare per tutto",
+"Every AI step (canon search and checks, multiverses, game details and canon check, refreshing a title or a universe, watch order) shows you the prompt: paste it into any AI chat (Gemini, Claude, ChatGPT…), then paste the answer back. No API key is used.": "Ogni passaggio AI (ricerca e controlli canon, multiversi, dettagli e controllo canon dei giochi, aggiornamento di un titolo o di un universo, ordine di visione) ti mostra il prompt: incollalo in una chat AI qualsiasi (Gemini, Claude, ChatGPT…), poi incolla qui la risposta. Nessuna chiave API viene usata.",
+"Off: your API keys below are used, and if one fails (a broken key, quota, Google turning it away) that step carries on as copy and paste instead of stopping. Background jobs can't ask you, so with this on they skip AI work.": "Spento: si usano le tue chiavi API qui sotto, e se una non funziona (chiave rotta, quota esaurita, Google che rifiuta) quel passaggio continua con copia e incolla invece di fermarsi. I lavori in background non possono chiederti nulla, quindi con questo attivo saltano il lavoro AI.",
+"That doesn’t look like the answer the prompt asked for (lines with | between the parts). Copy the AI’s whole answer and paste it again.": "Non sembra la risposta che il prompt chiedeva (righe con | tra le parti). Copia tutta la risposta dell'AI e incollala di nuovo."
 };
 window.BANTA_IT_PAT = [
 [
@@ -2248,5 +2263,13 @@ window.BANTA_IT_PAT = [
 [
 "Doctor Who timeline: (\\d[\\d,.]*) books, (\\d[\\d,.]*) films, (\\d[\\d,.]*) games added, (\\d[\\d,.]*) taken out",
 "Timeline di Doctor Who: aggiunti $1 libri, $2 film, $3 giochi, $4 tolti"
+],
+[
+"(.+) didn't answer \\((.+)\\)\\. Paste the answer from any AI chat instead\\.",
+"$1 non ha risposto ($2). Incolla invece la risposta da una chat AI qualsiasi."
+],
+[
+"Game details: (.+)",
+"Dettagli del gioco: $1"
 ]
 ];

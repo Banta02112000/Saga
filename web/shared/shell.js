@@ -126,6 +126,7 @@
   };
   var GEMINI_URL = "https://gemini.google.com/app";
   var CLAUDE_URL = "https://claude.ai/new";
+  var CHATGPT_URL = "https://chatgpt.com/";
 
   // ---------------------------------------------------------------- answer parsing
   // Finds JSON in a chat answer: a ```json block, a <json> block, or the outermost [ ] / { } in the text.
@@ -181,18 +182,18 @@
     return new Promise(function (resolve, reject) {
       var s = mount(
         '<div class="bai-grab"></div>' +
-        '<div class="bai-kicker">✦ Gemini app' + (o.steps > 1 ? " · prompt " + o.step + " of " + o.steps : "") + "</div>" +
-        "<h2>" + esc(o.title || "Ask Gemini") + "</h2>" +
+        '<div class="bai-kicker">✦ Copy and paste' + (o.steps > 1 ? " · prompt " + o.step + " of " + o.steps : "") + "</div>" +
+        "<h2>" + esc(o.title || "Ask your AI") + "</h2>" +
         (o.warn ? '<p class="bai-note warn">' + esc(o.warn) + "</p>" : "") +
         (o.note ? '<p class="bai-note">' + esc(o.note) + "</p>" : "") +
-        '<ol class="bai-steps"><li><span>Tap <b>Copy prompt &amp; open Gemini</b>, start a new chat and paste it. Your Gemini Pro plan covers it.</span></li>' +
-        "<li><span>When Gemini has finished, tap <b>Copy</b> under its answer" + (expect === "json" ? " (or on the code block)" : "") + ".</span></li>" +
+        '<ol class="bai-steps"><li><span>Tap <b>Copy prompt &amp; open Gemini</b> (or Claude, ChatGPT, any AI chat), start a new chat and paste it.</span></li>' +
+        "<li><span>When the AI has finished, tap <b>Copy</b> under its answer" + (expect === "json" ? " (or on the code block)" : "") + ".</span></li>" +
         "<li><span>Come back here and paste it below.</span></li></ol>" +
         '<button class="bai-btn primary bai-wide" data-a="gem">' + ICON_COPY + "Copy prompt &amp; open Gemini</button>" +
-        '<div class="bai-links"><button class="bai-btn quiet" data-a="copy">Copy only</button>' + (B() && B().shareTo ? '<button class="bai-btn quiet" data-a="send">Send straight to Gemini</button>' : "") + '<button class="bai-btn quiet" data-a="claude">Use Claude instead</button><button class="bai-btn quiet" data-a="show">See the prompt</button></div>' +
+        '<div class="bai-links"><button class="bai-btn quiet" data-a="copy">Copy only</button>' + (B() && B().shareTo ? '<button class="bai-btn quiet" data-a="send">Send straight to Gemini</button>' : "") + '<button class="bai-btn quiet" data-a="claude">Use Claude</button><button class="bai-btn quiet" data-a="chatgpt">Use ChatGPT</button><button class="bai-btn quiet" data-a="show">See the prompt</button></div>' +
         '<textarea class="bai-prompt" readonly hidden></textarea>' +
-        '<div class="bai-label"><span>Gemini’s answer</span>' + (io.canPaste() ? '<button class="bai-btn quiet" data-a="paste">Paste</button>' : "") + "</div>" +
-        '<textarea class="bai-in" placeholder="Long-press here and paste Gemini’s answer" spellcheck="false" autocapitalize="off"></textarea>' +
+        '<div class="bai-label"><span>The AI’s answer</span>' + (io.canPaste() ? '<button class="bai-btn quiet" data-a="paste">Paste</button>' : "") + "</div>" +
+        '<textarea class="bai-in" placeholder="Long-press here and paste the AI’s answer" spellcheck="false" autocapitalize="off"></textarea>' +
         '<div class="bai-err" role="status"></div>' +
         '<div class="bai-actions"><button class="bai-btn" data-a="stop">' + esc(o.stopLabel || "Stop") + '</button><button class="bai-btn primary" data-a="ok">Import</button></div>' +
         '<div class="bai-meta">' + prompt.length.toLocaleString() + " characters" + (o.meta ? " · " + esc(o.meta) : "") + "</div>");
@@ -201,7 +202,7 @@
       s._cancel = function () { close(); reject(Object.assign(new Error("Stopped"), { cancelled: true })); };
       var check = function () {
         var v = input.value.trim();
-        if (!v) return "Paste Gemini’s answer first.";
+        if (!v) return "Paste the AI’s answer first.";
         if (o.validate) return o.validate(v);
         if (expect === "json" && parseJson(v) === null) return "That doesn’t contain the JSON the prompt asked for. Copy Gemini’s whole answer (or its code block) and paste it again.";
         return null;
@@ -212,11 +213,11 @@
         var b = e.target.closest("[data-a]");
         if (!b) return;
         var a = b.getAttribute("data-a");
-        if (a === "gem" || a === "copy" || a === "claude") {
+        if (a === "gem" || a === "copy" || a === "claude" || a === "chatgpt") {
           var ok = io.copy(prompt);
           err.className = "bai-err bai-ok";
           err.textContent = ok ? "Prompt copied." : "Couldn’t copy automatically: open “See the prompt” and copy it from there.";
-          if (a !== "copy") setTimeout(function () { io.open(a === "claude" ? CLAUDE_URL : GEMINI_URL); }, 350);
+          if (a !== "copy") setTimeout(function () { io.open(a === "claude" ? CLAUDE_URL : a === "chatgpt" ? CHATGPT_URL : GEMINI_URL); }, 350);
         } else if (a === "send") {
           io.copy(prompt); // still on the clipboard in case Gemini opens without the text
           var sent = false;
