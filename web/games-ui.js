@@ -138,6 +138,8 @@
   }
   function renderMv() {
     const q = G.norm(ui.q);
+    // 0.7.6b: series as the canon scans found them (your list's names kept), whenever the canon or your games changed
+    try { const C = window.Core, db = Saga.db, v = `${db.canon().length}|${lib().games.length}`; if (C && C.gameCanon && ui.fcVer !== v) { ui.fcVer = v; const ch = lib().followCanon(C.gameCanon(db, lib().visible())).concat(lib().resolveFranchises()); if (ch.length) ui.fcVer = `${db.canon().length}|${lib().games.length}`; } } catch (e) { /* as they are */ }
     const mvs = lib().multiverses(ui.mvSort || "remake").filter(m => !q || G.norm(m.name).includes(q) || m.franchises.some(f => G.norm(f.name).includes(q)));
     const chip = (v, l) => `<button class="chip" data-action="gmvsort" data-v="${v}" aria-pressed="${(ui.mvSort || "remake") === v}">${l}</button>`;
     return `<div class="chips" style="margin-bottom:10px">${chip("remake", "By newest version (remakes, remasters)")}${chip("date", "By original release")}${chip("size", "Biggest first")}</div>` + mvs.slice(0, ui.mvLim || 80).map(m => `<section>

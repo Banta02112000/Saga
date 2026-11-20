@@ -72,6 +72,27 @@ const ok = m => console.log("ok  " + m);
   const v = m.rows.find(c => c.title === "Made Up Quest V");
   assert.ok(v && !m.rows.some(c => c.title === "Made Up Quest Kart") && !m.rows.some(c => c.title === "Made Up Quest V Deluxe") && v.versions[0].title === "Made Up Quest V Deluxe", JSON.stringify(m.rows.map(c => c.title)));
   ok("Missing: tie-ins, story-less and non-canon games out, versions under their original; the AI check is kept");
+  // ---- 0.7.6b: the canon scan's franchises group your games; your list's multiverse name wins
+  {
+    const gl = new G.Games(null), db2 = new C.Store();
+    const mk = (title, date, extra) => { const g = gl.add({ title }, "backlog").game; g.date = date; Object.assign(g, extra || {}); return g; };
+    const a = mk("Hero Legends", "1998-01-01", { franchise: "Hero Legends", multiverse: "Hero Saga", fImported: true });
+    const b = mk("Shadow of the Hero", "2002-01-01"); // guessed: its own series
+    const c = mk("Hero Tactics Online", "2005-01-01"); // guessed too
+    const d = mk("Other Thing", "2004-01-01");
+    db2.replaceCanon("ai", [["Hero Legends", 1998], ["Shadow of the Hero", 2002], ["Hero Tactics Online", 2005]].map(([t, y]) => ({ franchise: "The Hero Legends Series", title: t, year: y, medium: "Video Game", norm: C.norm(t) })));
+    const ch = gl.followCanon(C.gameCanon(db2, gl.visible()));
+    assert.ok(b.multiverse === "Hero Saga" && c.multiverse === "Hero Saga" && b.franchise === "Hero Legends" && a.multiverse === "Hero Saga" && d.multiverse === "Other Thing", JSON.stringify([ch, b, c]));
+    const mvs = gl.multiverses().map(m => m.name + ":" + m.total);
+    assert.ok(mvs.includes("Hero Saga:3"), mvs.join(", "));
+    // nobody of yours in it: the scan's name
+    const gl2 = new G.Games(null), x = gl2.add({ title: "Lone Game" }, "backlog").game, y = gl2.add({ title: "Lone Game Returns" }, "backlog").game;
+    x.date = "2001-01-01"; y.date = "2003-01-01";
+    db2.replaceCanon("ai", [["Lone Game", 2001], ["Lone Game Returns", 2003]].map(([t, yy]) => ({ franchise: "Lone Universe", title: t, year: yy, medium: "Video Game", norm: C.norm(t) })));
+    gl2.followCanon(C.gameCanon(db2, gl2.visible()));
+    assert.ok(x.multiverse === "Lone Universe" && y.multiverse === "Lone Universe");
+    ok("the canon scan's franchises group your games (your list's multiverse name kept)");
+  }
   // ---- the film and TV scan asks for no games of film or TV franchises
   assert.ok(/list NO video games/.test(require("fs").readFileSync(__dirname + "/core.js", "utf8")));
   console.log("0.7.6 TESTS PASSED");

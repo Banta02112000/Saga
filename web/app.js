@@ -276,7 +276,7 @@
   function undoChange(...a) { return P_website().undoChange(...a); }
   function syncWithWebServer(...a) { return P_website().syncWithWebServer(...a); }
   const C = window.Core;
-  const VERSION = "0.7.6";
+  const VERSION = "0.7.7";
   const AUTO_SYNC_HOURS = 12;
   Object.assign(C.PROFILES, (window.CANONSYNC_PRESET || {}).traktProfiles || {});
   const DEFAULT_PROFILE = (window.CANONSYNC_PRESET || {}).traktDefault || "PKCE (your own Trakt app)";
@@ -585,6 +585,7 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.7.7", ["Games › Franchises follows the canon scans: every game a scan placed in a franchise is grouped in it, instead of in a series guessed from its own title. Where games of yours in that franchise have a multiverse from your list, your name is used; games from your own list keep what it says. It updates whenever the canon or your games change."]],
     ["0.7.6", ["Canon for films and series no longer brings games: the AI scan lists games only for franchises that began as video games (story games, each once), and a film or TV universe no longer shows tie-in games (Doctor Who still does).",
       "Games › Missing leaves out tie-ins to film or TV series, and, after the new AI canon check, games that aren't canon, have no campaign or story, or are a remake, remaster or re-release of another game (listed under their original). What it left out, and why, is listed at the top.",
       "Remakes, remasters and re-releases are bundled with their original: one game, every version listed in it, its newest version's date remembered. Series are ordered by that date by default (By newest version); By original release is still there.",

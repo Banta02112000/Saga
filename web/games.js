@@ -215,9 +215,31 @@
     }
     // 0.7.6: games whose series was only guessed from their title join the series and multiverse of your list (the
     // one you imported) when their title starts with it, or when a game of yours tells the same story. Returns changes.
+    // 0.7.6b: the canon scans decide the series of your games: every game a scan placed in a franchise joins it. Where
+    // games of yours in that franchise already have a multiverse from your list, that name is used (so "Zelda" stays
+    // yours, not the scan's "The Legend of Zelda"); a game's sub-series comes from the scan when it has one. Games from
+    // your own list keep what your list says. `rows` are C.gameCanon()'s rows (with .game, .franchise, .sub).
+    followCanon(rows) {
+      const byF = new Map();
+      for (const c of rows || []) { if (!c.game) continue; const g = this.get(c.game); if (!g || !c.franchise) continue; if (!byF.has(c.franchise)) byF.set(c.franchise, []); byF.get(c.franchise).push({ g, c }); }
+      const most = list => { const n = new Map(); for (const x of list) if (x) n.set(x, (n.get(x) || 0) + 1); return [...n.entries()].sort((a, b) => b[1] - a[1])[0]; };
+      const out = [];
+      for (const [F, list] of byF) {
+        const mine = list.filter(x => trustedGame(x.g));
+        const m = most(mine.map(x => x.g.multiverse || x.g.franchise));
+        const mv = m ? m[0] : F;
+        for (const { g, c } of list) {
+          if (trustedGame(g)) continue;
+          const fr = c.sub || (mine.length ? (most(mine.map(x => x.g.franchise)) || [mv])[0] : F);
+          if (g.multiverse !== mv || g.franchise !== fr) { out.push(`${g.title}: ${mv}${fr !== mv ? " › " + fr : ""}`); g.multiverse = mv; g.franchise = fr; g.fCanon = true; }
+        }
+      }
+      if (out.length) this.save();
+      return out;
+    }
     resolveFranchises() {
       const vis = this.visible(), out = [];
-      const trusted = g => g.fImported || (g.franchise && !(g.franchise === franchiseGuess(g.title) && (g.multiverse || g.franchise) === g.franchise));
+      const trusted = g => trustedGame(g) || g.fCanon;
       const known = new Map(), mvs = new Map(), byStory = new Map();
       for (const g of vis) if (trusted(g)) { known.set(norm(g.franchise), { f: g.franchise, m: g.multiverse || g.franchise }); if (g.multiverse) mvs.set(norm(g.multiverse), g.multiverse); byStory.set(storyKey(g.title), g); }
       const names = [...known.keys()].sort((a, b) => b.length - a.length), mnames = [...mvs.keys()].sort((a, b) => b.length - a.length);
@@ -228,7 +250,7 @@
         let hit = twin && twin !== g ? { f: twin.franchise, m: twin.multiverse || twin.franchise } : null;
         if (!hit) { const n = names.find(n => starts(t, n)); if (n) hit = known.get(n); }
         if (!hit) { const n = mnames.find(n => starts(t, n)); if (n) hit = { f: g.franchise || franchiseGuess(g.title), m: mvs.get(n) }; }
-        if (hit && (hit.f !== g.franchise || hit.m !== g.multiverse)) { out.push(`${g.title}: ${hit.m}${hit.f !== hit.m ? " › " + hit.f : ""}`); g.franchise = hit.f; g.multiverse = hit.m; }
+        if (hit && (hit.f !== g.franchise || hit.m !== g.multiverse)) { out.push(`${g.title}: ${hit.m}${hit.f !== hit.m ? " › " + hit.f : ""}`); g.franchise = hit.f; g.multiverse = hit.m; g.fGuess = true; }
       }
       if (out.length) this.save();
       return out;
@@ -266,6 +288,8 @@
     if (d !== (g.verDate || "")) g.verDate = d;
     return d;
   }
+  // a game whose series came from your list (not guessed from its title, not given by a canon scan)
+  const trustedGame = g => !!(g.fImported || (g.franchise && !g.fCanon && !g.fGuess && !(g.franchise === franchiseGuess(g.title) && (g.multiverse || g.franchise) === g.franchise)));
   function franchiseGuess(t) {
     let s = String(t || "").split(/\s*[:–—]\s+|\s+-\s+/)[0];
     s = s.replace(/\s+(Remastered|Remake|HD|Deluxe|Edition|Definitive Edition|GOTY|Reloaded)$/i, "").replace(/\s+(\d+|[IVX]{1,4})$/i, "").trim();

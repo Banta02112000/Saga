@@ -107,7 +107,9 @@
     // ---- 0.7.6: versions together; series from your list
     function bundle() {
       if (!on("bundle") || !S.feat("games")) return;
-      const fr = S.games.resolveFranchises();
+      // the canon scans first (they know the wider series), then your list's names for what's left
+      const fc = S.C.gameCanon ? S.games.followCanon(S.C.gameCanon(db(), S.games.visible())) : [];
+      const fr = fc.concat(S.games.resolveFranchises());
       if (fr.length) log("bundle", `Joined your multiverses: ${fr.slice(0, 5).join("; ")}${fr.length > 5 ? ` and ${fr.length - 5} more` : ""}`);
       // only when something would be bundled: a copy first
       let b = [];
