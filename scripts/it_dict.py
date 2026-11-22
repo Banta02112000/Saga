@@ -698,3 +698,43 @@ P += [
 ]
 D.update({ "All in one row": "Tutto in una riga" })
 P += [(rf"Show its {N} series", "Mostra le sue $1 serie"), (rf"Show all {N}", "Mostra tutti e $1"), (r"Other (.+) games", "Altri giochi di $1")]
+# 0.8.1: found by walking every screen in Italian
+D.update({
+  "Pick something from my watchlist": "Scegli qualcosa dalla mia lista",
+  "Watchlist titles on Disney+, Netflix, Prime Video, or elsewhere with a VPN. Where things stream is looked up after each sync (needs a TMDB key).": "Titoli della tua lista su Disney+, Netflix, Prime Video o altrove con una VPN. Dove sono in streaming viene cercato dopo ogni sincronizzazione (serve una chiave TMDB).",
+  "No canon yet. Run the Claude or TMDB scan above.": "Ancora nessun canon. Avvia la ricerca con Claude o TMDB qui sopra.",
+  "finished": "finiti", "games": "giochi", "your games": "i tuoi giochi", "backlog cleared": "arretrati smaltiti", "your average": "la tua media",
+  "Nothing here.": "Qui non c'è niente.",
+  "Hold and drag to move": "Tieni premuto e trascina per spostare",
+  "next": "prossimo",
+  "Connect Last.fm for your full history and play counts (from Spotify, YouTube Music, Apple Music and more), Spotify for your top lists, or both.": "Collega Last.fm per tutta la cronologia e i conteggi di ascolto (da Spotify, YouTube Music, Apple Music e altri), Spotify per le tue classifiche, o entrambi.",
+  ", add yourself under User Management, and paste its Client ID. Spotify needs the app's owner to have Premium.": ", aggiungiti in User Management e incolla il suo Client ID. Spotify richiede che il proprietario dell'app abbia Premium.",
+  "Your phone does these (so they don't run twice); the switches here change what it does, and the list shows what it did.": "Li fa il telefono (così non girano due volte); gli interruttori qui cambiano cosa fa, e l'elenco mostra cosa ha fatto.",
+  "When IMDb or the connection turned a part away, it's tried again 45 minutes later (up to 3 times a day).": "Quando IMDb o la connessione hanno rifiutato una parte, viene ritentata 45 minuti dopo (fino a 3 volte al giorno).",
+  "Missing canon games you rated on IMDb become Finished with your rating; listed ones go to the wishlist.": "I giochi canon mancanti che hai votato su IMDb diventano Finiti con il tuo voto; quelli in lista vanno nei desiderati.",
+  "Remakes, remasters and re-releases join their original (a copy is kept first); games whose series was only guessed join your list's multiverse.": "Remake, remaster e riedizioni si uniscono al loro originale (prima viene fatta una copia); i giochi la cui serie era solo indovinata entrano nel multiverso della tua lista.",
+  "Two entries with the same IMDb, TMDB or Steam id become one (a copy is kept first; History › Undo).": "Due voci con lo stesso id IMDb, TMDB o Steam diventano una (prima viene fatta una copia; Cronologia › Annulla).",
+  "Once a week the newest automatic copy of your data is opened and compared with what you have, so a broken copy is found before you need it.": "Una volta a settimana la copia automatica più recente dei tuoi dati viene aperta e confrontata con ciò che hai, così una copia rotta viene scoperta prima che ti serva.",
+  "Needed for Trakt. Create a free API app at trakt.tv › Settings › Your API Apps (redirect URI": "Serve per Trakt. Crea un'app API gratuita su trakt.tv › Settings › Your API Apps (redirect URI",
+  ") and paste its Client ID here.": ") e incolla qui il suo Client ID.",
+  "ur12345678, p.abc123 or your profile link": "ur12345678, p.abc123 o il link al tuo profilo",
+  "The Music section: your listening from Last.fm and Spotify": "La sezione Musica: i tuoi ascolti da Last.fm e Spotify",
+  "Refresh everything at night (around 3:30: a full sync, your website, every series; the phone must be on)": "Aggiorna tutto di notte (verso le 3:30: sincronizzazione completa, il tuo sito, ogni serie; il telefono deve essere acceso)",
+  "Clear what's ticked": "Cancella ciò che è spuntato",
+  "You're on the website.": "Sei sul sito.",
+  "They see titles, status and ratings (never notes, diary or keys) of the parts you pick for each of them. You see theirs if they share with you.": "Vedono titoli, stato e voti (mai note, diario o chiavi) delle parti che scegli per ognuno. Tu vedi i loro se condividono con te.",
+  "Download a backup of your files (.zip)": "Scarica una copia dei tuoi file (.zip)",
+})
+P += [
+  (rf"Show more \({N}\)", "Mostra altri $1"), (rf"Show more \({N} left\)", "Mostra altri $1"),
+  (r"Next up: (.+)", "Prossimo: $1"), (rf"after (.+): {N} to go", "dopo $1: ne mancano $2"), (rf"{N}/{N} in (.+)", "$1/$2 in $3"),
+  (r"(Game|Film) ★ –", "$1 ★ –"),
+  (r"Your whole listening history and play counts, from any app that scrobbles to Last\.fm (.*)", "Tutta la cronologia di ascolto e i conteggi, da qualsiasi app che fa scrobbling su Last.fm $1"),
+  (r"Your top artists and tracks \(4 weeks, 6 months, all time\) and your last 50 plays\. Spotify gives no full history: that comes from Last\.fm\. Make an app at developer\.spotify\.com(.*)", "I tuoi artisti e brani più ascoltati (4 settimane, 6 mesi, sempre) e gli ultimi 50 ascolti. Spotify non dà la cronologia completa: quella arriva da Last.fm. Crea un'app su developer.spotify.com$1"),
+  (rf"Year in review: your {N} in one card", "L'anno in breve: il tuo $1 in una scheda"),
+  (rf"hours of stories: {N} watching \(estimated from runtimes\), {N} playing \(time to beat\)", "ore di storie: $1 guardando (stimate dalle durate), $2 giocando (tempo per finirli)"),
+  (r"From isthereanydeal\.com › Apps \(the same app as the API key\)\. Its redirect URI must be (.+)", "Da isthereanydeal.com › Apps (la stessa app della chiave API). Il suo redirect URI deve essere $1"),
+  (r"anilist\.co › Settings › Developer › Create new client, with the redirect URL (.+)", "anilist.co › Settings › Developer › Create new client, con il redirect URL $1"),
+]
+D.update({ "films": "film", "average": "media" })
+P += [(r"(Game|Film|Novel|Audio|Comic|Short story|Webcast|Video)\s+★\s+–", "$1 ★ –")]

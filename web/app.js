@@ -38,7 +38,7 @@
     get secOn() { return secOn; },
     get homeContinue() { return homeContinue; },
     get homeHero() { return homeHero; },
-    get yearCounts() { return yearCounts; },
+    get yearCounts() { return yearCounts; }, get activityReady() { return activityReady; }, get warmActivity() { return warmActivity; },
     get cImg() { return cImg; },
     get canonKey() { return canonKey; },
     get healthText() { return healthText; },
@@ -276,7 +276,8 @@
   function undoChange(...a) { return P_website().undoChange(...a); }
   function syncWithWebServer(...a) { return P_website().syncWithWebServer(...a); }
   const C = window.Core;
-  const VERSION = "0.8.0";
+  const VERSION = "0.8.1";
+  let dataVer = 0; // 0.8.1: bumped on every change of your data (memos key on it)
   const AUTO_SYNC_HOURS = 12;
   Object.assign(C.PROFILES, (window.CANONSYNC_PRESET || {}).traktProfiles || {});
   const DEFAULT_PROFILE = (window.CANONSYNC_PRESET || {}).traktDefault || "PKCE (your own Trakt app)";
@@ -585,6 +586,11 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.8.1", ["Faster on the phone: Home opens about three times quicker with a big library (the year card fills in a moment later), Missing canon about seven times quicker, Games › Franchises about three times; long lists load more as you scroll instead of laying out thousands of posters at once; the weekly backup copy runs after the first screens instead of during them.",
+      "Games › Franchises: a game that's the only one of its kind joins the main series (Tomb Raider: Legend is Tomb Raider, not a series of one); \"The Witcher\" and \"Witcher\", \"Assassin's Creed\" and \"Assassins Creed\" are one series; one-word names keep what they belong to (Star Wars Episode, Alien: Isolation).",
+      "Up next follows the line you're playing: finishing Dawn of War suggests the next Dawn of War, not the next Warhammer game.",
+      "Fixed: Undo and Older in the history of changes did nothing when tapped.",
+      "Italian: the texts still in English on Home, Sync › Done by itself, Music, the year in review and several settings are translated."]],
     ["0.8.0", ["Games › Franchises: one entry per multiverse. Every game that isn't from your list goes where its name says (Total War: Warhammer III, Space Marine II, Dawn of War… in Warhammer; Marvel's Spider-Man 2 and Miles Morales in Marvel › Spider-Man), instead of a series of its own per canon scan. All its games are in one row, by release; Show its series opens it into its sub-series (Dawn of War, Space Hulk, Total War…).",
       "Copies merged: the same game added again by a canon scan, IMDb or Steam (Marvel's Spider-Man 2 and Spider-Man 2 of the same year, II and 2) becomes one, your list's entry kept. Two games of your list with one name (another platform) both stay, and show their platform and year.",
       "Your games list's series put back where earlier versions had moved them, and rows whose columns had slid in the spreadsheet (Red Dead, The Dark Pictures, BS Zelda) read right. Done once; Sync › Done by itself says how many."]],
@@ -1746,7 +1752,7 @@
   // Taken in turn from each kind of reason, and shuffled by the date so the row changes from day to day.
   function picksToday(limit = 14) {
     const seed = +new Date().toISOString().slice(0, 10).replace(/-/g, ""), rnd = k => { let h = seed; for (const ch of String(k)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
-    const mix = a => a.sort((x, y) => rnd(x.k) - rnd(y.k));
+    const mix = a => a.map(x => [rnd(x.k), x]).sort((p, q) => p[0] - q[0]).map(p => p[1]); // the day's order, one hash each
     const lists = [];
     lists.push(mix(lib.all().filter(x => x.type === "show" && x.status === "watching" && x.epl).map(x => ({ x, n: lib.nextEp(x) })).filter(o => o.n && !o.n.upcoming && o.n.left <= 3)
       .map(o => ({ k: "lib:" + o.x.id, t: o.x.title, img: o.x.poster, kind: "show", attrs: `data-action="libopen" data-id="${esc(o.x.id)}"`, why: `${o.n.left} episode${o.n.left === 1 ? "" : "s"} left` }))));
@@ -2572,6 +2578,7 @@
   let libJobDirty = false;
   const libPending = () => !!libTimer || libBusy || libJobDirty;
   function libSave(ids) {
+    dataVer++;
     if (ids && libLogOn) for (const id of [].concat(ids)) libDirtyIds.add(id); else libDirtyAll = true;
     // 0.6.9.6: shows you dropped, for the background's episode alerts too (they don't read the library)
     try { const dr = lib.all().filter(it => it.type === "show" && it.status === "dropped"); const v = JSON.stringify({ ids: dr.flatMap(it => [it.imdb, it.tmdb ? "tv:" + it.tmdb : null].filter(Boolean)), names: dr.map(it => C.norm(it.title)) });
@@ -2946,7 +2953,7 @@
       <div class="row" style="margin:0 0 10px;gap:8px">${ui.sel ? `<b class="grow">${fmt(ui.sel.size)} selected</b><button class="btn quiet small" data-action="libselall">Select all ${fmt(Math.min(list.length, lim))}</button><button class="btn quiet small" data-action="libselend">Done</button>` : `<span class="grow"></span><button class="btn quiet small" data-action="libselstart">Select</button>`}</div>
       ${ui.sel && ui.sel.size ? `<div class="chips" style="position:sticky;top:0;z-index:5;background:var(--bg);padding:6px 0;margin-bottom:8px">${[["watched", "Watched"], ["watchlist", "Watchlist"], ["watching", "Watching"], ["paused", "Paused"], ["dropped", "Dropped"]].map(([v, l]) => `<button class="chip" data-action="libbulk" data-v="${v}">${l}</button>`).join("")}<button class="chip" data-action="libbulk" data-v="list">${icon("plus")}List</button><button class="chip" data-action="libbulk" data-v="tag">Tag</button><button class="chip" data-action="libbulk" data-v="remove">Remove</button></div>` : ""}
       ${list.length ? Kit.grid(list.slice(0, lim).map(libTile)) : `<p class="muted">Nothing here yet.</p>`}
-      ${list.length > lim ? `<button class="btn block" style="margin-top:16px" data-action="libmore">Show more (${fmt(list.length - lim)})</button>` : ""}
+      ${list.length > lim ? `<button class="btn block automore" style="margin-top:16px" data-action="libmore">Show more (${fmt(list.length - lim)})</button>` : ""}
       <p class="small muted" style="margin-top:16px">${fmt(c.movie)} film${c.movie === 1 ? "" : "s"} · ${fmt(c.show)} series · ${fmt(c.eps)} episode${c.eps === 1 ? "" : "s"} ticked${c.rewatches ? ` · ${fmt(c.rewatches)} rewatch${c.rewatches === 1 ? "" : "es"}` : ""}</p>`;
   }
   async function libSearch() {
@@ -3375,6 +3382,7 @@
   let changeTimer = null;
   // something changed in a section: refresh the widget and the backup file a little later
   function changed(what) {
+    dataVer++;
     webSyncSoon();
     clearTimeout(changeTimer);
     const run = () => { if (ui.job) { changeTimer = setTimeout(run, 20000); return; } // not in the middle of a sync
@@ -3546,7 +3554,19 @@
 
   // ---- your year: films, episodes, games, books and stories, by month
   // ---- activity history: one dated list across films, series, games, books and Doctor Who (activity.js)
+  // 0.8.1: built once per change of your data, not on every screen (it walks every episode you ever ticked)
+  let actMemo = null;
+  const actKey = () => `${dataVer}|${games.ver}|${books.books.length}|${secOn("games")}|${secOn("books")}|${secOn("timeline")}`;
+  const activityReady = () => !!(actMemo && actMemo.k === actKey() && Date.now() - actMemo.at < 10 * 60e3);
+  let actWarm = null;
+  // the first time, Home shows without the year card and it comes a moment later (first paint first)
+  function warmActivity() { if (actWarm) return; actWarm = setTimeout(() => { actWarm = null; activity(); if (ui.sec === "home" && !$("#overlay").innerHTML) render(); }, 80); }
   function activity() {
+    const k = actKey();
+    if (actMemo && actMemo.k === k && Date.now() - actMemo.at < 10 * 60e3) return actMemo.v;
+    const v = activity0(); actMemo = { k, v, at: Date.now() }; return v;
+  }
+  function activity0() {
     return Activity.build({ library: lib, games: secOn("games") ? games : null, books: secOn("books") ? books : null, readsOf: BC.readsOf, gameCover: GC.COVER,
       stories: secOn("timeline") ? Kit.mods.timeline.recent(99999) : null });
   }
@@ -4275,6 +4295,9 @@
   // live number next to a slider (inline handlers are blocked by the content security policy)
   document.addEventListener("input", e => { const el = e.target; if (el && el.dataset && el.dataset.setting === "widget_alpha") { const v = document.getElementById("walphaV"); if (v) v.textContent = el.value + "%"; } });
 
+  // 0.8.1: long lists grow by themselves: a "Show more" marked automore is pressed when you scroll near it
+  { let amT = 0; const am = () => { amT = 0; const b = document.querySelector("#view .automore"); if (!b || b.disabled || $("#overlay").innerHTML) return; const r = b.getBoundingClientRect(); if (r.top < innerHeight + 600 && r.bottom > 0) b.click(); };
+    addEventListener("scroll", () => { if (!amT) amT = setTimeout(am, 120); }, { passive: true, capture: true }); }
   // 0.7.8: tap the poster at the top of a title to see it whole, at full size (tap anywhere or Back/Esc to close)
   const bigImg = u => String(u || "").replace(/\/t\/p\/w\d+\//, "/t/p/original/").replace(/\._V1_[^.]*\./, "._V1_.").replace(/\/cover\/[^/]+\//, "/cover/").replace(/t_cover_big/, "t_1080p");
   function viewPoster(src, title) {
@@ -4321,8 +4344,8 @@
       case "actopen": { const P = P_website().people().find(p => p.name === el.dataset.p), x = P && (P.recent || [])[+el.dataset.i]; if (x) openTitle(Object.assign({ why: `${P.name} ${P_website().ACT[x.kind] || x.kind} it ${P_website().WHEN(x.date)}` }, x)); break; }
       case "webadmin": openAdmin(); break;
       case "webhist": openHistory(); break;
-      case "webhistmore": openHistory(+t.dataset.before); break;
-      case "webundo": undoChange(t.dataset.file, +t.dataset.r, t); break;
+      case "webhistmore": openHistory(+el.dataset.before); break;
+      case "webundo": undoChange(el.dataset.file, +el.dataset.r, el); break;
       case "dwimport": openDwImport(); break;
       case "dwnotefile": Native.pick(true).then(files => { const f = (files || []).find(x => typeof x.text === "string"); if (!f) { if (files && files.length) toast("Pick the note as a text file (.txt): Samsung Notes › Share › Text file"); return; } const ta = $("#dwnote"); if (ta) { ta.value = f.text; dwPreview(); } }); break;
       case "dwnoteprev": dwPreview(); break;
@@ -4557,7 +4580,6 @@
       case "tmdb":
         runJob("TMDB scan", p => C.collectionScan(db, Native.http, db.get("tmdb_key"), p).then(n => `TMDB scan found ${fmt(n)} collection entries`));
         break;
-      case "stopjob": C.CONFIG.cancelled = true; toast("Stopping after the current batch"); break;
       case "gapp": gappRun(el.dataset.k); break;
       case "mv": mvRun(el.dataset.k, el.dataset.via, el.dataset.only || null); break;
       case "xapp": openApp(el.dataset.app); break;
@@ -4895,7 +4917,7 @@
   setTimeout(() => { if (!navigator.webdriver || window.__wantDw) dwSoon(); }, 6000);
   applyBackground();
   if (/[?&]night=1\b/.test(location.search) && window.Android) setTimeout(() => nightRun(), 4000);
-  try { autoBackup(); } catch (e) { /* tried again next start */ }
+  setTimeout(() => { try { autoBackup(); } catch (e) { /* tried again next start */ } }, navigator.webdriver ? 0 : 20000); // 0.8.1: after the first screens, not during them
   try { backupToFile(false).catch(() => {}); } catch (e) { /* next time */ }
   setTimeout(() => livePull(), 4000);
   if (lsGet("saga_theme")) setLook("saga_theme", lsGet("saga_theme")); // the phone's bars follow the theme

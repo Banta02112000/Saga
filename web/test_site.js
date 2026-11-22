@@ -23,6 +23,16 @@ const ok = (c, m) => { if (!c) { console.error("FAIL: " + m); process.exit(1); }
     await pg.evaluate(() => __app.openHistory()); await pg.waitForSelector('.histlist [data-action="webundo"]', { timeout: 10000 });
     const hl = await pg.textContent(".sheet");
     ok(/Website Film/.test(hl) && /added/.test(hl) && /on the website/.test(hl), "history lists the film added on the website");
+    // 0.8.1: the Undo button itself (it did nothing before: wrong variable)
+    await pg.evaluate(() => { document.querySelector("#overlay").innerHTML = ""; __app.lib.add({ type: "movie", title: "Undo Me Film", year: 2003 }, "watchlist"); __app.lib.save(); });
+    await pg.waitForTimeout(6000); await pg.waitForFunction(() => __sagaWeb.pending() === 0, null, { timeout: 15000 });
+    await pg.evaluate(() => __app.openHistory()); await pg.waitForSelector('.histlist [data-action="webundo"]', { timeout: 10000 });
+    await pg.evaluate(() => { const row = [...document.querySelectorAll(".histlist .item")].find(r => /Undo Me Film/.test(r.textContent) && /added/.test(r.textContent)); row.querySelector('[data-action="webundo"]').click(); });
+    await pg.waitForFunction(() => [...document.querySelectorAll('.histlist [data-action="webundo"]')].some(b => b.textContent === "Undone"), null, { timeout: 10000 });
+    await pg.waitForTimeout(800);
+    await pg.reload(); await pg.waitForFunction(() => window.__app && __app.lib, null, { timeout: 15000 }); await pg.waitForTimeout(1500);
+    const undone = await pg.evaluate(() => !__app.lib.all().some(x => x.title === "Undo Me Film") && __app.lib.all().some(x => x.title === "Website Film"));
+    ok(undone && !/Undo Me Film/.test(fs.readFileSync(path.join(data, "library.json"), "utf8")), "Undo in the history takes the change back, and it stays undone");
     await pg.evaluate(() => { document.querySelector("#overlay").innerHTML = ""; });
     fs.writeFileSync(path.join(data, ".phone.json"), JSON.stringify({ version: "9.9.9", at: Date.now() }));
     await pg.reload(); await pg.waitForFunction(() => document.getElementById("behindbar") && __sagaWeb.paused(), null, { timeout: 15000 });

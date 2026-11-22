@@ -94,6 +94,11 @@ const epKey = (s, e) => `${s}:${e}`;
       for (const it of this.all()) { this._ix.ord.set(it, i++); this._index(it); }
       try { return fn(); } finally { this._ix = null; }
     }
+    withIndexKeep() {
+      const ix = { m: new Map(), ord: new Map() }, keep = this._ix; this._ix = ix;
+      let i = 0; for (const it of this.all()) { ix.ord.set(it, i++); this._index(it); }
+      this._ix = keep; this._fx = ix;
+    }
     _keys(o) {
       const k = [];
       if (o.mal) k.push(`mal|${o.type}|${o.mal}`);
@@ -115,6 +120,13 @@ const epKey = (s, e) => `${s}:${e}`;
       const clash = x => (o.imdb && x.imdb && x.imdb !== o.imdb) || (o.tmdb && x.tmdb && x.type === o.type && +x.tmdb !== +o.tmdb) || (o.mal && x.mal && x.type === o.type && +x.mal !== +o.mal);
       const test = x => (o.mal && x.mal === o.mal && x.type === o.type) || (o.imdb && x.imdb === o.imdb) || (o.tmdb && x.tmdb === o.tmdb && x.type === o.type) || (o.tvmaze && x.tvmaze === o.tvmaze) ||
         (x.type === o.type && norm(x.title) === n && n && (!y || !x.year || Math.abs(x.year - y) <= 1) && !clash(x));
+      // 0.8.1: outside imports too, look-ups through an index built once per moment (a screen asking about thousands of
+      // titles used to scan the whole library for each one); dropped as soon as the current task ends, and on add()
+      if (!this._ix && !this._noIx) {
+        if (!this._fx) { this._ix = null; this.withIndexKeep(); Promise.resolve().then(() => { this._fx = null; }); }
+        const saved = this._ix; this._ix = this._fx;
+        try { return this.find(o); } finally { this._ix = saved; }
+      }
       if (this._ix) {
         let best = null, bo = Infinity;
         const tmdbTyped = o.tmdb ? [`tmdb|movie|${o.tmdb}`, `tmdb|show|${o.tmdb}`] : [];
@@ -137,6 +149,7 @@ const epKey = (s, e) => `${s}:${e}`;
         this._index(ex);
         return { item: ex, existed: true };
       }
+      this._fx = null;
       const it = blank(Object.assign({}, o, { status: STATUSES.includes(status) ? status : (o.status || "watchlist") }));
       it.id = idFor(it);
       while (this.items[it.id]) it.id += "_";
@@ -234,8 +247,13 @@ const epKey = (s, e) => `${s}:${e}`;
     }
     // Everything watched with a date: films (each viewing), episodes, finished series runs.
     recent(limit = 20) {
-      const out = [];
-      for (const it of this.all()) {
+      // 0.8.1: only the titles that can reach the newest `limit` entries are expanded (it used to list and sort every
+      // day of every series ever watched just to show 16)
+      const last = it => { let m = ""; if (it.type === "movie") { for (const d of it.watches) if (d && String(d) > m) m = String(d); } else for (const k in it.eps) { const d = it.eps[k]; if (d && String(d) > m) m = String(d); } return m; };
+      const order = this.all().map(it => [it, last(it)]).filter(x => x[1]).sort((a, b) => b[1].localeCompare(a[1]));
+      let out = [];
+      for (const [it, lt] of order) {
+        if (out.length >= limit && lt < String(out[limit - 1].date)) break;
         if (it.type === "movie") it.watches.forEach((d, i) => out.push({ id: it.id, title: it.title, date: d, what: i ? `Watch ${i + 1}` : "", type: "movie", item: it }));
         else {
           const byDay = {};
@@ -246,8 +264,9 @@ const epKey = (s, e) => `${s}:${e}`;
             out.push({ id: it.id, title: it.title, date: d, type: "show", item: it, what: eps.length === 1 ? `S${a[0]} E${a[1]}` : `S${a[0]} E${a[1]} – S${z[0]} E${z[1]} (${eps.length})` });
           }
         }
+        out = out.filter(x => x.date).sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, Math.max(limit, 1));
       }
-      return out.filter(x => x.date).sort((a, b) => b.date.localeCompare(a.date)).slice(0, limit);
+      return out.filter(x => x.date).sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, limit);
     }
     counts() {
       const c = { all: 0, watchlist: 0, watching: 0, watched: 0, dropped: 0, movie: 0, show: 0, eps: 0, rewatches: 0 };

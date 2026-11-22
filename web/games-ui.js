@@ -64,7 +64,7 @@
       ${ui.view !== "stats" ? strip() : ""}
       ${ui.view === "canon" ? renderCanon() : ui.view === "stats" ? renderStats() : ui.view === "grid" ? `<div class="chips" style="margin-bottom:14px">${f.map(([k, l, n]) => `<button class="chip" data-action="gfilter" data-v="${k}" aria-pressed="${ui.f === k}">${l}${n != null ? ` <span class="muted">${n}</span>` : ""}</button>`).join("")}</div>
         ${list.length ? K.grid(list.slice(0, ui.lim).map(g => tileOf(g))) : `<p class="muted">Nothing here.</p>`}
-        ${list.length > ui.lim ? `<button class="btn block" style="margin-top:16px" data-action="gmore">Show more (${list.length - ui.lim})</button>` : ""}
+        ${list.length > ui.lim ? `<button class="btn block automore" style="margin-top:16px" data-action="gmore">Show more (${list.length - ui.lim})</button>` : ""}
         <p class="small muted" style="margin-top:16px">${c.all} games · ${c.done} finished · ${c.plays} playthroughs</p>` : renderMv()}`;
   }
   // a line of the main numbers at the top of Library and Franchises
@@ -148,8 +148,8 @@
     // twice in a row (two platforms, two games of one name) shows its platform and year.
     const rail = gs => { const n = new Map(); for (const g of gs) n.set(G.norm(g.title), (n.get(G.norm(g.title)) || 0) + 1);
       return K.rail(gs.map(g => tileOf(g, n.get(G.norm(g.title)) > 1 ? [g.platform, String(g.date || "").slice(0, 4)].filter(Boolean).join(" · ") : ""))); };
-    const LIM = 60;
-    return `<div class="chips" style="margin-bottom:10px">${chip("remake", "By newest version (remakes, remasters)")}${chip("date", "By original release")}${chip("size", "Biggest first")}</div>` + mvs.slice(0, ui.mvLim || 80).map(m => {
+    const LIM = 24, MVL = ui.mvLim || 12; // 0.8.1: fewer tiles at once (the page laid out thousands of posters); more as you scroll
+    return `<div class="chips" style="margin-bottom:10px">${chip("remake", "By newest version (remakes, remasters)")}${chip("date", "By original release")}${chip("size", "Biggest first")}</div>` + mvs.slice(0, MVL).map(m => {
       const isOpen = !!open[m.name] || (q && !G.norm(m.name).includes(q)), many = m.series.length > 1;
       const games = q && !G.norm(m.name).includes(q) ? m.all.filter(g => G.norm(g.title).includes(q) || G.norm(g.franchise).includes(q)) : m.all;
       return `<section>
@@ -158,7 +158,7 @@
       ${many ? `<div class="row" style="margin:-4px 0 8px"><button class="chip" data-action="gmvopen" data-mv="${esc(m.name)}" aria-pressed="${isOpen}">${isOpen ? "All in one row" : `Show its ${m.series.length} series`}</button></div>` : ""}
       ${isOpen && many ? m.series.map(sr => { const gs = sr.games.filter(g => games.includes(g)); return gs.length ? `<div class="small muted" style="margin:0 0 8px"><b>${esc(sr.name)}</b> · ${gs.filter(g => g.status === "done").length}/${gs.length}</div>${rail(gs)}` : ""; }).filter(Boolean).join('<div style="height:12px"></div>')
         : rail(games.slice(0, open["+" + m.name] ? 9999 : LIM)) + (games.length > LIM && !open["+" + m.name] ? `<button class="btn quiet small" data-action="gmvall" data-mv="${esc(m.name)}">Show all ${games.length}</button>` : "")}</section>`;
-    }).join("") + (mvs.length > (ui.mvLim || 80) ? `<button class="btn block" data-action="gmvmore">Show more</button>` : "") + (mvs.length ? "" : `<p class="muted">Nothing matches.</p>`);
+    }).join("") + (mvs.length > MVL ? `<button class="btn block automore" data-action="gmvmore">Show more</button>` : "") + (mvs.length ? "" : `<p class="muted">Nothing matches.</p>`);
   }
   function renderSearch() {
     const lim = ui.res || [];
@@ -316,10 +316,10 @@
       case "gcanonno": {
         const d = el.dataset; Saga.db.setNotCanon({ title: d.t, year: d.y ? parseInt(d.y, 10) : null, medium: "Video Game", imdb: d.i || null, franchise: d.f }, true); Saga.db.flush(); ui.cMemo = null;
         K.toast(`${d.t} won't count as canon. Undo in Settings.`); Saga.render(); return true; }
-      case "gmvsort": ui.mvSort = el.dataset.v; ui.mvLim = 80; Saga.render(); return true;
+      case "gmvsort": ui.mvSort = el.dataset.v; ui.mvLim = 12; Saga.render(); return true;
       case "gmvopen": { const o = ui.mvOpen || (ui.mvOpen = {}); o[el.dataset.mv] = !o[el.dataset.mv]; Saga.render(); return true; }
       case "gmvall": { const o = ui.mvOpen || (ui.mvOpen = {}); o["+" + el.dataset.mv] = true; Saga.render(); return true; }
-      case "gmvmore": ui.mvLim = (ui.mvLim || 80) + 80; Saga.render(); return true;
+      case "gmvmore": ui.mvLim = (ui.mvLim || 12) + 12; Saga.render(); return true;
       case "gmore": ui.lim += 120; Saga.render(); return true;
       case "gadd": ui.res = []; ui.sq = ""; Saga.render(); setTimeout(() => { const i = document.querySelector("[data-gsq]"); if (i) i.focus(); }, 30); return true;
       case "gsearch": { const i = document.querySelector("[data-gsq]"); ui.sq = i ? i.value : ui.sq; search(); return true; }

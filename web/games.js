@@ -140,10 +140,18 @@
         // just the multiverse's name goes by the series in its title (Dawn of War, Total War…); a series of one game joins "Other"
         const all = franchises.flatMap(f => f.games).sort((a, b) => dOf(a).localeCompare(dOf(b)) || (a.date || "9999").localeCompare(b.date || "9999"));
         const subs = new Map();
-        for (const g of all) { const k = words(g.franchise) && words(g.franchise) !== words(x.name) ? g.franchise : seriesStem(g.title, x.name); if (!subs.has(words(k))) subs.set(words(k), { name: k, games: [] }); subs.get(words(k)).games.push(g); }
+        const sk = t => words(t).replace(/^the /, ""); // "The Witcher" and "Witcher" are one series
+        for (const g of all) { const k = words(g.franchise) && sk(g.franchise) !== sk(x.name) ? g.franchise : seriesStem(g.title, x.name); if (!subs.has(sk(k))) subs.set(sk(k), { name: k, games: [] }); subs.get(sk(k)).games.push(g); }
+        // 0.8.1: one-game "series" are mostly main games with a subtitle (Tomb Raider: Legend): they join the main series
+        // named after the multiverse when its titles carry that name; otherwise "Other … games"
         let series = [...subs.values()], other = series.filter(s => s.games.length < 2);
         series = series.filter(s => s.games.length >= 2);
-        if (other.length) series.push({ name: series.length ? `Other ${x.name} games` : x.name, games: other.flatMap(s => s.games), other: true });
+        if (other.length) {
+          const mw = sk(x.name), main = series.find(s => sk(s.name) === mw);
+          const named = other.flatMap(s => s.games).filter(g => has(words(g.title), mw)).length >= other.length / 2;
+          if (main) { main.games.push(...other.flatMap(s => s.games)); main.games.sort((a, b) => dOf(a).localeCompare(dOf(b))); }
+          else series.push({ name: named || !series.length ? x.name : `Other ${x.name} games`, games: other.flatMap(s => s.games), other: !named });
+        }
         series.sort((a, b) => (a.other ? 1 : 0) - (b.other ? 1 : 0) || first(a.games).localeCompare(first(b.games)) || a.name.localeCompare(b.name));
         return { name: x.name, total: x.total, done: x.done, first: franchises.length ? first(all) : "9999", franchises, all, series };
       });
@@ -185,7 +193,12 @@
       const f = norm(g.franchise || g.multiverse);
       if (g.status === "done" && prev !== "done" && f && g.story !== false) {
         const t = today();
-        const list = this.visible().filter(x => norm(x.franchise || x.multiverse) === f && x.story !== false && (x.date || x === g))
+        // 0.8.1: within the series' own line when it has one (Dawn of War after Dawn of War, not the next Warhammer game)
+        const stemOf = x => { const mv = x.multiverse || x.franchise || ""; return words(x.franchise) && words(x.franchise) !== words(mv) ? words(x.franchise) : words(seriesStem(x.title, mv)).replace(/^the /, ""); };
+        let pool = this.visible().filter(x => norm(x.franchise || x.multiverse) === f && x.story !== false);
+        const sg = stemOf(g), same = pool.filter(x => x !== g && stemOf(x) === sg);
+        if (same.length) pool = same.concat([g]);
+        const list = pool.filter(x => x.date || x === g)
           .sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999") || a.title.localeCompare(b.title));
         const i = list.indexOf(g);
         const nx = list.slice(i + 1).find(x => x.status !== "done" && x.status !== "dropped" && x.status !== "playing" && x.date && x.date <= t);
@@ -363,9 +376,9 @@
   // name can be found inside any title, at word boundaries ("Total War: Warhammer III" contains "warhammer").
   const ROMAN = { ii: "2", iii: "3", iv: "4", vi: "6", vii: "7", viii: "8", ix: "9", xi: "11", xii: "12", xiii: "13" };
   const words = t => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[™®©]/g, "").replace(/&/g, " and ")
-    .replace(/['’]s\b/g, "").replace(/['’]/g, "").replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean).map(w => ROMAN[w] || w).join(" ");
+    .replace(/['’]/g, "").replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean).map(w => ROMAN[w] || w).join(" ");
   // a title as a loose key for spotting the same game added twice (brand prefixes and "The" dropped, numerals alike)
-  const looseKey = t => words(t).replace(/^(the|marvel|tom clancy|sid meier|disney|sega|nintendo|capcom|bandai namco)\s+/, "").replace(/\s+/g, "");
+  const looseKey = t => words(t).replace(/^(the|marvels?|tom clancys?|sid meiers?|disneys?|sega|nintendo|capcom|bandai namco)\s+/, "").replace(/\s+/g, "");
   const has = (text, name) => (" " + text + " ").includes(" " + name + " ");
   // franchise cells from a spreadsheet whose columns slid ("Red Dead Redemption Red Dead Redemption X" → "Red Dead Redemption")
   function cleanSeries(f) {
@@ -378,12 +391,19 @@
   const SUBVERSE = /^(40 000|40000|age of sigmar|the end times|fantasy battle|epic 40 000)$/;
   function seriesStem(title, mv) {
     const m = words(mv), parts = String(title || "").split(/\s*[:–—]\s+|\s+-\s+/).map(p => p.trim()).filter(Boolean);
-    const clean = p => String(p).replace(new RegExp("^" + String(mv || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*", "i"), "").trim();
-    let pick = null;
-    for (const p of parts) { let c = clean(p); const w = words(c); if (!w || SUBVERSE.test(w) || w === m) continue; if (c !== p && words(c).replace(/ (\d+)$/, "").split(" ").length < 2) c = p; pick = c; break; }
-    if (!pick) pick = parts[0] || String(title || "");
-    return pick.replace(/\s+(\d+|[IVX]{1,4})$/i, "").replace(/\s+(Remastered|Remake|HD)$/i, "").trim() || String(mv || "");
+    const esc = String(mv || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const noNum = t => String(t).replace(/\s+(\d+|[IVX]{1,4})$/i, "").replace(/\s+(Remastered|Remake|HD)$/i, "").trim();
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i], c = p.replace(new RegExp("^" + esc + "\\s*", "i"), "").trim(), w = words(c);
+      if (!w || SUBVERSE.test(w) || w === m || /^\d[\d ]*$/.test(w)) continue;
+      let pick = noNum(c);
+      // one word left ("Episode", "Origins", "Isolation"): keep what it belongs to ("Star Wars Episode", "Alien: Isolation")
+      if (words(pick).split(" ").length < 2) pick = c !== p ? noNum(p) : i > 0 ? `${parts[i - 1]}: ${pick}` : pick;
+      return pick || String(mv || "");
+    }
+    return noNum(parts[0] || String(title || "")) || String(mv || "");
   }
+
 
   // 0.7.8: a version's progress; finishing any version counts the whole game (the bundle) as finished
   function setVersionStatus(lib, g, i, st, date) {

@@ -86,7 +86,6 @@
     }
     { const ls = A.listsSection(); if (ls) parts.push(ls); }
     const nx = st.length ? A.C.upNext(st, 12) : [];
-    const fy = A.forYou();
     if (A.lib.all().some(x => x.status === "watchlist")) parts.push(`<section><button class="btn" data-action="librandom">${A.icon("sync")}Pick something from my watchlist</button></section>`);
     { const pk = A.picksToday(); if (pk.length >= 3) parts.push(`<section>${Kit.head("Picks for today", `<button class="btn quiet small" data-action="pickedit">${A.ui.pickEdit ? "Done" : "Not for me…"}</button>`)}${A.ui.pickEdit
       ? `<div class="listcard">${pk.map(x => `<div class="item"><div class="grow" style="min-width:0"><b class="ell">${A.esc(x.t)}</b><div class="small muted ell">${A.esc(x.why)}</div></div>${[["seen", "Seen it"], ["long", "Too long"], ["mood", "Not now"], ["no", "Not for me"]].map(([r, l]) => `<button class="btn quiet small" data-action="pickhide" data-k="${A.esc(x.k)}" data-v="${r}">${l}</button>`).join("")}</div>`).join("")}</div>`
@@ -94,10 +93,11 @@
     if (nx.length) parts.push(`<section>${Kit.head("Next in your canon", `<button class="btn quiet small" data-action="go" data-sec="missing">Canon</button>`)}${Kit.rail(nx.map(c => Kit.tile({ title: c.title, key: "canon:" + A.canonKey(c), img: A.cImg(c), kind: c.medium === "TV Series" ? "show" : c.medium === "Video Game" ? "game" : "movie", attrs: `data-action="sheet" data-sid="${A.sid(c, "canon")}"` }, c.title, `${c.franchise}${c.year ? " · " + c.year : ""}`)))}</section>`);
     const mvs = multiverseList().slice(0, 12);
     if (mvs.length) parts.push(`<section>${Kit.head("Your multiverses")}${Kit.rail(mvs.map(m => `<button class="poster wide" data-action="mvopen" data-mv="${A.esc(m.name)}" style="text-align:left"><span class="gen" style="--h:${Kit.hue(m.name)}"><b>${A.esc(m.name)}</b><small>${m.done} of ${m.total} · ${Math.round(100 * m.done / Math.max(1, m.total))}%</small></span><span class="bar"><i style="width:${Math.round(100 * m.done / Math.max(1, m.total))}%"></i></span></button>`), true)}</section>`);
-    const y = A.yearCounts(new Date().getFullYear());
+    if (!A.activityReady()) { A.warmActivity(); parts.push(`<section class="card" data-action="go" data-sec="year" style="cursor:pointer;min-height:132px"><div class="kicker">${new Date().getFullYear()} so far</div><p class="small muted" style="margin:10px 0 0">Your year in review ›</p></section>`); }
+    else { const y = A.yearCounts(new Date().getFullYear());
     parts.push(`<section class="card" data-action="go" data-sec="year" style="cursor:pointer"><div class="kicker">${y.year} so far</div>
       <div class="stat3" style="margin-top:10px"><div><b>${A.fmt(y.films + y.episodes)}</b><span>films and episodes</span></div><div><b>${A.fmt(y.games)}</b><span>games finished</span></div><div><b>${A.fmt(y.books)}</b><span>books read</span></div></div>
-      <p class="small muted" style="margin:10px 0 0">Your year in review ›</p></section>`);
+      <p class="small muted" style="margin:10px 0 0">Your year in review ›</p></section>`); }
     if (A.ui.report && /FAIL|PART/.test(A.ui.report)) parts.push(`<section class="card"><div class="row"><span class="grow small">Some sources didn't sync completely last time.</span><button class="btn small" data-action="go" data-sec="sync">See why</button></div></section>`);
     return parts.join("");
   }

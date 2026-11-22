@@ -4,9 +4,10 @@
    from the stores when asked. */
 (function (root) {
   "use strict";
+  const dayMemo = new Map(); // 0.8.1: one Date per day, not per episode
   const day = d => {
     if (!d) return "";
-    if (typeof d === "number") return new Date(d).toISOString().slice(0, 10);
+    if (typeof d === "number") { const k = Math.floor(d / 864e5); let v = dayMemo.get(k); if (!v) { v = new Date(k * 864e5).toISOString().slice(0, 10); dayMemo.set(k, v); } return v; }
     const s = String(d).slice(0, 10);
     return /^\d{4}-\d\d-\d\d$/.test(s) ? s : "";
   };

@@ -73,7 +73,7 @@
       const watches = st === "watched" ? [fin].concat(Array(times).fill("")) : [];
       const movie = /^movie$/i.test(a.series_type || "");
       return { type: movie ? "movie" : "show", title: a.series_title, year: null, anime: true, mal: +a.series_animedb_id || null, status: st, rating: +a.my_score || 0, watches,
-        epsWatched: movie ? 0 : +a.my_watched_episodes || 0, mal: +a.series_animedb_id || null, src: "myanimelist", notes: a.my_comments || "" };
+        epsWatched: movie ? 0 : +a.my_watched_episodes || 0, src: "myanimelist", notes: a.my_comments || "" };
     }).filter(x => x.title);
   }
   function malManga(text) {

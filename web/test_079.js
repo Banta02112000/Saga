@@ -56,4 +56,19 @@ const g1 = lib2.add({ title: "Old Stone Tablets" }, "backlog").game; Object.assi
 const n = G.repairFromList(lib2, [{ t: "Old Stone Tablets", od: "March 30, 1997", r: "Hero Quest", f: "Big Crossover", m: "" }]);
 assert.strictEqual(n, 1); assert.strictEqual(g1.franchise, "Hero Quest"); assert.strictEqual(g1.multiverse, "Big Crossover"); assert.ok(g1.fImported && !g1.fCanon);
 ok("your list's series put back, slid columns read right");
+// 0.8.1: one-game "series" join the main line; "The X" and "X" are one; single words keep what they belong to
+const lib3 = new G.Games(null); lib3.save = () => {};
+for (const [t, d] of [["Raider Tomb", "1996-01-01"], ["Raider Tomb: Legend", "2006-01-01"], ["Raider Tomb: Underworld", "2008-01-01"], ["Rise of the Raider Tomb", "2015-01-01"], ["Raider Tomb: Dusk Isle", "2001-01-01"], ["Raider Tomb: Dusk Isle 2", "2003-01-01"]]) { const g = lib3.add({ title: t }, "backlog").game; Object.assign(g, { date: d, franchise: "Raider Tomb", multiverse: "Raider Tomb", src: "list" }); }
+const rt = lib3.multiverses("date")[0];
+assert.deepStrictEqual(rt.series.map(x => `${x.name}:${x.games.length}`).sort(), ["Dusk Isle:2", "Raider Tomb:4"]);
+assert.strictEqual(G.seriesStem("Grimdark Wars Episode I: The Shadow", "Grimdark Wars"), "Grimdark Wars Episode");
+assert.strictEqual(G.seriesStem("Xeno: Isolation", "Xeno"), "Xeno: Isolation");
+ok("main line keeps its one-offs; one-word series keep their name");
+// Up next stays in the line you're playing
+const lib4 = new G.Games(null); lib4.save = () => {};
+const mk = (t, d) => { const g = lib4.add({ title: t }, "backlog").game; Object.assign(g, { date: d, franchise: "Grimdark", multiverse: "Grimdark", src: "list" }); return g; };
+const d1 = mk("Grimdark: Dawn Siege", "2004-01-01"); mk("Grimdark: Rat Swarm", "2005-01-01"); const d2 = mk("Grimdark: Dawn Siege II", "2009-01-01");
+const was = d1.status; G.setStatus(d1, "done"); const nx = lib4.statusChanged(d1, was);
+assert.strictEqual(nx && nx.id, d2.id, "next in Dawn Siege, not the next Grimdark game");
+ok("Up next follows the sub-series");
 console.log("TEST 079 PASSED");

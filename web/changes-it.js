@@ -2,6 +2,13 @@
    as CHANGES in app.js; a version missing here is shown in English with a note. */
 (function () {
   window.SAGA_CHANGES_IT = {
+    "0.8.1": [
+      "Più veloce sul telefono: con una libreria grande la Home si apre circa tre volte più in fretta (la scheda dell'anno arriva un attimo dopo), Canon mancante circa sette volte, Giochi › Franchise circa tre; gli elenchi lunghi caricano altro mentre scorri invece di disporre migliaia di locandine insieme; la copia settimanale parte dopo le prime schermate invece che durante.",
+      "Giochi › Franchise: un gioco unico nel suo genere entra nella serie principale (Tomb Raider: Legend è Tomb Raider, non una serie di un solo gioco); \"The Witcher\" e \"Witcher\", \"Assassin's Creed\" e \"Assassins Creed\" sono una serie sola; i nomi di una parola tengono ciò a cui appartengono (Star Wars Episode, Alien: Isolation).",
+      "Prossimo segue la linea che stai giocando: finire Dawn of War suggerisce il prossimo Dawn of War, non il prossimo gioco Warhammer.",
+      "Corretto: Annulla e Più vecchie nella cronologia delle modifiche non facevano nulla.",
+      "Italiano: tradotti i testi ancora in inglese in Home, Sincronizza › Fatto da sé, Musica, l'anno in breve e diverse impostazioni."
+    ],
     "0.8.0": [
       "Giochi › Franchise: una voce per multiverso. Ogni gioco che non viene dalla tua lista va dove dice il suo nome (Total War: Warhammer III, Space Marine II, Dawn of War… in Warhammer; Marvel's Spider-Man 2 e Miles Morales in Marvel › Spider-Man), invece di finire in una serie a sé per ogni ricerca canon. Tutti i suoi giochi stanno in una riga, per data d'uscita; Mostra le sue serie la apre nelle sottoserie (Dawn of War, Space Hulk, Total War…).",
       "Copie unite: lo stesso gioco aggiunto di nuovo da una ricerca canon, IMDb o Steam (Marvel's Spider-Man 2 e Spider-Man 2 dello stesso anno, II e 2) diventa uno solo, tenendo la voce della tua lista. Due giochi della tua lista con lo stesso nome (un'altra piattaforma) restano entrambi e mostrano piattaforma e anno.",
