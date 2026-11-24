@@ -738,3 +738,4 @@ P += [
 ]
 D.update({ "films": "film", "average": "media" })
 P += [(r"(Game|Film|Novel|Audio|Comic|Short story|Webcast|Video)\s+★\s+–", "$1 ★ –")]
+D.update({ "Standalone games": "Giochi singoli" })

@@ -3,7 +3,8 @@
 (function (root) {
   "use strict";
   const norm = t => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/&/g, "and").replace(/[™®©]/g, "").replace(/^(the|a|an)\s+/, "").replace(/[^a-z0-9]/g, "");
-  const same = (a, b) => { const x = norm(a), y = norm(b); return !!x && (x === y || (x.length > 5 && (x.startsWith(y) || y.startsWith(x)) && Math.abs(x.length - y.length) <= 3)); };
+  // 0.8.2: a sequel number is not a small difference ("Mega Man" is not "Mega Man 11", "Final Fantasy X" not "XV")
+  const same = (a, b) => { const x = norm(a), y = norm(b); if (!x) return false; if (x === y) return true; const [s, l] = x.length < y.length ? [x, y] : [y, x]; return s.length > 5 && l.startsWith(s) && l.length - s.length <= 3 && !/^(\d+|[ivx]+|hd|3d|2d)$/.test(l.slice(s.length)); };
   const yearOk = (a, b) => !a || !b || Math.abs(+a - +b) <= 1;
   async function J(http, url, headers) {
     const r = await http("GET", url, { headers: Object.assign({ Accept: "application/json" }, headers || {}) });

@@ -276,7 +276,7 @@
   function undoChange(...a) { return P_website().undoChange(...a); }
   function syncWithWebServer(...a) { return P_website().syncWithWebServer(...a); }
   const C = window.Core;
-  const VERSION = "0.8.1";
+  const VERSION = "0.8.2";
   let dataVer = 0; // 0.8.1: bumped on every change of your data (memos key on it)
   const AUTO_SYNC_HOURS = 12;
   Object.assign(C.PROFILES, (window.CANONSYNC_PRESET || {}).traktProfiles || {});
@@ -586,6 +586,9 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.8.2", ["Games › Franchises, grouped from your actual games: your games came from IMDb and the canon scans, not from a list with series, so 0.8.0 had nothing to go by. Now the multiverses' own names decide: a small group whose titles name a bigger multiverse joins it (Star Wars Outlaws, Star Wars Jedi, Vader Immortal → Star Wars; Total War: Warhammer → Warhammer), a family goes under its head (Dragon Ball Z, GT, FighterZ → Dragon Ball; Kirby's Dream Land → Kirby; Sonic Advance, Riders, Rivals → Sonic the Hedgehog), and series inside fold together (The Amazing Spider-Man, Spider-Man (2000), Marvel's Spider-Man → Spider-Man). About 770 entries become about 170, plus one Standalone games row at the end for games that are the only one of their kind. A copy of your data is kept first.",
+      "Wrong Steam links fixed: 28 Steam apps were each linked to two or three different games (Doom 1993 and Doom 2016, Mega Man and Mega Man 11, Final Fantasy X, XV and XVI…), so they showed the same cover and price, which looked like duplicates. Steam's own name and release date decide which game keeps it; the others lose the link, its cover and price. New links now need the same name (or the same game with Remastered, GOTY…), never a numbered sequel, and never an app another game already has. Covers found by name follow the same rule.",
+      "Placeholder series from imports (\"Unsorted\", \"-\") no longer make groups of their own, and accents read in the wrong encoding are put right (PokÃ©mon → Pokémon)."]],
     ["0.8.1", ["Faster on the phone: Home opens about three times quicker with a big library (the year card fills in a moment later), Missing canon about seven times quicker, Games › Franchises about three times; long lists load more as you scroll instead of laying out thousands of posters at once; the weekly backup copy runs after the first screens instead of during them.",
       "Games › Franchises: a game that's the only one of its kind joins the main series (Tomb Raider: Legend is Tomb Raider, not a series of one); \"The Witcher\" and \"Witcher\", \"Assassin's Creed\" and \"Assassins Creed\" are one series; one-word names keep what they belong to (Star Wars Episode, Alien: Isolation).",
       "Up next follows the line you're playing: finishing Dawn of War suggests the next Dawn of War, not the next Warhammer game.",
@@ -4909,6 +4912,27 @@
       games.save(); db.set("fix_gamelist_v1", "1"); db.flush(); changed("games");
       if (n || moved.length) { try { const a = JSON.parse(db.get("auto_log", "[]")); a.unshift({ at: Date.now(), k: "bundle", what: `Games sorted: ${fmt(n)} games of your list back in their series, ${fmt(moved.length)} others moved into your series or merged as copies` }); db.set("auto_log", JSON.stringify(a.slice(0, 60))); } catch (e) { /* log only */ } if (ui.sec === "games") render(); }
     } catch (e) { logError("fix", "games list: " + e.message); }
+  })();
+  // 0.8.2: games grouped again by the names of their multiverses (families under their head, small groups whose titles
+  // name a big one moved there, placeholder series tidied), then games sharing one Steam app sorted out with Steam's
+  // own name and date. Once, on the phone, a copy kept first.
+  (async () => {
+    try {
+      if (window.__sagaWeb || !games.games.length) return;
+      const logIt = what => { try { const a = JSON.parse(db.get("auto_log", "[]")); a.unshift({ at: Date.now(), k: "bundle", what }); db.set("auto_log", JSON.stringify(a.slice(0, 60))); } catch (e) { /* log only */ } };
+      if (!db.get("fix_gamegroups_v2")) {
+        await new Promise(r => setTimeout(r, navigator.webdriver ? 0 : 4000));
+        try { snapshot("before Saga regrouped your games (0.8.2)"); } catch (e) { return; }
+        const moved = games.resolveFranchises();
+        games.save(); db.set("fix_gamegroups_v2", "1"); db.flush(); changed("games");
+        if (moved.length) logIt(`Games regrouped: ${fmt(moved.length)} games moved into their multiverse, tidied or merged`);
+        if (ui.sec === "games") render();
+      }
+      if (navigator.webdriver || !Native.native || db.get("fix_steamshared_v1")) return;
+      const st = await GC.fixSharedSteam(games, Native.http);
+      db.set("fix_steamshared_v1", "1"); db.flush();
+      if (st.length) { changed("games"); logIt(`Steam links fixed: ${st.map(x => `${x.cleared.join(", ")} no longer linked to ${x.name}${x.kept ? ` (${x.kept})` : ""}`).join("; ")}`); if (ui.sec === "games") render(); }
+    } catch (e) { logError("fix", "games regroup: " + e.message); }
   })();
   try { const nz = fixImdbPageNoise(); if (nz && (nz.films || nz.games)) { render(); setTimeout(() => toast(`Removed ${fmt(nz.films)} title${nz.films === 1 ? "" : "s"}${nz.games ? ` and ${fmt(nz.games)} games` : ""} IMDb's page had wrongly marked watched. A copy from before is in Settings › Data.`), 1500); } } catch (e) { logError("fix", e.message); }
   try { const fx = fixListedWatched(); if (fx && (fx.films || fx.games)) { render(); setTimeout(() => toast(`${fmt(fx.films)} titles and ${fmt(fx.games)} games were only on a list, not rated: back to To watch / Wishlist`), 1200); } } catch (e) { logError("fixlisted", e.message); }

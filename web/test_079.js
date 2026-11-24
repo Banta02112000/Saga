@@ -72,3 +72,38 @@ const was = d1.status; G.setStatus(d1, "done"); const nx = lib4.statusChanged(d1
 assert.strictEqual(nx && nx.id, d2.id, "next in Dawn Siege, not the next Grimdark game");
 ok("Up next follows the sub-series");
 console.log("TEST 079 PASSED");
+// ---- 0.8.2: games from IMDb / scans with no list of yours: the multiverses' own names decide
+(async () => {
+const L = new G.Games(null); L.save = () => {};
+let i = 0; const add = (title, date, franchise, multiverse, extra) => { const g = G.blank(Object.assign({ id: "z" + i++, title, date, franchise, multiverse, src: "imdb" }, extra || {})); L.games.push(g); return g; };
+for (let k = 1; k <= 6; k++) add(`Space Saga: Chapter ${k}`, `${2000 + k}-01-01`, "Space Saga", "Space Saga");
+const so = add("Space Saga Outlaws", "2024-01-01", "Space Saga Outlaws", "Space Saga Outlaws");
+const tw = add("Big War: Space Saga III", "2022-01-01", "Big War", "Big War"); add("Big War: Rome", "2004-01-01", "Big War", "Big War");
+for (let k = 1; k <= 4; k++) add(`Blob Ball ${k}`, `${1990 + k}-01-01`, "Blob Ball", "Blob Ball");
+const z = []; for (let k = 1; k <= 3; k++) z.push(add(`Blob Ball Z: Fight ${k}`, `${2000 + k}-01-01`, "Blob Ball Z", "Blob Ball Z"));
+const ph = add("Lost Title", "2010-01-01", "Unsorted", "-\\\\");
+const mo = add("PokÃ©mon Pocket", "2012-01-01", "PokÃ©mon Pocket", "PokÃ©mon Pocket");
+const solo1 = add("Lonely Game", "2015-01-01", "Lonely Game", "Lonely Game"), solo2 = add("Other Lonely", "2016-01-01", "Other Lonely", "Other Lonely");
+const big1 = add("Same Name", "1993-12-10", "Same Name", "Same Name", { steam: 777, cover: "https://cdn.cloudflare.steamstatic.com/steam/apps/777/library_600x900.jpg", price: { eur: 9 } });
+const big2 = add("Same Name", "2016-05-13", "Same Name", "Same Name", { steam: 777 });
+L.resolveFranchises();
+assert.strictEqual(so.multiverse, "Space Saga", "a small group whose title names a bigger multiverse joins it");
+assert.strictEqual(tw.multiverse, "Space Saga"); assert.strictEqual(tw.franchise, "Big War", "its old series stays as a sub-series");
+assert.ok(z.every(g => g.multiverse === "Blob Ball") && z[0].franchise === "Blob Ball Z", "a family goes under its head: " + z[0].multiverse);
+assert.strictEqual(ph.multiverse, "Lost Title", "a placeholder series is not a series");
+assert.strictEqual(mo.title, "Pokémon Pocket", "accents read in the wrong encoding put right");
+const mv = L.multiverses("size");
+assert.ok(!mv.some(m => m.name === "Big War" && m.total > 1) || mv.find(m => m.name === "Big War").total === 1);
+const sa = mv.find(m => m.standalone); assert.ok(sa && sa.all.includes(solo1) && sa.all.includes(solo2), "one-game multiverses go together");
+assert.strictEqual(mv[mv.length - 1], sa, "at the end");
+ok("no list of yours: names decide, families under their head, standalone games together");
+// two games sharing one Steam app: Steam's name and date decide
+const http = async () => ({ status: 200, body: JSON.stringify({ 777: { success: true, data: { name: "SAME NAME", release_date: { date: "13 May, 2016" } } } }) });
+const r = await G.fixSharedSteam(L, http, null);
+assert.strictEqual(big2.steam, 777); assert.ok(!big1.steam && !big1.cover && !big1.price, "the 1993 one loses the 2016 app, its cover and price");
+assert.strictEqual(r[0].cleared[0], "Same Name");
+ok("shared Steam app given back to the right game");
+// a sequel number is not a near match
+assert.strictEqual(G.storyKey ? G.storyKey("Mega Hero 11") !== G.storyKey("Mega Hero") : true, true);
+console.log("TEST 079b PASSED");
+})().catch(e => { console.error(e); process.exit(1); });

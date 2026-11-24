@@ -122,10 +122,11 @@
     multiverses(order = "remake") {
       const m = new Map();
       for (const g of this.visible()) verDate(g); // 0.7.6: each game remembers its newest version's date
+      const mk = t => String(t || "").split(/\s+\/\s+/).map(p => words(p).replace(/^the /, "")).sort().join("/");
       for (const g of this.visible()) {
-        const mv = g.multiverse || g.franchise || "Other", fr = g.franchise || mv;
-        if (!m.has(mv)) m.set(mv, { name: mv, franchises: new Map(), total: 0, done: 0 });
-        const x = m.get(mv);
+        const mv = g.multiverse || g.franchise || "Other", fr = g.franchise || mv, key = mk(mv) || mv;
+        if (!m.has(key)) m.set(key, { name: mv, franchises: new Map(), total: 0, done: 0 });
+        const x = m.get(key);
         if (!x.franchises.has(fr)) x.franchises.set(fr, []);
         x.franchises.get(fr).push(g); x.total++; if (g.status === "done") x.done++;
       }
@@ -141,7 +142,17 @@
         const all = franchises.flatMap(f => f.games).sort((a, b) => dOf(a).localeCompare(dOf(b)) || (a.date || "9999").localeCompare(b.date || "9999"));
         const subs = new Map();
         const sk = t => words(t).replace(/^the /, ""); // "The Witcher" and "Witcher" are one series
-        for (const g of all) { const k = words(g.franchise) && sk(g.franchise) !== sk(x.name) ? g.franchise : seriesStem(g.title, x.name); if (!subs.has(sk(k))) subs.set(sk(k), { name: k, games: [] }); subs.get(sk(k)).games.push(g); }
+        // 0.8.2: a series named after the multiverse ("Warhammer 40,000", "Lego Batman") splits by its titles (Dawn of War,
+        // Space Marine…); a series whose name holds another series' name folds into it ("The Amazing Spider-Man",
+        // "Spider-Man (2000)", "Marvel's Spider-Man" → Spider-Man)
+        const mwx = sk(x.name);
+        const keyOf = g => { const f = sk(g.franchise); return f && f !== mwx && !has(f, mwx) ? g.franchise : seriesStem(g.title, x.name); };
+        const raw = new Map(); for (const g of all) { const k = keyOf(g); raw.set(sk(k), (raw.get(sk(k)) || 0) + 1); }
+        const fold = new Map(), keys = [...raw.keys()].filter(k => k.length >= 4 && k !== mwx).sort((a, b) => a.length - b.length);
+        for (const k of raw.keys()) { const into = keys.find(o => o !== k && o.length < k.length && has(k, o) && raw.get(o) >= 1 && (raw.get(o) + raw.get(k)) >= 2); if (into) fold.set(k, into); }
+        const root = k => { let r = k, n = 0; while (fold.has(r) && n++ < 5) r = fold.get(r); return r; };
+        for (const g of all) { const k0 = keyOf(g), k = root(sk(k0)); if (!subs.has(k)) subs.set(k, { name: k === sk(k0) ? k0 : null, games: [] }); const sb = subs.get(k); sb.games.push(g); if (!sb.name || (k === sk(k0) && k0.length < sb.name.length)) sb.name = k === sk(k0) ? k0 : sb.name; }
+        for (const sb of subs.values()) if (!sb.name) sb.name = sb.games.map(keyOf).sort((a, b) => a.length - b.length)[0];
         // 0.8.1: one-game "series" are mostly main games with a subtitle (Tomb Raider: Legend): they join the main series
         // named after the multiverse when its titles carry that name; otherwise "Other … games"
         let series = [...subs.values()], other = series.filter(s => s.games.length < 2);
@@ -155,7 +166,12 @@
         series.sort((a, b) => (a.other ? 1 : 0) - (b.other ? 1 : 0) || first(a.games).localeCompare(first(b.games)) || a.name.localeCompare(b.name));
         return { name: x.name, total: x.total, done: x.done, first: franchises.length ? first(all) : "9999", franchises, all, series };
       });
-      return out.sort((a, b) => order === "size" ? b.total - a.total || a.name.localeCompare(b.name) : a.first.localeCompare(b.first) || a.name.localeCompare(b.name));
+      const sorted = out.sort((a, b) => order === "size" ? b.total - a.total || a.name.localeCompare(b.name) : a.first.localeCompare(b.first) || a.name.localeCompare(b.name));
+      // 0.8.2: games that are the only one of their kind go together at the end (one row) instead of a banner each
+      const solo = sorted.filter(x => x.total === 1), groups = sorted.filter(x => x.total > 1);
+      if (solo.length < 2) return sorted;
+      const all = solo.flatMap(x => x.all).sort((a, b) => dOf(a).localeCompare(dOf(b)) || a.title.localeCompare(b.title));
+      return groups.concat([{ name: "Standalone games", standalone: true, total: all.length, done: all.filter(g => g.status === "done").length, first: "9999", franchises: solo.flatMap(x => x.franchises), all, series: [{ name: "Standalone games", games: all }] }]);
     }
     // 0.6.6: what you're playing, then the next game of each franchise you're going through (the first one, by release
     // date, after the last you finished or are playing: released, not finished or dropped), the franchises you played
@@ -314,8 +330,88 @@
         const f = hit.f && words(hit.f) !== words(hit.m) ? hit.f : own || hit.f || hit.m;
         if (f !== g.franchise || hit.m !== g.multiverse) { out.push(`${g.title}: ${hit.m}${f !== hit.m ? " › " + f : ""}`); g.franchise = f; g.multiverse = hit.m; g.fGuess = true; delete g.fCanon; }
       }
+      out.push(...this.tidyNames());
+      out.push(...this.familyMerge());
+      out.push(...this.joinBigger());
       out.push(...this.mergeCopies());
       if (out.length) { this._ver = (this._ver || 0) + 1; this.save(); }
+      return out;
+    }
+    // 0.8.2: when your games came from IMDb, the canon scans or Steam (no list of yours to go by), every multiverse's own
+    // name decides: a game in a small group whose title names a bigger multiverse moves there, its old series kept as
+    // a sub-series ("Star Wars Outlaws", "Star Wars Jedi", "Vader Immortal: A Star Wars VR Series" → Star Wars;
+    // "Total War: Warhammer III" → Warhammer › Total War). A title naming its own group too ("Lego Star Wars" in Lego)
+    // only moves to a group at least three times bigger. Your list's games (an import with series) never move.
+    // 0.8.2: series names left by imports as placeholders ("Unsorted", "-", "\\") or with a stray "\\", and titles whose
+    // accents were read in the wrong encoding ("PokÃ©mon") put right
+    tidyNames() {
+      const out = [], PH = /^\s*(unsorted|other|none|n\/?a|-|\?|\\|-\\|—)?\s*$/i;
+      const fix = t => { let x = String(t || ""); if (/Ã.|Â./.test(x)) { try { x = decodeURIComponent(escape(x)); } catch (e) { /* not that */ } } return x.replace(/\\+$/, "").trim(); };
+      for (const g of this.games) {
+        const t = fix(g.title), f0 = fix(g.franchise), m0 = fix(g.multiverse);
+        const f = PH.test(f0) ? "" : f0, m = PH.test(m0) ? "" : m0;
+        if (t !== g.title || f !== (g.franchise || "") || m !== (g.multiverse || "")) {
+          out.push(`${g.title}: tidied`); g.title = t || g.title; g.franchise = f; g.multiverse = m;
+          if (!f && !m) { const gs = franchiseGuess(g.title); g.franchise = gs; g.multiverse = gs; g.fGuess = true; }
+        }
+      }
+      return out;
+    }
+    // 0.8.2: a family of multiverses goes under its head: "Dragon Ball Z", "Dragon Ball GT", "Dragon Ball FighterZ" under
+    // Dragon Ball; "Kirby's Dream Land", "Kirby Star Allies" under Kirby; "Sonic Advance" under Sonic the Hedgehog;
+    // "Doom Eternal" under Doom. Only when a multiverse is named just that (no "Dead" family from Dead Space + Dead
+    // Rising). The old multiverse stays as a sub-series when it had 2+ games.
+    familyMerge() {
+      const out = [], vis = this.visible(), listed = g => !!(g.fImported || g.src === "list");
+      const fw = t => words(String(t || "").replace(/['’]s\b/g, "")); // Kirby's → kirby
+      const groups = new Map();
+      for (const g of vis) { const m = g.multiverse || g.franchise; if (!m) continue; const k = fw(m); if (!groups.has(k)) groups.set(k, { k, names: new Map(), games: [] }); const x = groups.get(k); x.games.push(g); x.names.set(m, (x.names.get(m) || 0) + 1); }
+      const heads = new Map();
+      for (const x of groups.values()) {
+        if (x.k.length < 4) continue;
+        if (!heads.has(x.k) || heads.get(x.k).games.length < x.games.length) heads.set(x.k, x);
+        const mm = x.k.match(/^(\S{4,}) the \S+$/); if (mm && (!heads.has(mm[1]) || heads.get(mm[1]).games.length < x.games.length)) heads.set(mm[1], x); // Sonic the Hedgehog → "sonic"
+      }
+      for (const x of groups.values()) {
+        const toks = x.k.split(" ");
+        let head = null;
+        for (let n = toks.length - 1; n >= 1 && !head; n--) { const h = heads.get(toks.slice(0, n).join(" ")); if (h && h !== x) head = h; }
+        if (!head || head.games.length < 3 || head.games.length * 3 < x.games.length) continue; // a real head, not a one-off "Kingdom"
+        const name = [...head.names.entries()].sort((a, b) => b[1] - a[1])[0][0];
+        for (const g of x.games) {
+          if (listed(g)) continue;
+          const old = g.multiverse || g.franchise;
+          g.franchise = x.games.length >= 2 ? old : (g.franchise && fw(g.franchise) !== x.k ? g.franchise : name);
+          g.multiverse = name; g.fGuess = true; delete g.fCanon;
+          out.push(`${g.title}: ${name}${g.franchise !== name ? " › " + g.franchise : ""}`);
+        }
+      }
+      return out;
+    }
+    joinBigger() {
+      const vis = this.visible(), size = new Map(), out = [];
+      const mvOf = g => g.multiverse || g.franchise || "";
+      for (const g of vis) { const m = mvOf(g); if (m) size.set(m, (size.get(m) || 0) + 1); }
+      const big = [...size.entries()].filter(([m, n]) => n >= 3 && words(m).length >= 4).map(([m, n]) => ({ m, n, w: words(m) })).sort((a, b) => b.w.length - a.w.length);
+      if (!big.length) return out;
+      const segs = t => String(t || "").split(/\s*[:–—]\s+|\s+-\s+/).map(words).filter(Boolean);
+      // a one-word name counts at the start of a title or after ":"; a big one (20+ games: Mario, Sonic, Kirby) anywhere
+      const names = (title, w, n) => w.includes(" ") || n >= 20 ? has(words(title), w) : segs(title).some(x => x === w || x.startsWith(w + " "));
+      const listed = g => !!(g.fImported || g.src === "list");
+      for (const g of vis) {
+        if (listed(g)) continue;
+        const own = mvOf(g), n0 = size.get(own) || 0;
+        const ownNamed = own && names(g.title, words(own), n0);
+        const hits = big.filter(b => b.m !== own && b.n > n0 && (!ownNamed || b.n >= 3 * n0) && names(g.title, b.w, b.n));
+        if (!hits.length) continue;
+        hits.sort((a, b) => b.n - a.n || b.w.length - a.w.length);
+        const to = hits[0].m;
+        // its old series stays as a sub-series only when it was a real one (2+ games); a one-game "series" was just its title
+        const f = g.franchise && words(g.franchise) !== words(to) && n0 >= 2 ? g.franchise : to;
+        out.push(`${g.title}: ${to}${f !== to ? " › " + f : ""}`);
+        size.set(own, n0 - 1); size.set(to, (size.get(to) || 0) + 1);
+        g.multiverse = to; g.franchise = f; g.fGuess = true; delete g.fCanon;
+      }
       return out;
     }
     // the same game twice (not two games of your list: those are different platforms on purpose)
@@ -329,7 +425,7 @@
         for (const extra of list.filter(g => !listed(g))) {
           if (!this.games.includes(extra)) continue;
           const y = +String(extra.date || "").slice(0, 4) || 0;
-          const keep = list.find(g => g !== extra && this.games.includes(g) && (!y || !g.date || Math.abs((+String(g.date).slice(0, 4)) - y) <= 1) && (!extra.platform || !g.platform || listed(g) || norm(g.platform) === norm(extra.platform)));
+          const keep = list.find(g => g !== extra && this.games.includes(g) && !(g.imdb && extra.imdb && g.imdb !== extra.imdb) && (!y || !g.date || Math.abs((+String(g.date).slice(0, 4)) - y) <= 1) && (!extra.platform || !g.platform || listed(g) || norm(g.platform) === norm(extra.platform)));
           if (!keep) continue;
           mergeGames(this, keep, extra, listed(keep)); // your list's entry stays the one shown
           out.push(`${extra.title}: merged with ${keep.title}`);
@@ -398,7 +494,7 @@
       if (!w || SUBVERSE.test(w) || w === m || /^\d[\d ]*$/.test(w)) continue;
       let pick = noNum(c);
       // one word left ("Episode", "Origins", "Isolation"): keep what it belongs to ("Star Wars Episode", "Alien: Isolation")
-      if (words(pick).split(" ").length < 2) pick = c !== p ? noNum(p) : i > 0 ? `${parts[i - 1]}: ${pick}` : pick;
+      if (words(pick).split(" ").length < 2 || /^[&+]|^and\s/i.test(pick)) pick = c !== p ? noNum(p) : i > 0 ? `${parts[i - 1]}: ${pick}` : pick; // "& Luigi" is "Mario & Luigi"
       return pick || String(mv || "");
     }
     return noNum(parts[0] || String(title || "")) || String(mv || "");
@@ -506,11 +602,49 @@
       let hits = [];
       try { hits = await steamSearch(http, g.title, lib.settings.region || "IT"); } catch (e) { if (/HTTP 429|HTTP 403/.test(e.message)) break; continue; }
       const n = norm(g.title);
-      const hit = hits.find(h => norm(h.title) === n) || hits.find(h => norm(h.title).startsWith(n) && norm(h.title).length - n.length <= 4);
-      if (hit) { g.steam = hit.steam; if (hit.price) g.price = hit.price; linked++; } else lib.meta.noSteam[g.id] = Date.now();
+      // 0.8.2: the same name, or the same story with an edition word (Remastered, GOTY…); never a numbered sequel, and
+      // never an app another of your games already has (two games named Doom, 1993 and 2016, got the same Steam app)
+      const sk = storyKey(g.title);
+      const hit = hits.find(h => norm(h.title) === n) || hits.find(h => storyKey(h.title) === sk);
+      const taken = hit && lib.games.some(x => x !== g && x.steam === hit.steam && storyKey(x.title) !== sk && !(x.versions || []).some(v => storyKey(v.title) === sk));
+      const twin = hit && lib.games.some(x => x !== g && x.steam === hit.steam);
+      if (hit && !taken && !twin) { g.steam = hit.steam; if (hit.price) g.price = hit.price; linked++; } else lib.meta.noSteam[g.id] = Date.now();
       if (gap) await sleep(gap);
     }
     return linked;
+  }
+  // 0.8.2: games that ended up with the same Steam app (Doom 1993 and Doom 2016; Mega Man and Mega Man 11): Steam's own
+  // name and release date say which one it is; the others lose the link, its price and its cover, and get a new link
+  // later only when one matches exactly. → [{ steam, kept, cleared: [titles] }]
+  async function fixSharedSteam(lib, http, sleep = ms => new Promise(r => setTimeout(r, ms))) {
+    const by = new Map(), out = [];
+    for (const g of lib.games) if (g.steam) { if (!by.has(g.steam)) by.set(g.steam, []); by.get(g.steam).push(g); }
+    const groups = [...by.entries()].filter(([, l]) => l.length > 1);
+    let reached = 0;
+    for (const [id, list] of groups) {
+      let name = "", year = 0;
+      try { const j = await getJson(http, `https://store.steampowered.com/api/appdetails?appids=${id}&filters=basic,release_date`); reached++; const d = j && j[id] && j[id].data; if (d) { name = d.name || ""; year = +String(isoOf(d.release_date && d.release_date.date) || "").slice(0, 4) || 0; } }
+      catch (e) { if (/HTTP 429|HTTP 403/.test(e.message)) break; continue; }
+      if (!name) continue;
+      const score = g => (norm(g.title) === norm(name) ? 3 : storyKey(g.title) === storyKey(name) ? 2 : 0) + (year && g.date && Math.abs(+g.date.slice(0, 4) - year) <= 1 ? 2 : 0) + (g.src === "Steam library" || g.steamMins ? 1 : 0);
+      const ranked = list.slice().sort((a, b) => score(b) - score(a) || String(b.date || "").localeCompare(String(a.date || "")));
+      const keep = score(ranked[0]) >= 2 ? ranked[0] : null; // none of them is Steam's game: all lose it
+      const cleared = [];
+      for (const g of list) {
+        if (g === keep) continue;
+        // a remaster of the kept game keeps it (Dark Souls Remastered and Dark Souls are one app)
+        if (keep && storyKey(g.title) === storyKey(keep.title) && norm(g.title) !== norm(keep.title)) continue;
+        delete g.steam; delete g.price; delete g.steamMins; delete g.steam2w;
+        if (g.cover && g.cover.includes(`/apps/${id}/`)) delete g.cover;
+        (lib.meta.noSteam = lib.meta.noSteam || {})[g.id] = Date.now();
+        cleared.push(g.title);
+      }
+      if (cleared.length) out.push({ steam: id, name, kept: keep ? keep.title : null, cleared });
+      if (sleep) await sleep(700);
+    }
+    if (groups.length && !reached) throw new Error("Steam couldn't be reached"); // tried again next start
+    if (out.length) lib.save();
+    return out;
   }
   // Prices for linked games you don't own yet, 50 per request. Returns games whose price dropped to an alert.
   async function steamPrices(lib, http, cc = "IT") {
@@ -1189,7 +1323,7 @@ ${rows.map(c => `${c.title} (${c.year || "?"}) — ${c.franchise || ""}`).join("
     return n;
   }
   const API = { repairFromList, cleanSeries, seriesStem, looseKey, words, setVersionStatus, versionDone, missingRows, canonCheckPrompt, applyCanonCheck, checkKey, storyKey, hasEdition, verDate, versionKind, MY_INFO_PROMPT, infoPromptOne, parseInfoText, imdbCheckMissing, timePlayed, hrs, sourceOf, wordDate, longDate, infoPrompt, parseInfo, applyInfo, steamPlay, backlogHours, findDuplicates, mergeGames, linkRemake, mergeInto, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
-    steamSearch, linkSteam, steamPrices, storePrices, steamDates, importRows, fromImdb, storeLinks, indexFor, yearOf, NA };
+    steamSearch, linkSteam, fixSharedSteam, steamPrices, storePrices, steamDates, importRows, fromImdb, storeLinks, indexFor, yearOf, NA };
   if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
   root.GamesCore = API;
 })(typeof window !== "undefined" ? window : globalThis);

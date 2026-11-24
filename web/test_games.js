@@ -38,7 +38,7 @@ const assert = (c, m) => { if (!c) throw new Error(m); };
   assert(!existed && o.franchise === "Outer Wilds" && lib.add({ title: "outer wilds" }).existed, "add and find");
   assert(G.franchiseGuess("Mass Effect 2") === "Mass Effect", "franchise guess");
   const mv = lib.multiverses();
-  assert(mv.some(m => m.name === "Hollow Knight" && m.total === 1), "multiverses");
+  assert(mv.some(m => m.name === "Hollow Knight" && m.total === 1) || mv.some(m => m.standalone && m.all.some(g => /^Hollow Knight/.test(g.title))), "multiverses (0.8.2: one-game ones in Standalone games)");
   assert(lib.nextUp().some(g => g === sk), "next up");
 
   // ---- Steam

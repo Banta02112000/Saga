@@ -1282,7 +1282,8 @@ window.BANTA_IT = {
 "They see titles, status and ratings (never notes, diary or keys) of the parts you pick for each of them. You see theirs if they share with you.": "Vedono titoli, stato e voti (mai note, diario o chiavi) delle parti che scegli per ognuno. Tu vedi i loro se condividono con te.",
 "Download a backup of your files (.zip)": "Scarica una copia dei tuoi file (.zip)",
 "films": "film",
-"average": "media"
+"average": "media",
+"Standalone games": "Giochi singoli"
 };
 window.BANTA_IT_PAT = [
 [

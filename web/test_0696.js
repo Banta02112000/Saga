@@ -17,6 +17,7 @@ const M = new G.Games();
 M.add({ title: "B Late", date: "2005-01-01", franchise: "Late", multiverse: "Late" }, "backlog");
 M.add({ title: "A Early", date: "1987-01-01", franchise: "Early", multiverse: "Early" }, "backlog");
 M.add({ title: "C Big 1", date: "1995-01-01", franchise: "Big", multiverse: "Big" }, "backlog"); M.add({ title: "C Big 2", date: "1996-01-01", franchise: "Big", multiverse: "Big" }, "backlog"); M.add({ title: "C Big 3", date: "1997-01-01", franchise: "Big", multiverse: "Big" }, "backlog");
+M.add({ title: "B Late 2", date: "2007-01-01", franchise: "Late", multiverse: "Late" }, "backlog"); M.add({ title: "A Early 2", date: "1988-01-01", franchise: "Early", multiverse: "Early" }, "backlog"); // 0.8.2: one-game ones go to Standalone games
 assert.deepStrictEqual(M.multiverses().map(m => m.name), ["Early", "Big", "Late"]);
 assert.deepStrictEqual(M.multiverses("size").map(m => m.name)[0], "Big");
 console.log("ok  Games › Franchises: oldest original release first, or biggest first");

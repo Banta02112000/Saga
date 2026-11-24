@@ -42,7 +42,7 @@
     const imgs = (o.imgs || []).filter(Boolean).slice(0, 5), h = hue(o.name), pct = Math.max(0, Math.min(100, Math.round(o.pct || 0)));
     return `<div class="mvbanner${o.small ? " small" : ""}" style="--h:${h}" ${o.attrs || ""}>
       <div class="mvbg">${imgs.length ? `<div class="bg" style="background-image:url('${esc(imgs[0])}')"></div>` : ""}</div>
-      <div class="mvfan">${imgs.length ? imgs.map((u, i) => `<img loading="lazy" decoding="async" alt="" src="${esc(u)}" style="--i:${i};--n:${imgs.length}">`).join("") : `<b class="mono">${esc(String(o.name || "?").replace(/^the\s+/i, "").slice(0, 1))}</b>`}</div>
+      <div class="mvfan">${imgs.length ? imgs.map((u, i) => `<img loading="lazy" decoding="async" alt="" src="${esc(u)}" style="--i:${i};--n:${imgs.length}" onerror="this.remove()">`).join("") : `<b class="mono">${esc(String(o.name || "?").replace(/^the\s+/i, "").slice(0, 1))}</b>`}</div>
       <div class="mvtext">${o.kicker ? `<div class="kicker">${esc(o.kicker)}</div>` : ""}<h2>${esc(o.name)}</h2>${o.line ? `<div class="small">${o.line}</div>` : ""}</div>
       ${o.pct != null ? `<div class="mvbar"><i style="width:${pct}%"></i></div>` : ""}${o.right ? `<div class="mvright">${o.right}</div>` : ""}</div>`;
   }
