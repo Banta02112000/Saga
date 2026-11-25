@@ -105,5 +105,26 @@ assert.strictEqual(r[0].cleared[0], "Same Name");
 ok("shared Steam app given back to the right game");
 // a sequel number is not a near match
 assert.strictEqual(G.storyKey ? G.storyKey("Mega Hero 11") !== G.storyKey("Mega Hero") : true, true);
+// ---- 0.8.3: your games list merged into games from IMDb: missing ones added, remakes joined to their original
+const M3 = new G.Games(null); M3.save = () => {};
+const im = G.blank({ id: "im1", title: "Night Mansion 2", date: "2019-01-25", src: "imdb", imdb: "tt9000001", status: "done", franchise: "Night Mansion 2", multiverse: "Night Mansion 2", plays: ["2019-03-01"] });
+const im2 = G.blank({ id: "im2", title: "Rocket Kid IV", date: "1993-10-29", src: "imdb", imdb: "tt9000002", franchise: "Rocket Kid", multiverse: "Rocket Kid" });
+const im3 = G.blank({ id: "im3", title: "Rocket Kid 4", date: "1992-01-01", src: "imdb", imdb: "tt9000003", franchise: "Rocket Kid", multiverse: "Rocket Kid" });
+M3.games.push(im, im2, im3);
+const rows = [
+  { t: "Night Mansion 2", od: "January 21, 1998", op: "PS1", rn: "Night Mansion 2", rd: "January 25, 2019", rp: "PS4", f: "Night Mansion", m: "Night Mansion" },
+  { t: "Night Mansion", od: "March 22, 1996", op: "PS1", rn: "Night Mansion", rd: "January 15, 2015", f: "Night Mansion", m: "Night Mansion" },
+  { t: "Old Stone Tablets", od: "March 30, 1997", op: "SFC", rn: "March 30, 1997 (Satellite)", f: "Hero Quest", m: "Big Crossover" },
+  { t: "Rocket Kid IV", od: "October 29, 1993", op: "GB", f: "Rocket Kid", m: "Big Crossover" },
+];
+const mr = G.mergeList(M3, rows);
+const nm2 = M3.games.find(g => g.title === "Night Mansion 2" && g.date === "1998-01-21");
+assert.ok(nm2 && !M3.games.includes(im), "the 2019 remake joined the 1998 original: " + JSON.stringify(mr));
+assert.strictEqual(nm2.status, "done", "finished remake finishes the bundle"); assert.ok(nm2.versions.some(v => v.date === "2019-01-25" && v.status === "done"));
+assert.ok(M3.games.some(g => g.title === "Night Mansion" && g.src === "list" && g.versions.length === 1), "a game you didn't have is added, with its remake listed");
+assert.ok(!(M3.games.find(g => g.title === "Old Stone Tablets").versions || []).length, "a date in the remake column is no remake");
+assert.strictEqual(im2.multiverse, "Big Crossover"); assert.strictEqual(im3.multiverse, "Rocket Kid", "Rocket Kid 4 (another IMDb page) is another game");
+const ord = M3.multiverses("date").map(m => m.name);
+ok("games list merged: added, remakes joined, original release dates");
 console.log("TEST 079b PASSED");
 })().catch(e => { console.error(e); process.exit(1); });

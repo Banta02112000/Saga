@@ -739,3 +739,5 @@ P += [
 D.update({ "films": "film", "average": "media" })
 P += [(r"(Game|Film|Novel|Audio|Comic|Short story|Webcast|Video)\s+★\s+–", "$1 ★ –")]
 D.update({ "Standalone games": "Giochi singoli" })
+D.update({ "Scroll left": "Scorri a sinistra", "Scroll right": "Scorri a destra" })
+P += [(rf"{N} episodes? · (.+) left", "$1 episodi · $2 rimanenti"), (rf"{N} episodes? left", "$1 episodi rimanenti"), (r"(.+) left$", "$1 rimanenti")]

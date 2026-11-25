@@ -85,7 +85,7 @@
     find(o) {
       const n = norm(o.title), y = o.year || (o.date ? +o.date.slice(0, 4) : null);
       const ok = g => (o.steam && g.steam === o.steam) || (o.imdb && g.imdb === o.imdb) ||
-        (norm(g.title) === n && n && (!y || !yearOf(g) || Math.abs(yearOf(g) - y) <= 1));
+        (norm(g.title) === n && n && !(o.imdb && g.imdb && o.imdb !== g.imdb) && (!y || !yearOf(g) || Math.abs(yearOf(g) - y) <= 1)); // 0.8.3: two IMDb pages are two games
       const ix = this._ix();
       const cand = [...(o.steam ? ix.s.get(o.steam) || [] : []), ...(o.imdb ? ix.i.get(o.imdb) || [] : []), ...(n ? ix.t.get(n) || [] : [])];
       let best = null, bp = Infinity;
@@ -1224,7 +1224,7 @@ ${rows.map(c => `${c.title} (${c.year || "?"}) — ${c.franchise || ""}`).join("
       if (!title) continue;
       if (lib.removed[norm(title)]) { skipped++; continue; }
       const od = get(r, "date"), date = sheetDate(od), platform = txt(r, "platform");
-      const rn = txt(r, "rn"), rd = sheetDate(get(r, "rd")), rp = txt(r, "rp");
+      const rn0 = txt(r, "rn"), rn = DATEISH.test(rn0) ? "" : rn0, rd = sheetDate(get(r, "rd")), rp = txt(r, "rp"); // 0.8.3: a date in the remake column is a slid column
       const fields = {
         title, date, dateText: date ? "" : (NA(od) ? "" : String(od)), platform,
         remake: rn && (rn !== title || (rd && rd !== date)) ? { title: rn, date: rd, platform: rp } : null,
@@ -1304,6 +1304,44 @@ ${rows.map(c => `${c.title} (${c.year || "?"}) — ${c.franchise || ""}`).join("
       games: lib.visible().map(g => ({ id: g.id, t: g.title, f: g.franchise, m: g.multiverse, done: g.status === "done", date: g.date })) };
   }
 
+  // 0.8.3: your games list (the spreadsheet) merged into what you have from IMDb, Steam and the canon scans: a game of
+  // the list you have takes its series, multiverse, platform and remake from it; one you don't have is added (Backlog);
+  // a remake the list names is joined to its original (one game, the remake under Versions, the original's date).
+  // A remake cell holding a date (a slid column) is not a remake. → { added, linked, remakes }
+  const DATEISH = /^(january|february|march|april|may|june|july|august|september|october|november|december)\b|^\d{1,4}([\/.-]|$)/i;
+  function mergeList(lib, mine) {
+    const rows = fromOld({}, mine);
+    let added = 0, linked = 0, remakes = 0;
+    const listed = g => !!(g.fImported || g.src === "list");
+    for (const r of rows) {
+      if (!r.title || lib.removed[norm(r.title)]) continue;
+      if (r.remake && (DATEISH.test(r.remake.title) || NA(r.remake.title))) r.remake = null;
+      if (!r.multiverse || !r.franchise) { const m = cleanSeries(r.multiverse || r.franchise); r.franchise = cleanSeries(r.franchise) || m; r.multiverse = m || r.franchise; }
+      const y = yearOf(r);
+      let g = lib.find({ title: r.title, date: r.date });
+      if (g && g.date && y && Math.abs(yearOf(g) - y) > 1) g = null;
+      if (!g) g = lib.games.find(x => !listed(x) && looseKey(x.title) === looseKey(r.title) && (!y || !yearOf(x) || Math.abs(yearOf(x) - y) <= 1)) || null;
+      // already a version of another game (the remake row of an original you have)
+      if (!g && lib.games.some(x => (x.versions || []).some(v => norm(v.title) === norm(r.title) && (!y || !v.date || Math.abs(+String(v.date).slice(0, 4) - y) <= 1)))) continue;
+      if (g) {
+        if (!listed(g) || g.franchise !== r.franchise || g.multiverse !== r.multiverse) { g.franchise = r.franchise || g.franchise; g.multiverse = r.multiverse || g.multiverse; g.fImported = true; delete g.fCanon; delete g.fGuess; linked++; }
+        for (const k of ["platform", "dateText", "hours", "hoursRemake", "owned"]) if (!g[k] && r[k]) g[k] = r[k];
+        if (!g.date && r.date) g.date = r.date;
+        if (r.remake && !(g.versions || []).some(v => norm(v.title) === norm(r.remake.title)) && norm(r.remake.title) !== norm(g.title)) {
+          g.remake = r.remake; g.versions = (g.versions || []).concat([Object.assign({ kind: versionKind(r.remake.title) }, r.remake)]).sort((a, b) => String(a.date || "9999").localeCompare(String(b.date || "9999"))); verDate(g); remakes++;
+        }
+      } else {
+        const n = Object.assign(r, { id: r.id || ("l" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7)), src: "list", fImported: true, status: r.status || "backlog", added: Date.now() });
+        if (n.remake) { n.versions = [Object.assign({ kind: versionKind(n.remake.title) }, n.remake)]; verDate(n); remakes++; }
+        lib.games.push(n); added++;
+      }
+    }
+    lib._fi = null; lib._ver = (lib._ver || 0) + 1;
+    // remakes you have as games of their own join their original
+    const joined = lib.bundleVersions(false).length;
+    lib.save();
+    return { added, linked, remakes, joined };
+  }
   // 0.7.9: puts the series and multiverse of your list back on its games (earlier versions could move them by a canon
   // scan), with slid spreadsheet columns read right; → how many changed
   function repairFromList(lib, mine) {
@@ -1322,7 +1360,7 @@ ${rows.map(c => `${c.title} (${c.year || "?"}) — ${c.franchise || ""}`).join("
     if (n) { lib._ver = (lib._ver || 0) + 1; lib.save(); }
     return n;
   }
-  const API = { repairFromList, cleanSeries, seriesStem, looseKey, words, setVersionStatus, versionDone, missingRows, canonCheckPrompt, applyCanonCheck, checkKey, storyKey, hasEdition, verDate, versionKind, MY_INFO_PROMPT, infoPromptOne, parseInfoText, imdbCheckMissing, timePlayed, hrs, sourceOf, wordDate, longDate, infoPrompt, parseInfo, applyInfo, steamPlay, backlogHours, findDuplicates, mergeGames, linkRemake, mergeInto, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
+  const API = { mergeList, repairFromList, cleanSeries, seriesStem, looseKey, words, setVersionStatus, versionDone, missingRows, canonCheckPrompt, applyCanonCheck, checkKey, storyKey, hasEdition, verDate, versionKind, MY_INFO_PROMPT, infoPromptOne, parseInfoText, imdbCheckMissing, timePlayed, hrs, sourceOf, wordDate, longDate, infoPrompt, parseInfo, applyInfo, steamPlay, backlogHours, findDuplicates, mergeGames, linkRemake, mergeInto, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
     steamSearch, linkSteam, fixSharedSteam, steamPrices, storePrices, steamDates, importRows, fromImdb, storeLinks, indexFor, yearOf, NA };
   if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
   root.GamesCore = API;

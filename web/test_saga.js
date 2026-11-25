@@ -292,7 +292,7 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
     await A(() => __app.go("home")); await pg.screenshot({ path: `${OUT}/s-light-home.png` });
     await A(() => { __app.setLook("saga_theme", ""); __app.setLook("saga_accent", ""); });
     const wn = await A(() => { __app.db.set("seen_version", "5.4"); __app.whatsNew(false); const t = document.querySelector("#overlay").textContent; window.Saga.close(); return { t: /What's new/.test(t) && /0\.5\.4\.2/.test(t) && /5\.4\.1/.test(t), seen: __app.db.get("seen_version") }; });
-    ok(wn.t && wn.seen === "0.8.2", "what's new after an update: " + JSON.stringify(wn));
+    ok(wn.t && wn.seen === "0.8.3", "what's new after an update: " + JSON.stringify(wn));
     ok(await A(() => { __app.whatsNew(false); return !document.querySelector("#overlay .whatsnew"); }), "what's new shows only once");
     const dw = await A(() => { const tl = Kit.mods.timeline; __app.go("timeline"); const k0 = document.querySelector('[data-action="tlopen"]').dataset.k;
       tl.openStory(k0); document.querySelector('#overlay [data-action="tladd"]').click();
@@ -962,6 +962,15 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   await pg.setViewportSize({ width: 1500, height: 900 });
   const sp = await A(() => { __app.ui.setGroup = ""; __app.go("settings"); return { two: !!document.querySelector(".setpage.two .setnav") && !!document.querySelector(".setbody h2"), cur: (document.querySelector('.setrow[aria-current="true"]') || {}).textContent || "" }; });
   ok(sp.two && /Accounts/.test(sp.cur), "website settings: two panes, first group open: " + JSON.stringify(sp));
+  // 0.8.3: the × beside a title on a big screen closes it (its icon used to swallow the tap)
+  await A(() => { __app.go("library"); const it = __app.lib.all()[0]; __app.openLib(it.id); });
+  await pg.waitForSelector(".sideclose", { timeout: 5000 });
+  await pg.click(".sideclose svg", { force: true });
+  ok(await A(() => !document.querySelector("#overlay").innerHTML), "the × closes the title beside the list");
+  // 0.8.3: a sideways row scrolls with the mouse wheel
+  const wh = await A(() => { __app.go("home"); const r = [...document.querySelectorAll("#view .rail")].find(x => x.scrollWidth > x.clientWidth + 4); if (!r) return "no row"; r.scrollLeft = 0; r.scrollIntoView({ block: "center" }); const b = r.getBoundingClientRect(); return [b.left + 30, b.top + 30]; });
+  if (Array.isArray(wh)) { await pg.mouse.move(wh[0], wh[1]); await pg.mouse.wheel(0, 300); await pg.waitForTimeout(200);
+    ok(await A(() => [...document.querySelectorAll("#view .rail")].some(x => x.scrollLeft > 0)), "the wheel scrolls a row sideways"); }
   const pview = await A(() => { __app.viewPoster("https://image.tmdb.org/t/p/w342/x.jpg", "X"); const v = document.querySelector(".postview img"); const src = v && v.getAttribute("src"); document.querySelector(".postview").click(); return { src, gone: !document.querySelector(".postview") }; });
   ok(/\/original\//.test(pview.src) && pview.gone, "poster viewer opens the full size and closes: " + JSON.stringify(pview));
   // 0.7.9: copy-and-paste prompts for everything: with the switch on, game details ask you instead of an API

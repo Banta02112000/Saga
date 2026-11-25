@@ -276,7 +276,7 @@
   function undoChange(...a) { return P_website().undoChange(...a); }
   function syncWithWebServer(...a) { return P_website().syncWithWebServer(...a); }
   const C = window.Core;
-  const VERSION = "0.8.2";
+  const VERSION = "0.8.3";
   let dataVer = 0; // 0.8.1: bumped on every change of your data (memos key on it)
   const AUTO_SYNC_HOURS = 12;
   Object.assign(C.PROFILES, (window.CANONSYNC_PRESET || {}).traktProfiles || {});
@@ -586,6 +586,11 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.8.3", ["Your games list (the spreadsheet) merged in, once, on the phone (a copy kept first): the games of your list you didn't have (about 300) are added (Backlog), the games you have take your list's series and multiverse, and remakes, remasters and re-releases are listed under their original with their own status. A remake you had as a game of its own (Resident Evil 2 from 2019, Final Fantasy VII Remake…) joins its original, so By original release sorts by the original's date. Sync › Done by itself says how many.",
+      "Importing your spreadsheet again does the same joining, and a date in the remake column (a slid row) is no longer taken for a remake.",
+      "Time left on series you're watching: episodes and hours still to watch, from each episode's length (the next episode box, Up next and the series rows).",
+      "Website: the × beside an open title closes it (the tap landed on its icon and was lost), and rows that scroll sideways work with a mouse: the wheel scrolls them, you can drag them, and arrows show at their sides.",
+      "Fixed: two games with the same name a year apart and different IMDb pages (Mega Man IV and Mega Man 4) were taken for one; IMDb sync brings back the one that went missing."]],
     ["0.8.2", ["Games › Franchises, grouped from your actual games: your games came from IMDb and the canon scans, not from a list with series, so 0.8.0 had nothing to go by. Now the multiverses' own names decide: a small group whose titles name a bigger multiverse joins it (Star Wars Outlaws, Star Wars Jedi, Vader Immortal → Star Wars; Total War: Warhammer → Warhammer), a family goes under its head (Dragon Ball Z, GT, FighterZ → Dragon Ball; Kirby's Dream Land → Kirby; Sonic Advance, Riders, Rivals → Sonic the Hedgehog), and series inside fold together (The Amazing Spider-Man, Spider-Man (2000), Marvel's Spider-Man → Spider-Man). About 770 entries become about 170, plus one Standalone games row at the end for games that are the only one of their kind. A copy of your data is kept first.",
       "Wrong Steam links fixed: 28 Steam apps were each linked to two or three different games (Doom 1993 and Doom 2016, Mega Man and Mega Man 11, Final Fantasy X, XV and XVI…), so they showed the same cover and price, which looked like duplicates. Steam's own name and release date decide which game keeps it; the others lose the link, its cover and price. New links now need the same name (or the same game with Remastered, GOTY…), never a numbered sequel, and never an app another game already has. Covers found by name follow the same rule.",
       "Placeholder series from imports (\"Unsorted\", \"-\") no longer make groups of their own, and accents read in the wrong encoding are put right (PokÃ©mon → Pokémon)."]],
@@ -1758,7 +1763,7 @@
     const mix = a => a.map(x => [rnd(x.k), x]).sort((p, q) => p[0] - q[0]).map(p => p[1]); // the day's order, one hash each
     const lists = [];
     lists.push(mix(lib.all().filter(x => x.type === "show" && x.status === "watching" && x.epl).map(x => ({ x, n: lib.nextEp(x) })).filter(o => o.n && !o.n.upcoming && o.n.left <= 3)
-      .map(o => ({ k: "lib:" + o.x.id, t: o.x.title, img: o.x.poster, kind: "show", attrs: `data-action="libopen" data-id="${esc(o.x.id)}"`, why: `${o.n.left} episode${o.n.left === 1 ? "" : "s"} left` }))));
+      .map(o => ({ k: "lib:" + o.x.id, t: o.x.title, img: o.x.poster, kind: "show", attrs: `data-action="libopen" data-id="${esc(o.x.id)}"`, why: leftTxt(o.x) || `${o.n.left} episode${o.n.left === 1 ? "" : "s"} left` }))));
     lists.push(forYou(8).map(o => ({ k: "lib:" + o.it.id, t: o.it.title, img: o.it.poster, kind: o.it.type, attrs: `data-action="libopen" data-id="${esc(o.it.id)}"`, why: `You rate ${o.why} highly${o.it.runtime ? ` · ${o.it.runtime} min` : ""}` })));
     lists.push(mix(lib.all().filter(x => x.type === "movie" && x.status === "watchlist" && x.runtime && x.runtime < 100 && !isFinished(x))
       .map(x => ({ k: "lib:" + x.id, t: x.title, img: x.poster, kind: "movie", attrs: `data-action="libopen" data-id="${esc(x.id)}"`, why: `Short: ${x.runtime} min` }))));
@@ -2309,8 +2314,10 @@
       try { d = detectFile(f); } catch (e) { lines.push(`${f.name}: ${e.message}`); continue; }
       if (d.target === "gamesheet") {
         if (!feat("games")) { lines.push(`${f.name}: switch the Games tab on in Features first`); continue; }
-        const gr = GC.fromSheet(games, d.sheet); games.save(); changed("games");
-        lines.push(`${f.name}: ${fmt(gr.added)} games added, ${fmt(gr.updated)} updated, ${fmt(gr.same)} unchanged${gr.skipped ? `, ${fmt(gr.skipped)} you had removed left out` : ""}`);
+        const gr = GC.fromSheet(games, d.sheet);
+        const bj = games.bundleVersions(false).length; // 0.8.3: remakes you have as games of their own join the original the list names
+        games.save(); changed("games");
+        lines.push(`${f.name}: ${fmt(gr.added)} games added, ${fmt(gr.updated)} updated, ${fmt(gr.same)} unchanged${bj ? `, ${fmt(bj)} remakes joined to their original` : ""}${gr.skipped ? `, ${fmt(gr.skipped)} you had removed left out` : ""}`);
         continue;
       }
       if (d.target === "watch") {
@@ -2864,7 +2871,7 @@
   }
   function libRow(it, opts = {}) {
     const n = it.type === "show" && it.status !== "watched" && !opts.noNext ? lib.nextEp(it) : null;
-    const nline = n ? (n.upcoming ? (n.date ? `Next: S${n.s} E${n.e} on ${esc(shortDay(n.date))}` : `S${n.s} E${n.e} not out yet`) : `Next: S${n.s} E${n.e}${n.left > 1 ? ` · ${n.left} to watch` : ""}`) : "";
+    const nline = n ? (n.upcoming ? (n.date ? `Next: S${n.s} E${n.e} on ${esc(shortDay(n.date))}` : `S${n.s} E${n.e} not out yet`) : `Next: S${n.s} E${n.e}${n.left > 1 ? ` · ${n.left} to watch` : ""}${(() => { const tl = lib.timeLeft(it); return tl && tl.mins ? ` · ${lenTxt(tl.mins)} left` : ""; })()}`) : "";
     return `<div class="item" data-action="libopen" data-id="${esc(it.id)}">${libThumb(it)}
       <div class="grow body"><div class="ttl"><b>${esc(it.title)}</b></div>
         <div class="sub">${typeTag(it)}<span class="muted ellipsis">${opts.sub || libSub(it)}</span></div>
@@ -3190,6 +3197,8 @@
   }
   // 0.6.9.9: a length as "1 h 57 min" / "45 min"
   const lenTxt = m => (!m ? "" : m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ""}` : `${m} min`);
+  // 0.8.3: "12 episodes · 9 h 40 min left" for a series you're on
+  const leftTxt = it => { const tl = lib.timeLeft(it); if (!tl || !tl.eps) return ""; return `${fmt(tl.eps)} episode${tl.eps === 1 ? "" : "s"}${tl.mins ? ` · ${lenTxt(tl.mins)}` : ""} left`; };
   // 0.6.9.9: each episode's guest cast, asked of TMDB a season at a time when you open that season (kept for the session)
   const seasonCast = new Map();
   function epCastHtml(it, s, e) {
@@ -3247,7 +3256,7 @@
       <div class="row"><span class="small muted grow">Your rating</span>${stars(it.rating)}</div>
       <div class="seg2" style="grid-template-columns:repeat(5,1fr);margin:10px 0">${L.STATUSES.map(s => `<button data-action="libst" data-v="${s}" aria-pressed="${it.status === s}">${LST[s]}</button>`).join("")}</div>
       ${n ? `<div class="nextbox"><div class="grow"><div class="kicker">${n.upcoming ? "Next episode airs" : "Next episode"}</div><b>S${n.s} E${n.e}${n.name && !/^episode \d+$/i.test(n.name) ? ` · ${esc(n.name)}` : ""}</b>
-          <div class="small muted">${n.upcoming ? (n.date ? esc(shortDay(n.date)) : "date not announced") : `${n.left} aired episode${n.left === 1 ? "" : "s"} to watch`}</div></div>
+          <div class="small muted">${n.upcoming ? (n.date ? esc(shortDay(n.date)) : "date not announced") : `${n.left} aired episode${n.left === 1 ? "" : "s"} to watch${(() => { const tl = lib.timeLeft(it); return tl && tl.mins ? ` · ${lenTxt(tl.mins)} left` : ""; })()}`}</div></div>
           ${n.upcoming ? "" : `<button class="btn primary" data-action="libep" data-s="${n.s}" data-e="${n.e}">${icon("check")}Watched</button>`}</div>` : ""}
       <h4>${show ? "Full runs" : "Watch log"} <span class="muted small">${it.watches.length ? `· ${it.watches.length}×` : ""}</span></h4>
       ${log || `<p class="small muted">${show ? "Finishing every episode logs a run. Rewatching? Start a rewatch below." : "Not watched yet."}</p>`}
@@ -3344,7 +3353,7 @@
   }
   function nextEpRow(x) {
     if (x.trakt) return cwRow(x);
-    return libRow(x.it, { noNext: true, sub: `S${x.s} E${x.e}${x.name && !/^episode \d+$/i.test(x.name) ? ` · ${esc(x.name)}` : ""}${x.left > 1 ? ` · ${x.left} to watch` : ""}`,
+    return libRow(x.it, { noNext: true, sub: `S${x.s} E${x.e}${x.name && !/^episode \d+$/i.test(x.name) ? ` · ${esc(x.name)}` : ""}${x.left > 1 ? ` · ${x.left} to watch` : ""}${(() => { const tl = lib.timeLeft(x.it); return tl && tl.mins ? ` · ${lenTxt(tl.mins)} left` : ""; })()}`,
       trail: `<button class="seen" data-action="libnext" data-id="${esc(x.it.id)}" data-s="${x.s}" data-e="${x.e}" aria-label="Mark S${x.s} E${x.e} watched">${icon("check")}</button>` });
   }
   // the latest things you finished anywhere: films, episodes, games, books
@@ -4298,6 +4307,30 @@
   // live number next to a slider (inline handlers are blocked by the content security policy)
   document.addEventListener("input", e => { const el = e.target; if (el && el.dataset && el.dataset.setting === "widget_alpha") { const v = document.getElementById("walphaV"); if (v) v.textContent = el.value + "%"; } });
 
+  // 0.8.3: rows that scroll sideways (poster rows, chips) work with a mouse too: the wheel scrolls them, you can drag
+  // them, and arrows show at the sides while the pointer is over one (only with a mouse: touch already swipes)
+  if (matchMedia("(pointer: fine)").matches) {
+    const ROW = ".rail, .chips, .hscroll";
+    const canX = r => r && r.scrollWidth > r.clientWidth + 4;
+    addEventListener("wheel", e => {
+      const r = e.target.closest && e.target.closest(ROW); if (!canX(r) || e.ctrlKey) return;
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return; // a trackpad already scrolls sideways
+      const max = r.scrollWidth - r.clientWidth, d = e.deltaY * (e.deltaMode === 1 ? 32 : 1);
+      if ((d < 0 && r.scrollLeft <= 0) || (d > 0 && r.scrollLeft >= max - 1)) return; // at the end: the page scrolls on
+      r.scrollLeft += d; e.preventDefault();
+    }, { passive: false });
+    let drag = null;
+    addEventListener("pointerdown", e => { if (e.pointerType !== "mouse" || e.button !== 0) return; const r = e.target.closest && e.target.closest(ROW); if (!canX(r)) return; drag = { r, x: e.clientX, left: r.scrollLeft, moved: false }; }, true);
+    addEventListener("pointermove", e => { if (!drag) return; const dx = e.clientX - drag.x; if (!drag.moved && Math.abs(dx) < 6) return; drag.moved = true; drag.r.style.scrollSnapType = "none"; drag.r.scrollLeft = drag.left - dx; drag.r.classList.add("dragging"); }, true);
+    addEventListener("pointerup", () => { if (!drag) return; const d = drag; drag = null; d.r.style.scrollSnapType = ""; d.r.classList.remove("dragging"); if (d.moved) { const stop = ev => { ev.stopPropagation(); ev.preventDefault(); }; addEventListener("click", stop, { capture: true, once: true }); setTimeout(() => removeEventListener("click", stop, true), 50); } }, true);
+    // arrows
+    const arrows = document.createElement("div"); arrows.className = "rowarrows"; arrows.innerHTML = `<button class="iconbtn" data-dir="-1" aria-label="Scroll left">‹</button><button class="iconbtn" data-dir="1" aria-label="Scroll right">›</button>`;
+    let cur = null;
+    const place = r => { if (!canX(r)) { arrows.remove(); cur = null; return; } cur = r; const b = r.getBoundingClientRect(); arrows.style.cssText = `top:${b.top + b.height / 2 - 20}px;left:${b.left}px;width:${b.width}px`; arrows.children[0].hidden = r.scrollLeft <= 2; arrows.children[1].hidden = r.scrollLeft >= r.scrollWidth - r.clientWidth - 2; if (!arrows.isConnected) document.body.appendChild(arrows); };
+    addEventListener("pointerover", e => { if (e.pointerType !== "mouse") return; const r = e.target.closest && e.target.closest(ROW); if (r && r.matches(".rail")) place(r); else if (!(e.target.closest && e.target.closest(".rowarrows"))) { arrows.remove(); cur = null; } }, true);
+    addEventListener("scroll", e => { if (cur && (e.target === cur)) place(cur); else if (cur) arrows.remove(), cur = null; }, true);
+    arrows.addEventListener("click", e => { const b = e.target.closest("button"); if (!b || !cur) return; e.stopPropagation(); cur.scrollBy({ left: +b.dataset.dir * cur.clientWidth * 0.8, behavior: "smooth" }); });
+  }
   // 0.8.1: long lists grow by themselves: a "Show more" marked automore is pressed when you scroll near it
   { let amT = 0; const am = () => { amT = 0; const b = document.querySelector("#view .automore"); if (!b || b.disabled || $("#overlay").innerHTML) return; const r = b.getBoundingClientRect(); if (r.top < innerHeight + 600 && r.bottom > 0) b.click(); };
     addEventListener("scroll", () => { if (!amT) amT = setTimeout(am, 120); }, { passive: true, capture: true }); }
@@ -4327,7 +4360,8 @@
     if (!el) return;
     lastTap = Date.now();
     const a = el.dataset.action;
-    if (a === "dismiss") { if (e.target === el) closeOverlay(); return; }
+    // the scrim closes only when tapped itself; a Close button (the × beside a title on a big screen, Cancel) always closes
+    if (a === "dismiss") { if (e.target === el || el.tagName === "BUTTON") closeOverlay(); return; }
     if (a.startsWith("lib") && libAct(a, el)) { if (a === "libseasonopen") return; e.preventDefault(); return; }
     if ((a.startsWith("mlist") || a.startsWith("mrule")) && myListAct(a, el)) { e.preventDefault(); return; }
     if (a === "imdbfull") { e.preventDefault(); doSync(false, true); return; }
@@ -4927,6 +4961,18 @@
         games.save(); db.set("fix_gamegroups_v2", "1"); db.flush(); changed("games");
         if (moved.length) logIt(`Games regrouped: ${fmt(moved.length)} games moved into their multiverse, tidied or merged`);
         if (ui.sec === "games") render();
+      }
+      // 0.8.3: your games list (the spreadsheet that ships with your app) merged in: games you didn't have yet, the
+      // series and multiverse your list gives, and remakes joined to their originals
+      if (!db.get("fix_mergelist_v1") && (!navigator.webdriver || window.__wantMerge)) {
+        const okLoad = window.GC_MINE ? true : await loadScript("gc-mine.js");
+        if (okLoad && window.GC_MINE) {
+          try { snapshot("before Saga merged your games list (0.8.3)"); } catch (e) { return; }
+          const r = GC.mergeList(games, window.GC_MINE); games.resolveFranchises(); games.save();
+          logIt(`Your games list merged: ${fmt(r.added)} games added, ${fmt(r.linked)} given your list's series, ${fmt(r.remakes)} remakes and remasters listed, ${fmt(r.joined)} joined to their original`);
+          changed("games"); if (ui.sec === "games") render();
+        }
+        db.set("fix_mergelist_v1", "1"); db.flush();
       }
       if (navigator.webdriver || !Native.native || db.get("fix_steamshared_v1")) return;
       const st = await GC.fixSharedSteam(games, Native.http);

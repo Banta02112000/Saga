@@ -1283,7 +1283,9 @@ window.BANTA_IT = {
 "Download a backup of your files (.zip)": "Scarica una copia dei tuoi file (.zip)",
 "films": "film",
 "average": "media",
-"Standalone games": "Giochi singoli"
+"Standalone games": "Giochi singoli",
+"Scroll left": "Scorri a sinistra",
+"Scroll right": "Scorri a destra"
 };
 window.BANTA_IT_PAT = [
 [
@@ -2365,5 +2367,17 @@ window.BANTA_IT_PAT = [
 [
 "(Game|Film|Novel|Audio|Comic|Short story|Webcast|Video)\\s+★\\s+–",
 "$1 ★ –"
+],
+[
+"(\\d[\\d,.]*) episodes? · (.+) left",
+"$1 episodi · $2 rimanenti"
+],
+[
+"(\\d[\\d,.]*) episodes? left",
+"$1 episodi rimanenti"
+],
+[
+"(.+) left$",
+"$1 rimanenti"
 ]
 ];

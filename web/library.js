@@ -216,6 +216,17 @@ const epKey = (s, e) => `${s}:${e}`;
       it.updated = Date.now();
     }
     aired(it, t = today()) { return (it.epl || []).filter(x => x[0] > 0 && (!x[2] || x[2] <= t)); }
+    // 0.8.3: what's left of a series: aired episodes not ticked, and their length (each episode's own runtime when
+    // TMDB gave it, else the series' usual length, else the average of the episodes that have one). Minutes are null
+    // when no length is known at all.
+    timeLeft(it, t = today()) {
+      if (!it || it.type !== "show" || !it.epl) return null;
+      const left = this.aired(it, t).filter(x => !it.eps[epKey(x[0], x[1])]);
+      const known = (it.epl || []).map(x => +x[4] || 0).filter(Boolean);
+      const per = +it.runtime || (known.length ? Math.round(known.reduce((a, b) => a + b, 0) / known.length) : 0);
+      const mins = per || known.length ? left.reduce((a, x) => a + (+x[4] || per), 0) : null;
+      return { eps: left.length, mins, upcoming: (it.epl || []).filter(x => x[0] > 0 && x[2] && x[2] > t).length };
+    }
     caughtUp(it, t = today()) { const a = this.aired(it, t); return !!a.length && a.every(x => it.eps[epKey(x[0], x[1])]); }
     // The first aired episode after the furthest one you've watched (skips gaps you left on purpose).
     nextEp(it, t = today()) {
