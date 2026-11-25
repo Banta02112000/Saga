@@ -1,9 +1,0 @@
-{
- "version": "0.8.3",
- "shell": 1,
- "bundle": "bundle.gz",
- "sig": "bundle.sig",
- "size": 835367,
- "sha256": "24d37343249bab90b295f6ba282fa84eda4f001bc9032d898a040382ddbab44e",
- "files": 41
-}

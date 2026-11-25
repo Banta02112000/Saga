@@ -967,10 +967,10 @@ const ok = (c, m) => { if (!c) throw new Error(m); };
   await pg.waitForSelector(".sideclose", { timeout: 5000 });
   await pg.click(".sideclose svg", { force: true });
   ok(await A(() => !document.querySelector("#overlay").innerHTML), "the × closes the title beside the list");
-  // 0.8.3: a sideways row scrolls with the mouse wheel
-  const wh = await A(() => { __app.go("home"); const r = [...document.querySelectorAll("#view .rail")].find(x => x.scrollWidth > x.clientWidth + 4); if (!r) return "no row"; r.scrollLeft = 0; r.scrollIntoView({ block: "center" }); const b = r.getBoundingClientRect(); return [b.left + 30, b.top + 30]; });
-  if (Array.isArray(wh)) { await pg.mouse.move(wh[0], wh[1]); await pg.mouse.wheel(0, 300); await pg.waitForTimeout(200);
-    ok(await A(() => [...document.querySelectorAll("#view .rail")].some(x => x.scrollLeft > 0)), "the wheel scrolls a row sideways"); }
+  // 0.8.3: a sideways row scrolls with the mouse wheel (where the browser has a mouse)
+  const wh = await A(() => { if (!matchMedia("(pointer: fine)").matches) return "no mouse"; __app.go("home"); const r = [...document.querySelectorAll("#view .rail")].find(x => x.scrollWidth > x.clientWidth + 4); if (!r) return "no row";
+    r.scrollLeft = 0; r.style.scrollBehavior = "auto"; r.firstElementChild.dispatchEvent(new WheelEvent("wheel", { deltaY: 300, bubbles: true, cancelable: true })); return r.scrollLeft; });
+  ok(wh === "no mouse" || wh === "no row" || wh > 0, "the wheel scrolls a row sideways: " + wh);
   const pview = await A(() => { __app.viewPoster("https://image.tmdb.org/t/p/w342/x.jpg", "X"); const v = document.querySelector(".postview img"); const src = v && v.getAttribute("src"); document.querySelector(".postview").click(); return { src, gone: !document.querySelector(".postview") }; });
   ok(/\/original\//.test(pview.src) && pview.gone, "poster viewer opens the full size and closes: " + JSON.stringify(pview));
   // 0.7.9: copy-and-paste prompts for everything: with the switch on, game details ask you instead of an API
