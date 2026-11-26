@@ -297,10 +297,10 @@
         for (const g of list) if (g !== base && hasEdition(g.title)) join(base, g);
       }
       for (const base of this.visible()) {
-        const r = base.remake; if (!r || !r.title) continue;
-        const ry = +String(r.date || "").slice(0, 4) || 0;
-        const other = this.visible().find(x => x !== base && norm(x.title) === norm(r.title) && (!ry || !x.date || Math.abs(+x.date.slice(0, 4) - ry) <= 1) && (x.date || "") >= (base.date || ""));
-        if (other) join(base, other);
+        // 0.8.5: every version it names (not only the newest), found however it's written ("Resident Evil 2 (2019)",
+        // "Resident Evil 2 Remake", "Resident Evil II")
+        const vs = (base.versions || []).concat(base.remake && base.remake.title ? [base.remake] : []);
+        for (const r of vs) { const other = findVersionGame(this, r, base); if (other) join(base, other); }
       }
       if (out.length && !dry) { this._fi = null; this.save(); }
       return out;
@@ -519,9 +519,19 @@
         verDate(g); this.games.push(n); this._fi = null; return n;
       });
     }
-    attachVersion(base, other) {
+    attachVersion(base, other, kind) {
       if (!base || !other || base === other) return null;
-      return this.batch(`${other.title} joined to ${base.title} as a version`, () => { base.unbundled = (base.unbundled || []).filter(t => t !== norm(other.title)); return linkRemake(this, base, other); });
+      return this.batch(`${other.title} joined to ${base.title} as a version`, () => this._attach(base, other, kind));
+    }
+    _attach(base, other, kind) {
+      base.unbundled = (base.unbundled || []).filter(t => t !== norm(other.title));
+      const date = other.date, title = other.title, r = linkRemake(this, base, other);
+      if (kind) { const v = (base.versions || []).find(x => norm(x.title) === norm(title) && (x.date || "") === (date || "")); if (v) v.kind = kind; }
+      return r;
+    }
+    // the AI's verdicts on possible remakes: versions joined, the others marked as two games; one step
+    applyRemakeVerdicts(list) {
+      return this.batch(r => `Remakes: ${r.joined} joined to their original, ${r.apart} kept apart`, () => { let joined = 0, apart = 0; for (const x of list) { if (!this.games.includes(x.a) || !this.games.includes(x.b)) continue; if (x.kind === "different") { (this.meta.notSame = this.meta.notSame || {})[[x.a.id, x.b.id].sort().join("|")] = 1; apart++; } else { this._attach(x.a, x.b, x.kind); joined++; } } return { joined, apart }; });
     }
     setVersionKind(g, i, kind) { const v = g && (g.versions || [])[i]; if (!v || !["remake", "remaster", "re-release"].includes(kind)) return false; v.kind = kind; this.save(); return true; }
     // ---- 0.8.4: Check your games: what looks wrong, each with its fix. → { steam, noInfo, names, copies, versions }
@@ -545,7 +555,8 @@
       }
       const versions = [];
       for (const g of vis) (g.versions || []).forEach((v, i) => { if (v.date && g.date && v.date < g.date) versions.push({ g, i, why: "older than the original" }); else if ((g.versions || []).some((w, j) => j < i && norm(w.title) === norm(v.title) && (w.date || "") === (v.date || ""))) versions.push({ g, i, why: "listed twice" }); });
-      return { steam, noInfo, names, copies, versions, total: steam.length + names.length + copies.length + versions.length };
+      const remakes = remakeCandidates(this);
+      return { steam, noInfo, names, copies, versions, remakes, total: steam.length + names.length + copies.length + versions.length + remakes.length };
     }
     unlinkSteam(g) { return this.batch(`${g.title}: Steam link removed`, () => { const id = g.steam; delete g.steam; delete g.price; delete g.steamMins; delete g.steam2w; if (g.cover && g.cover.includes(`/apps/${id}/`)) delete g.cover; (this.meta.noSteam = this.meta.noSteam || {})[g.id] = Date.now(); return true; }); }
     notSame(a, b) { (this.meta.notSame = this.meta.notSame || {})[[a.id, b.id].sort().join("|")] = 1; this.save(); }
@@ -1251,7 +1262,11 @@ ${rows.map(c => `${c.title} (${c.year || "?"}) — ${c.franchise || ""}`).join("
       let ch = false;
       if (!g.date && r.date) { g.date = r.date.length === 4 ? r.date : r.date; g.dateText = ""; ch = true; }
       if (!g.platform && r.platform) { g.platform = r.platform; ch = true; }
-      if (!(g.remake && g.remake.title) && r.remake && norm(r.remake.title) !== norm(g.title)) { g.remake = r.remake; ch = true; }
+      if (!(g.remake && g.remake.title) && r.remake && !NA(r.remake.title) && !(r.remake.date && g.date && r.remake.date < g.date) && (norm(r.remake.title) !== norm(g.title) || (r.remake.date && g.date && r.remake.date.slice(0, 4) !== g.date.slice(0, 4)))) {
+        g.remake = r.remake; ch = true;
+        // 0.8.5: and in Versions, so it shows and the game you have of it is joined to it
+        if (!(g.versions || []).some(v => norm(v.title) === norm(r.remake.title))) { g.versions = (g.versions || []).concat([Object.assign({ kind: versionKind(r.remake.title) }, r.remake)]).sort((a, b) => String(a.date || "9999").localeCompare(String(b.date || "9999"))); verDate(g); }
+      }
       else if (g.remake && r.remake && norm(g.remake.title) === norm(r.remake.title)) { if (!g.remake.date && r.remake.date) { g.remake.date = r.remake.date; ch = true; } if (!g.remake.platform && r.remake.platform) { g.remake.platform = r.remake.platform; ch = true; } }
       if (g.hours == null && r.hours) { g.hours = r.hours; ch = true; }
       g.aiAt = Date.now();
@@ -1259,6 +1274,53 @@ ${rows.map(c => `${c.title} (${c.year || "?"}) — ${c.franchise || ""}`).join("
     });
     lib._fi = null;
     return { filled, same, touched };
+  }
+  // 0.8.5: the game you have that a version names: the same title once years, edition words and numerals are set aside
+  // (II = 2), from the year it names (±1), never older than the original, never one of two IMDb pages for one entry
+  const bareTitle = t => String(t || "").replace(/\s*[(\[]\s*(19|20)\d\d\s*[)\]]\s*/g, " ").replace(/\b(remake|remastered|remaster|re-?release)\b/gi, " ").replace(/\s+/g, " ").trim();
+  const titleKey = t => { let x = bareTitle(t); for (let i = 0; i < 3; i++) { const y = x.replace(EDITION_RX, "").trim(); if (y === x) break; x = y; } return looseKey(x); };
+  function findVersionGame(lib, r, base) {
+    if (!r || !r.title || NA(r.title)) return null;
+    const k = titleKey(r.title), ry = +String(r.date || "").slice(0, 4) || +(String(r.title).match(/\b(19|20)\d\d\b/) || [])[0] || 0, by = yearOf(base);
+    if (!k) return null;
+    const cands = lib.visible().filter(x => x !== base && titleKey(x.title) === k && !(base.unbundled || []).includes(norm(x.title)) && (!by || !yearOf(x) || yearOf(x) >= by) && (!ry || !yearOf(x) || Math.abs(yearOf(x) - ry) <= 1));
+    // the same title as the original: it must be a later year (a remake of the same name), not the original twice
+    const ok = cands.filter(x => titleKey(x.title) !== titleKey(base.title) || (yearOf(x) && by && yearOf(x) - by >= 2));
+    return ok.sort((a, b) => Math.abs((yearOf(a) || ry) - ry) - Math.abs((yearOf(b) || ry) - ry))[0] || null;
+  }
+  // 0.8.5: games that look like a remake of another you have (same title, years apart, same series), for Check your games
+  function remakeCandidates(lib) {
+    const out = [], by = new Map(), notSame = lib.meta.notSame || {};
+    for (const g of lib.visible()) { const k = titleKey(g.title); if (!k) continue; if (!by.has(k)) by.set(k, []); by.get(k).push(g); }
+    for (const l of by.values()) {
+      if (l.length < 2) continue;
+      l.sort((a, b) => String(a.date || "9999").localeCompare(String(b.date || "9999")));
+      for (let i = 1; i < l.length; i++) {
+        const a = l[0], b = l[i], ya = yearOf(a), yb = yearOf(b);
+        if (!ya || !yb || yb - ya < 3) continue;
+        if (notSame[[a.id, b.id].sort().join("|")] || (a.unbundled || []).includes(norm(b.title))) continue;
+        const sameWorld = words(a.multiverse || a.franchise) === words(b.multiverse || b.franchise) || !a.fImported || !b.fImported;
+        if (sameWorld) out.push({ a, b });
+      }
+    }
+    return out;
+  }
+  // 0.8.5: the AI tells remakes from games that only share a name (Resident Evil 4 2023 is a remake; Doom 2016,
+  // God of War 2018, Spider-Man 2 2023 are not). → prompt; parseRemakeAnswer → [{ a, b, kind }] for the pairs it called a version
+  function remakePrompt(pairs) {
+    return `For each numbered pair of video games, say whether the second is a REMAKE, REMASTER or RE-RELEASE (a port or collection of the same game) of the first, or a DIFFERENT game that only shares the name (a reboot, a sequel, a tie-in of another film, a mobile spin-off). Use web search when unsure.
+Answer one line per pair, nothing else: <number>: REMAKE | REMASTER | RE-RELEASE | DIFFERENT
+
+${pairs.map((p, i) => `${i + 1}: ${p.a.title} (${yearOf(p.a) || "?"}${p.a.platform ? ", " + p.a.platform : ""}) / ${p.b.title} (${yearOf(p.b) || "?"}${p.b.platform ? ", " + p.b.platform : ""})`).join("\n")}`;
+  }
+  function parseRemakeAnswer(pairs, text) {
+    const out = [];
+    for (const l of String(text || "").split(/\r?\n/)) {
+      const m = l.replace(/\*\*/g, "").match(/^\s*[-•]?\s*(\d+)\s*[:.)-]\s*(REMAKE|REMASTER|RE-?RELEASE|DIFFERENT)/i); if (!m) continue;
+      const p = pairs[+m[1] - 1]; if (!p) continue;
+      out.push({ a: p.a, b: p.b, kind: /different/i.test(m[2]) ? "different" : /remaster/i.test(m[2]) ? "remaster" : /re-?release/i.test(m[2]) ? "re-release" : "remake" });
+    }
+    return out;
   }
   // 0.6.9.6: you say `rem` is a remake of `base`: one game with its remake (title, date, platform, its hours as the
   // remake's), your status, rating, plays, sessions and notes from both. The original's title and date stay.
@@ -1544,7 +1606,7 @@ ${lines.slice(i, i + per).join("\n")}`);
     if (n) { lib._ver = (lib._ver || 0) + 1; lib.save(); }
     return n;
   }
-  const API = { aiSortPrompts, parseAiSort, mergeList, repairFromList, cleanSeries, seriesStem, looseKey, words, setVersionStatus, versionDone, missingRows, canonCheckPrompt, applyCanonCheck, checkKey, storyKey, hasEdition, verDate, versionKind, MY_INFO_PROMPT, infoPromptOne, parseInfoText, imdbCheckMissing, timePlayed, hrs, sourceOf, wordDate, longDate, infoPrompt, parseInfo, applyInfo, steamPlay, backlogHours, findDuplicates, mergeGames, linkRemake, mergeInto, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
+  const API = { remakePrompt, parseRemakeAnswer, findVersionGame, remakeCandidates, titleKey, aiSortPrompts, parseAiSort, mergeList, repairFromList, cleanSeries, seriesStem, looseKey, words, setVersionStatus, versionDone, missingRows, canonCheckPrompt, applyCanonCheck, checkKey, storyKey, hasEdition, verDate, versionKind, MY_INFO_PROMPT, infoPromptOne, parseInfoText, imdbCheckMissing, timePlayed, hrs, sourceOf, wordDate, longDate, infoPrompt, parseInfo, applyInfo, steamPlay, backlogHours, findDuplicates, mergeGames, linkRemake, mergeInto, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
     steamSearch, linkSteam, fixSharedSteam, steamPrices, storePrices, steamDates, importRows, fromImdb, storeLinks, indexFor, yearOf, NA };
   if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
   root.GamesCore = API;

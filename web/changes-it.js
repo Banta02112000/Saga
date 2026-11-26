@@ -2,6 +2,12 @@
    as CHANGES in app.js; a version missing here is shown in English with a note. */
 (function () {
   window.SAGA_CHANGES_IT = {
+    "0.8.5": ["I remake si trovano per nome: \"Resident Evil 2 (2019)\", \"… Remake\" e \"… Remastered\" corrispondono all'originale anche quando IMDb li chiama diversamente, una versione non è mai più vecchia del suo originale, e Trova su un gioco mette prima i titoli più vicini.",
+      "Controlla i tuoi giochi › Possibili remake: giochi con lo stesso nome a distanza di anni, con È il suo remake, Remaster, Riedizione o Due giochi diversi, oppure Chiedi all'AI quali sono remake (o copia e incolla) e togli la spunta a ciò che ha sbagliato. I reboot come God of War (2018) restano separati a meno che non li unisca tu.",
+      "Stasera nella Home: tocca 30 min, 1 h, 2 h o 3 h+ e ottieni una serie di episodi della serie che stai guardando, un film della watchlist che ci sta, una sessione del gioco a cui stai giocando e qualche pagina del tuo libro.",
+      "Obiettivi nella Home: libri, film, episodi o giochi quest'anno, finire un multiverso di giochi o una serie, con una barra e se sei in linea.",
+      "Doctor Who: le prossime 10 storie oltre la TV (audio, fumetti, racconti, romanzi) nella Home una volta iniziata la cronologia.",
+      "Impostazioni › Dati e info › Esporta per altri siti: i tuoi film come file da importare su Letterboxd (una riga per visione, voto su 5) e i tuoi giochi come CSV per Backloggd, HowLongToBeat o un foglio di calcolo."],
     "0.8.4": [
       "L'ultima parola sui raggruppamenti è tua. Su un gioco: Sposta in un altro multiverso o serie. Su un multiverso (la matita sul suo banner): rinominalo, uniscilo a un altro o aprilo, così ognuna delle sue serie diventa un multiverso a sé (Super Smash in Mario, Zelda, Pokémon…). Su una serie: Rendila un multiverso a sé. Su una versione: cambiane il tipo, oppure Non è una versione: rendila un gioco a sé. Ciò che imposti resta: nessuna regola, ricerca o unione della lista lo sposta più.",
       "Modifiche ai tuoi giochi (Giochi › Franchise): ogni raggruppamento, unione, correzione Steam, unione della lista e spostamento è una voce con ciò che è cambiato e un Annulla per tutto o per un solo gioco. Un gioco che hai cambiato di nuovo nel frattempo tiene la tua modifica più recente.",

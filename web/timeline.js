@@ -362,6 +362,17 @@
     for (const g of D().groups) { if (/skipped|not canon/i.test(g.name)) continue; for (const t of g.tabs) for (const it of itemsOf(g, t)) if (nextable(it, t, (load().works[it.k] || {}).done)) return { k: it.k, title: workOf(it).title, era: t.name, group: g.name, type: workOf(it).type }; }
     return null;
   }
+  // 0.8.5: the next n stories in timeline order, of the kinds asked (audio, comic…): Home's Doctor Who queue
+  function queue(n = 10, types) {
+    const out = [], want = types && types.length ? new Set(types) : null, works = load().works;
+    for (const g of D().groups) { if (/skipped|not canon/i.test(g.name)) continue; for (const t of g.tabs) for (const it of itemsOf(g, t)) {
+      const w = workOf(it); if (w.hidden || (want && !want.has(w.type))) continue;
+      if (!nextable(it, t, (works[it.k] || {}).done)) continue;
+      if (out.some(x => x.k === it.k)) continue;
+      out.push({ k: it.k, title: w.title, type: w.type, era: t.name }); if (out.length >= n) return out;
+    } }
+    return out;
+  }
   function recent(limit = 10) { return Object.entries(load().works).filter(([, v]) => v.done && v.at).map(([k, v]) => ({ k, t: workOf({ k }).title, date: v.at })).sort((a, b) => b.date.localeCompare(a.date)).slice(0, limit); }
   // ---- 0.6.9.3: your list as you keep it in a note (Samsung Notes and the like), pasted or as a .txt:
   //   -------S1-------            a section (the era tab of the same name in Doctor Who)
@@ -454,5 +465,5 @@
     } }
     return out;
   }
-  K.mods.timeline = { allWorks, title: "Doctor Who", restoreMine, parseNote, matchNote, importNote, statsOf, canonEntries, render, act, change, input, migrate, next, recent, openStory, state: statesFor, reset: () => { st = null; ver++; }, waitsFor, deleteEntry, moveEntry, itemsOf, data: () => D(), mine: () => load(), saveMine: () => save() };
+  K.mods.timeline = { queue, started: () => Object.values(load().works).some(w => w && w.done), allWorks, title: "Doctor Who", restoreMine, parseNote, matchNote, importNote, statsOf, canonEntries, render, act, change, input, migrate, next, recent, openStory, state: statesFor, reset: () => { st = null; ver++; }, waitsFor, deleteEntry, moveEntry, itemsOf, data: () => D(), mine: () => load(), saveMine: () => save() };
 })();

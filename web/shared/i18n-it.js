@@ -1137,7 +1137,7 @@ window.BANTA_IT = {
 "Oldest first (original release)": "Prima i più vecchi (uscita originale)",
 "Biggest first": "Prima i più grandi",
 "Link: its remake, or the same game twice": "Collega: il suo remake, o lo stesso gioco due volte",
-"Its remake": "Il suo remake",
+"Its remake": "È il suo remake",
 "Its original": "Il suo originale",
 "Same game": "Stesso gioco",
 "Find the other game": "Trova l'altro gioco",
@@ -1337,7 +1337,52 @@ window.BANTA_IT = {
 "Type the new name first": "Prima scrivi il nuovo nome",
 "Tap again to open it up": "Tocca di nuovo per aprirlo",
 "Tap again to make it a game of its own": "Tocca di nuovo per renderlo un gioco a sé",
-"No release date": "Senza data d'uscita"
+"No release date": "Senza data d'uscita",
+"Possible remakes": "Possibili remake",
+"The same name years apart. A remake joins its original (one game, the remake under Versions); a reboot or another game of the same name stays apart.": "Stesso nome a distanza di anni. Un remake si unisce al suo originale (un solo gioco, il remake tra le Versioni); un reboot o un altro gioco con lo stesso nome resta separato.",
+"original?": "originale?",
+"remake?": "remake?",
+"No possible remakes": "Nessun possibile remake",
+"Tells remakes from games that only share a name. Nothing changes until you apply.": "Distingue i remake dai giochi che hanno solo lo stesso nome. Non cambia niente finché non applichi.",
+"Asking the AI about remakes": "Chiedo all'AI dei remake",
+"Paste the AI's lines (1: REMAKE, 2: DIFFERENT…).": "Incolla le righe dell'AI (1: REMAKE, 2: DIFFERENT…).",
+"Untick what's wrong, then apply: remakes join their original, the rest stay apart and won't be asked again. One step in Changes to your games, with Undo.": "Togli la spunta a ciò che è sbagliato, poi applica: i remake si uniscono al loro originale, gli altri restano separati e non verranno più chiesti. Un passo in Modifiche ai tuoi giochi, con Annulla.",
+"is a different game from": "è un gioco diverso da",
+"Tonight": "Stasera",
+"How much time do you have?": "Quanto tempo hai?",
+"30 min": "30 min",
+"1 h": "1 h",
+"2 h": "2 h",
+"3 h+": "3 h+",
+"Goals": "Obiettivi",
+"Remove goal": "Togli l'obiettivo",
+"no longer in your lists": "non è più nelle tue liste",
+"done": "fatto",
+"on track": "in linea",
+"New goal": "Nuovo obiettivo",
+"What do you want to get done?": "Cosa vuoi portare a termine?",
+"Kind": "Tipo",
+"Books read this year": "Libri letti quest'anno",
+"Films watched this year": "Film visti quest'anno",
+"Episodes watched this year": "Episodi visti quest'anno",
+"Games finished this year": "Giochi finiti quest'anno",
+"Finish a games multiverse": "Finisci un multiverso di giochi",
+"Finish a series": "Finisci una serie",
+"How many (for a count)": "Quanti (per un conteggio)",
+"Multiverse (for Finish a multiverse)": "Multiverso (per Finisci un multiverso)",
+"Series (for Finish a series)": "Serie (per Finisci una serie)",
+"By (optional; otherwise the end of the year)": "Entro (facoltativo; altrimenti la fine dell'anno)",
+"Add the goal": "Aggiungi l'obiettivo",
+"Pick a multiverse": "Scegli un multiverso",
+"Goal added: on Home": "Obiettivo aggiunto: nella Home",
+"Remove?": "Togliere?",
+"Doctor Who: next 10 beyond TV": "Doctor Who: i prossimi 10 oltre la TV",
+"Timeline": "Cronologia",
+"Export to other sites": "Esporta per altri siti",
+"Films for Letterboxd (.csv)": "Film per Letterboxd (.csv)",
+"Games (.csv)": "Giochi (.csv)",
+"Files other sites import. Letterboxd: Settings › Import & Export › Import your data, pick the file. Games: a CSV with title, platform, status, rating, finished date and hours, for Backloggd, HowLongToBeat or a spreadsheet.": "File che altri siti importano. Letterboxd: Settings › Import & Export › Import your data, scegli il file. Giochi: un CSV con titolo, piattaforma, stato, voto, data di fine e ore, per Backloggd, HowLongToBeat o un foglio di calcolo.",
+"Nothing to export": "Niente da esportare"
 };
 window.BANTA_IT_PAT = [
 [
@@ -2475,5 +2520,93 @@ window.BANTA_IT_PAT = [
 [
 " (\\d[\\d,.]*) games have no release date or platform yet \\(at the end\\)\\.",
 " $1 giochi non hanno ancora una data d'uscita (in fondo)."
+],
+[
+"(.+) \\((\\d+|\\?)\\) is now a (remake|remaster|re-release) of (.+) \\((\\d+|\\?)\\) \\(Changes › Undo\\)",
+"$1 ($2) ora è un $3 di $4 ($5) (Modifiche › Annulla)"
+],
+[
+"(\\d[\\d,.]*) joined to their original, (\\d[\\d,.]*) kept apart \\(Changes › Undo\\)",
+"$1 uniti al loro originale, $2 tenuti separati (Modifiche › Annulla)"
+],
+[
+"Ask the AI which are remakes \\((\\d[\\d,.]*)\\)",
+"Chiedi all'AI quali sono remake ($1)"
+],
+[
+"(\\d[\\d,.]*) verdicts",
+"$1 verdetti"
+],
+[
+"Set a goal for (\\d[\\d,.]*)…",
+"Imposta un obiettivo per il $1…"
+],
+[
+"Nothing on your lists fits (.+)\\.",
+"Niente nelle tue liste sta in $1."
+],
+[
+"(\\d[\\d,.]*) rows saved",
+"$1 righe salvate"
+],
+[
+"Finish (.+)",
+"Finisci $1"
+],
+[
+"(\\d[\\d,.]*) films in (\\d[\\d,.]*)",
+"$1 film nel $2"
+],
+[
+"(\\d[\\d,.]*) episodes in (\\d[\\d,.]*)",
+"$1 episodi nel $2"
+],
+[
+"(\\d[\\d,.]*) games in (\\d[\\d,.]*)",
+"$1 giochi nel $2"
+],
+[
+"(\\d[\\d,.]*) books in (\\d[\\d,.]*)",
+"$1 libri nel $2"
+],
+[
+"(\\d[\\d,.]*) behind · (\\d[\\d,.]*) days left",
+"$1 indietro · $2 giorni rimasti"
+],
+[
+"on track · (\\d[\\d,.]*) days left",
+"in linea · $1 giorni rimasti"
+],
+[
+"(\\d[\\d,.]*) behind · past its date",
+"$1 indietro · scaduto"
+],
+[
+"(\\d[\\d,.]*) episodes? from S(\\d[\\d,.]*) E(\\d[\\d,.]*) · (.+)",
+"$1 episodi da S$2 E$3 · $4"
+],
+[
+"(\\d[\\d,.]*) episodes? · (.+)",
+"$1 episodi · $2"
+],
+[
+"a (.+) session · about (.+) to finish",
+"una sessione di $1 · circa $2 per finire"
+],
+[
+"a (.+) session",
+"una sessione di $1"
+],
+[
+"about (\\d[\\d,.]*) pages · (\\d[\\d,.]*) left",
+"circa $1 pagine · $2 rimaste"
+],
+[
+"about (\\d[\\d,.]*) pages",
+"circa $1 pagine"
+],
+[
+"(.+) · on your watchlist",
+"$1 · nella tua watchlist"
 ]
 ];
