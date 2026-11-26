@@ -2,6 +2,14 @@
    as CHANGES in app.js; a version missing here is shown in English with a note. */
 (function () {
   window.SAGA_CHANGES_IT = {
+    "0.8.4": [
+      "L'ultima parola sui raggruppamenti è tua. Su un gioco: Sposta in un altro multiverso o serie. Su un multiverso (la matita sul suo banner): rinominalo, uniscilo a un altro o aprilo, così ognuna delle sue serie diventa un multiverso a sé (Super Smash in Mario, Zelda, Pokémon…). Su una serie: Rendila un multiverso a sé. Su una versione: cambiane il tipo, oppure Non è una versione: rendila un gioco a sé. Ciò che imposti resta: nessuna regola, ricerca o unione della lista lo sposta più.",
+      "Modifiche ai tuoi giochi (Giochi › Franchise): ogni raggruppamento, unione, correzione Steam, unione della lista e spostamento è una voce con ciò che è cambiato e un Annulla per tutto o per un solo gioco. Un gioco che hai cambiato di nuovo nel frattempo tiene la tua modifica più recente.",
+      "Ordina i miei giochi con l'AI (o copia e incolla): l'AI guarda tutti i tuoi multiversi e i giochi singoli e propone unioni (Zelda e The Legend of Zelda, Ryū ga Gotoku e Yakuza…) e dove mettere i giochi singoli; togli la spunta a ciò che è sbagliato e applichi il resto in un passo.",
+      "Controlla i tuoi giochi: un gioco Steam su due dei tuoi, possibili copie, versioni più vecchie del loro originale o elencate due volte, nomi rovinati e giochi senza data o piattaforma, ognuno con la sua correzione.",
+      "Corretto: l'unione automatica dei doppioni prendeva un'app Steam come prova che due giochi fossero lo stesso, e univa giochi diversi con nomi simili (ecco dove erano finiti alcuni giochi); ora devono anche essere lo stesso gioco per nome e non due pagine IMDb. Un remake non è mai più vecchio del suo originale (Modern Warfare 2019 aveva Modern Warfare Remastered 2016 come versione).",
+      "Prossimi › In corso mostra quanto manca in tutte le serie che stai guardando. Impostazioni › Dati e informazioni › Velocità su questo telefono mostra quanto ci mette ogni schermata qui, da copiare e inviare quando qualcosa sembra lento."
+    ],
     "0.8.3": [
       "La tua lista di giochi (il foglio) unita, una volta, sul telefono (prima viene fatta una copia): i giochi della tua lista che non avevi (circa 300) vengono aggiunti (Arretrati), i giochi che hai prendono la serie e il multiverso della tua lista, e remake, remaster e riedizioni sono elencati sotto il loro originale con il proprio stato. Un remake che avevi come gioco a sé (Resident Evil 2 del 2019, Final Fantasy VII Remake…) si unisce al suo originale, così Per uscita originale ordina per la data dell'originale. Sincronizza › Fatto da sé dice quanti.",
       "Importare di nuovo il tuo foglio fa la stessa unione, e una data nella colonna del remake (una riga slittata) non viene più presa per un remake.",

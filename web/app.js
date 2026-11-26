@@ -92,7 +92,24 @@
   function sheet(...a) { return P_rules().sheet(...a); }
   function go(...a) { return P_rules().go(...a); }
   function setTab(...a) { return P_rules().setTab(...a); }
-  function render(...a) { return P_rules().render(...a); }
+  // 0.8.4: how long each screen takes to draw on this device (Settings › Data and about › Speed on this phone)
+  const diagR = (() => { try { return JSON.parse(localStorage.getItem("saga_diag") || "{}"); } catch (e) { return {}; } })();
+  let diagT = 0;
+  function render(...a) {
+    const t0 = performance.now(), r = P_rules().render(...a), ms = performance.now() - t0;
+    try {
+      const k = ui.sec || "home";
+      const x = diagR[k] || (diagR[k] = { n: 0, sum: 0, max: 0, last: 0 });
+      x.n++; x.sum += ms; x.max = Math.max(x.max, ms); x.last = ms; x.at = Date.now();
+      if (!diagT) diagT = setTimeout(() => { diagT = 0; try { localStorage.setItem("saga_diag", JSON.stringify(diagR)); } catch (e) { /* full */ } }, 5000);
+    } catch (e) { /* never breaks a screen */ }
+    return r;
+  }
+  function diagHtml() {
+    const rows = Object.entries(diagR).filter(([, x]) => x.n).sort((a, b) => b[1].max - a[1].max);
+    return rows.length ? `<table class="small" style="width:100%;border-collapse:collapse"><tr class="muted"><td>Screen</td><td>Opened</td><td>Usual</td><td>Slowest</td></tr>${rows.map(([k, x]) => `<tr style="border-top:1px solid var(--line)"><td>${esc(k)}</td><td>${fmt(x.n)}</td><td>${Math.round(x.sum / x.n)} ms</td><td>${Math.round(x.max)} ms</td></tr>`).join("")}</table>` : `<p class="small muted" style="margin:0">Nothing measured yet: open a few screens.</p>`;
+  }
+  const diagText = () => `Saga ${VERSION} speed on ${navigator.userAgent.replace(/.*\(([^)]*)\).*/, "$1")}, ${innerWidth}x${innerHeight}\n` + Object.entries(diagR).map(([k, x]) => `${k}: ${x.n}x, usual ${Math.round(x.sum / x.n)} ms, slowest ${Math.round(x.max)} ms`).join("\n") + "\n" + errLog().filter(x => /SLOW/.test(x.m)).slice(-10).map(x => `${new Date(x.at).toISOString()} ${x.m}`).join("\n");
   // tidy.js: what it uses from here, and what it gives back
   let P_tidy$ = null;
   function P_tidy() { return P_tidy$ || (P_tidy$ = SagaParts.tidy(A_tidy)); }
@@ -276,7 +293,7 @@
   function undoChange(...a) { return P_website().undoChange(...a); }
   function syncWithWebServer(...a) { return P_website().syncWithWebServer(...a); }
   const C = window.Core;
-  const VERSION = "0.8.3";
+  const VERSION = "0.8.4";
   let dataVer = 0; // 0.8.1: bumped on every change of your data (memos key on it)
   const AUTO_SYNC_HOURS = 12;
   Object.assign(C.PROFILES, (window.CANONSYNC_PRESET || {}).traktProfiles || {});
@@ -586,6 +603,12 @@
   }
   // ---- what's new: shown once after an update (never on a fresh install)
   const CHANGES = [
+    ["0.8.4", ["You have the last word on grouping. On a game: Move to another multiverse or series. On a multiverse (the pencil on its banner): rename it, merge it into another, or open it up so each of its series becomes a multiverse of its own (Super Smash into Mario, Zelda, Pokémon…). On a series: Make it its own multiverse. On a version: change its type, or Not a version: make it a game of its own. What you set stays: no rule, scan or list merge moves it again.",
+      "Changes to your games (Games › Franchises): every regroup, merge, Steam fix, list merge and move is one entry with what changed and an Undo for all of it or one game. A game you changed again since keeps your later change.",
+      "Sort my games with AI (or copy and paste): the AI looks at all your multiverses and standalone games and proposes merges (Zelda and The Legend of Zelda, Ryū ga Gotoku and Yakuza…) and homes for standalone games; you untick what's wrong and apply the rest in one step.",
+      "Check your games: one Steam game on two of yours, possible copies, versions older than their original or listed twice, broken names, and games without a date or platform, each with its fix.",
+      "Fixed: the automatic duplicate merge took one Steam app as proof two games were the same, and merged different games named alike (that's where some games went); now they must also be the same game by name and not two IMDb pages. A remake is never older than its original (Modern Warfare 2019 had Modern Warfare Remastered 2016 as a version).",
+      "Upcoming › Watching shows how much is left in all the series you're watching. Settings › Data and about › Speed on this phone shows how long each screen takes here, to copy and send when something feels slow."]],
     ["0.8.3", ["Your games list (the spreadsheet) merged in, once, on the phone (a copy kept first): the games of your list you didn't have (about 300) are added (Backlog), the games you have take your list's series and multiverse, and remakes, remasters and re-releases are listed under their original with their own status. A remake you had as a game of its own (Resident Evil 2 from 2019, Final Fantasy VII Remake…) joins its original, so By original release sorts by the original's date. Sync › Done by itself says how many.",
       "Importing your spreadsheet again does the same joining, and a date in the remake column (a slid row) is no longer taken for a remake.",
       "Time left on series you're watching: episodes and hours still to watch, from each episode's length (the next episode box, Up next and the series rows).",
@@ -1706,6 +1729,7 @@
     const nHidden = Object.keys(db.upHidden()).length;
     const head = `<section>
         <div class="chips">${chips}</div>
+        ${f === "all" ? (() => { const w = lib.all().filter(it => it.type === "show" && it.status === "watching").map(it => lib.timeLeft(it)).filter(Boolean); const eps = w.reduce((a, x) => a + x.eps, 0), mins = w.reduce((a, x) => a + (x.mins || 0), 0); return eps ? `<p class="small" style="margin:10px 0 0"><b>${fmt(eps)} episodes${mins ? ` · ${lenTxt(mins)}` : ""}</b> left in the ${fmt(w.filter(x => x.eps).length)} series you're watching</p>` : ""; })() : ""}
         <p class="small muted" style="margin:10px 0 0">${db.get("tmdb_key") ? (f === "releases" ? "Missing canon with a release date." : f === "games" ? "Games coming out." : "New episodes of the series you're watching (status Watching).") : "Add a TMDB key in Settings to see upcoming episodes."}</p>
         <div class="row wrap" style="margin-top:8px"><button class="btn small" data-action="refreshshows" ${ui.job || !db.get("tmdb_key") ? "disabled" : ""}>${icon("sync")}Refresh shows</button>
         <span class="grow"></span>${nHidden ? `<button class="btn quiet small" data-action="tab" data-tab="settings">${icon("eyeoff")}${nHidden} hidden</button>` : ""}</div>
@@ -1990,6 +2014,12 @@
           : `<p class="small muted" style="margin:0">Nothing has gone wrong. Errors and failed syncs are listed here so they can be copied and reported.</p>`; })()}
       </section>
       <section class="stack">
+        <h2>Speed on this phone</h2>
+        <p class="small muted" style="margin:0">How long each screen takes to draw here, and the pauses during syncs. Copy it and send it along when something feels slow.</p>
+        ${diagHtml()}
+        <div class="row wrap"><button class="btn small" data-action="diagcopy">${icon("copy")}Copy</button><button class="btn quiet small" data-action="diagclear">Clear</button></div>
+      </section>
+      <section class="stack">
         <h2>Keys in backup files</h2>
         <label class="switch"><input type="checkbox" data-setting="backup_secrets" ${db.get("backup_secrets", "0") === "1" ? "checked" : ""}><span>Include API keys and sign-ins in backup files</span></label>
         <p class="small muted" style="margin:0">Off: backup files you save or share hold your library but not your Trakt sign-in or API keys; restoring one keeps the keys already on the phone. On this phone the keys are kept encrypted with Android's Keystore${db.secretsOn() ? "" : " (not available on this phone: they're kept in the app's private storage)"}.</p>
@@ -2025,7 +2055,7 @@
     ["ai", "Canon finder and AI", "spark", "Gemini, Claude, ChatGPT, Mistral, Groq, OpenRouter, DeepSeek; canon lists", ["Gemini (free)", "Claude (optional, paid)", "Other AI services", "Canon lists", "Matching"]],
     ["alerts", "Notifications and widgets", "bell", "Background checks, alerts, home-screen widgets", ["Notifications"]],
     ["hidden", "Hidden and marked", "eyeoff", "Seen, not canon, hidden franchises and releases", ["Marked as seen"]],
-    ["data", "Data and about", "settings", "Find a missing title, error log, clear data, version", ["Why isn’t a title showing?", "Error log", "Keys in backup files", "About", "Data"]],
+    ["data", "Data and about", "settings", "Find a missing title, error log, clear data, version", ["Why isn’t a title showing?", "Error log", "Speed on this phone", "Keys in backup files", "About", "Data"]],
   ];
   // which group a link (data-scroll) belongs to, for the old "Settings › …" buttons around the app
   const SET_ANCHOR = { accounts: "accounts", importhub: "imports", features: "general", backup: "backup", files: "imports" };
@@ -3125,6 +3155,34 @@
   }
   // 0.7.8: one game, everything: your IMDb rating and finished state (and IMDb's rating), its series from the canon
   // scans, its versions, its details from your prompt (release, platform, remakes, HLTB), and its franchise's canon
+  // 0.8.4: the AI proposes merges of multiverses and homes for standalone games; you approve them one by one
+  let aiSortProps = [];
+  function gameAiSort() {
+    const prompts = GC.aiSortPrompts(games);
+    let stopped = false;
+    const prov = aiProvider("Proposes which of your game groups are one franchise, and where standalone games belong. Nothing changes until you approve.", () => { stopped = true; });
+    return runJob("Sorting your games with AI", async p => {
+      if (prov.prepare) await prov.prepare();
+      const all = [];
+      for (let i = 0; i < prompts.length && !stopped && !C.CONFIG.cancelled; i++) {
+        p(`Batch ${i + 1} of ${prompts.length}`);
+        let text = "";
+        try { text = await prov.call(prompts[i], { title: "Sort my games", step: i + 1, steps: prompts.length, validate: v => (/=>|→|->|\bNONE\b/i.test(v) ? null : "Paste the AI's lines (MERGE: … => … or MOVE: … => …), or NONE.") }); }
+        catch (e) { if (isCancel(e)) break; throw e; }
+        for (const x of GC.parseAiSort(games, text)) if (!all.some(y => y.k === x.k && (x.k === "merge" ? y.from === x.from : y.id === x.id))) all.push(x);
+      }
+      aiSortProps = all.map(x => Object.assign(x, { on: true }));
+      if (aiSortProps.length) setTimeout(() => sheet(aiSortHtml()), 50);
+      return aiSortProps.length ? `${fmt(aiSortProps.length)} proposals to look at` : (stopped ? "Stopped" : "The AI proposed no changes");
+    });
+  }
+  function aiSortHtml() {
+    const on = aiSortProps.filter(x => x.on).length;
+    return `<div class="kicker">Sort my games with AI</div><h2 style="margin:4px 0 6px">${fmt(aiSortProps.length)} proposals</h2>
+      <p class="small muted">Untick what's wrong, then apply. It's one step in Changes to your games, with Undo; the games you move this way stay where you put them.</p>
+      <div class="listcard">${aiSortProps.map((x, i) => `<label class="item" style="gap:10px"><input type="checkbox" data-aisort="${i}" ${x.on ? "checked" : ""}><span class="grow">${x.k === "merge" ? `Merge <b>${esc(x.from)}</b> (${x.n}) into <b>${esc(x.to)}</b>` : `Move <b>${esc(x.title)}</b> to <b>${esc(x.to)}</b>`}</span></label>`).join("")}</div>
+      <button class="btn block" style="margin-top:12px" data-action="aisortapply">${icon("check")}Apply ${fmt(on)}</button>`;
+  }
   async function gameRefreshOne(id) {
     let g = games.get(id); if (!g) return;
     const title = g.title, year = +String(g.date || "").slice(0, 4) || null;
@@ -4472,6 +4530,8 @@
       case "webupdhide": P_website().WS.set({ hide: P_website().WS.get().ver || "" }); render(); break;
       case "webupdate": webUpdate(); break;
       case "undo": { const f = undoFn; undoFn = null; $("#toast").classList.remove("show"); if (f) { try { f(); } catch (e) { logError("undo", e.message); } } break; }
+      case "diagcopy": Native.copy(diagText()); toast("Copied"); break;
+      case "diagclear": for (const k of Object.keys(diagR)) delete diagR[k]; try { localStorage.removeItem("saga_diag"); } catch (e) { /* none */ } render(); break;
       case "errcopy": Native.copy(`Saga ${VERSION} error log\n` + errLog().map(x => `${new Date(x.at).toISOString()} [${x.k}] ${x.s || ""} v${x.v}${x.n > 1 ? " x" + x.n : ""}: ${x.m}`).join("\n")); toast("Error log copied"); break;
       case "librandom": { const pool = lib.all().filter(x => x.status === "watchlist"); if (!pool.length) { toast("Your watchlist is empty"); break; } const pick = pool[Math.floor(Math.random() * pool.length)]; openLib(pick.id); toast(`How about ${pick.title}?`); break; }
       case "errclear": try { localStorage.removeItem("saga_errors"); } catch (e) { /* fine */ } render(); break;
@@ -4630,6 +4690,7 @@
       }
       case "order": openOrder(el.dataset.mv); break;
       case "urefresh": universeRefresh(el.dataset.mv); break;
+      case "aisortapply": { const sel = aiSortProps.filter(x => x.on); if (!sel.length) { toast("Nothing ticked"); break; } const n = games.applyProposals(sel); games.save(); changed("games"); aiSortProps = []; closeOverlay(); toast(`${fmt(n)} change${n === 1 ? "" : "s"} applied (Changes to your games › Undo)`); render(); break; }
       case "ordermode": openOrder(ui.order.mv, el.dataset.v); break;
       case "orderget": orderGet(el.dataset.via); break;
       case "trakt": { const c = ui.sheetC; closeOverlay(); if (c) traktDo(c, el.dataset.k); break; }
@@ -4752,6 +4813,7 @@
     if (e.target.id === "libTag") { e.preventDefault(); const b = document.querySelector('[data-action="libtagadd"]'); if (b) b.click(); }
   });
   document.addEventListener("change", e => {
+    if (e.target && e.target.dataset && e.target.dataset.aisort != null) { const x = aiSortProps[+e.target.dataset.aisort]; if (x) { x.on = e.target.checked; const b = document.querySelector('[data-action="aisortapply"]'); if (b) b.innerHTML = `${icon("check")}Apply ${fmt(aiSortProps.filter(y => y.on).length)}`; } return; }
     const el = e.target;
     for (const m of Object.values(Kit.mods)) if (m.change && m.change(el)) return;
     if (el.dataset && el.dataset.libsort) { ui.libSort = el.value; render(); return; }
@@ -4917,7 +4979,7 @@
   window.__sagaAuto = Auto && { run: why => ((navigator.webdriver && !window.__wantAuto) || window.__sagaWeb ? Promise.resolve() : Auto.run(why)) }; // the phone does them; the website gets the result
   // also when the app opens and they haven't run for 12 hours (no sync needed); a failed part from before is retried later
   setTimeout(() => { try { if (window.__sagaAuto && !window.__sagaWeb && Date.now() - (+db.get("auto_at", "0") || 0) > 12 * 3600e3 && !ui.job) window.__sagaAuto.run("app opened"); } catch (e) { /* next time */ } }, 90000);
-  const Saga = window.Saga = { universeRefresh: n => universeRefresh(n), gameRefresh: id => gameRefreshOne(id), gameCanonCheck: () => gameCanonCheck(), gameImdbCheck: () => gameImdbCheck(), gameInfo: ids => gameInfoRun(ids), http: C.robust(Native.http, { timeout: 30000, tries: 2 }), Native, db, games, books, lib, lang, feat, render, sheet, go, changed,
+  const Saga = window.Saga = { fixSteam: () => runJob("Asking Steam", async () => { const r = await GC.fixSharedSteam(games, Native.http); changed("games"); render(); return r.length ? `${fmt(r.length)} Steam games given to the right game` : "Nothing to change"; }), gameAiSort: () => gameAiSort(), aiSortHtml: () => aiSortHtml(), universeRefresh: n => universeRefresh(n), gameRefresh: id => gameRefreshOne(id), gameCanonCheck: () => gameCanonCheck(), gameImdbCheck: () => gameImdbCheck(), gameInfo: ids => gameInfoRun(ids), http: C.robust(Native.http, { timeout: 30000, tries: 2 }), Native, db, games, books, lib, lang, feat, render, sheet, go, changed,
     close: () => { if (Kit.mods.books && Kit.mods.books.stopScan) Kit.mods.books.stopScan(); closeOverlay(); } };
   Kit.toast = toast; Kit.icon = icon; Kit.sheet = sheet; Kit.close = Saga.close;
   ui.sec = "home"; ui.tab = "library";

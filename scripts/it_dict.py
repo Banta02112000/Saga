@@ -741,3 +741,39 @@ P += [(r"(Game|Film|Novel|Audio|Comic|Short story|Webcast|Video)\s+★\s+–", "
 D.update({ "Standalone games": "Giochi singoli" })
 D.update({ "Scroll left": "Scorri a sinistra", "Scroll right": "Scorri a destra" })
 P += [(rf"{N} episodes? · (.+) left", "$1 episodi · $2 rimanenti"), (rf"{N} episodes? left", "$1 episodi rimanenti"), (r"(.+) left$", "$1 rimanenti")]
+# 0.8.4
+D.update({
+  "Sort my games with AI": "Ordina i miei giochi con l'AI", "Changes to your games": "Modifiche ai tuoi giochi", "Check your games": "Controlla i tuoi giochi",
+  "Move to another multiverse or series": "Sposta in un altro multiverso o serie", "Move to another multiverse or series (you placed it)": "Sposta in un altro multiverso o serie (l'hai messo tu)",
+  "Move": "Sposta", "Multiverse": "Multiverso", "Series inside it (empty: the multiverse itself)": "Serie al suo interno (vuoto: il multiverso stesso)", "Move it": "Spostalo",
+  "Rename": "Rinomina", "Merge": "Unisci", "Merge into another multiverse (its series stay as series)": "Unisci a un altro multiverso (le sue serie restano serie)", "Pick or type": "Scegli o scrivi",
+  "Open it up": "Aprilo", "Everything here is one step in Changes to your games, with Undo.": "Tutto qui è un passo in Modifiche ai tuoi giochi, con Annulla.",
+  "Make it its own multiverse": "Rendila un multiverso a sé", "Remake": "Remake", "Re-release": "Riedizione",
+  "Nothing yet. Every regroup, merge, Steam fix or move you make shows here, with Undo.": "Ancora niente. Ogni raggruppamento, unione, correzione Steam o spostamento compare qui, con Annulla.",
+  "Undo": "Annulla", "merged away": "unito a un altro", "added": "aggiunto", "undone": "annullato",
+  "Nothing looks wrong.": "Non sembra esserci niente di sbagliato.", "One Steam game on two of yours": "Un gioco Steam su due dei tuoi",
+  "They show the same cover and price. Steam's own name and release date say which one it is.": "Mostrano la stessa copertina e lo stesso prezzo. Il nome e la data d'uscita di Steam dicono quale è.",
+  "Ask Steam for all of them": "Chiedi a Steam per tutti", "Not this one": "Non questo", "Possible copies": "Possibili copie",
+  "The same name and year, and nothing says they're two games.": "Stesso nome e anno, e niente dice che siano due giochi.", "Merge them": "Uniscili", "Two different games": "Due giochi diversi",
+  "Versions that look wrong": "Versioni che sembrano sbagliate", "A remake older than its original, or the same version listed twice.": "Un remake più vecchio del suo originale, o la stessa versione elencata due volte.",
+  "Remove the extra": "Togli quella in più", "Make it the original": "Rendila l'originale", "Not a version": "Non è una versione",
+  "Names that look broken": "Nomi che sembrano rovinati", "Accents read in the wrong encoding, a stray backslash or a placeholder series from an import.": "Accenti letti con la codifica sbagliata, una barra rovesciata di troppo o una serie segnaposto da un'importazione.",
+  "Tidy them all": "Sistemali tutti", "Missing release date or platform": "Data d'uscita o piattaforma mancante", "Filled from your prompt with the AI (or copy and paste).": "Compilati dal tuo prompt con l'AI (o copia e incolla).",
+  "no date": "senza data", "no platform": "senza piattaforma", "Franchises": "Franchise",
+  "Speed on this phone": "Velocità su questo telefono", "How long each screen takes to draw here, and the pauses during syncs. Copy it and send it along when something feels slow.": "Quanto ci mette ogni schermata a comparire qui, e le pause durante le sincronizzazioni. Copialo e invialo quando qualcosa sembra lento.",
+  "Screen": "Schermata", "Opened": "Aperta", "Usual": "Di solito", "Slowest": "La più lenta", "Nothing measured yet: open a few screens.": "Ancora niente di misurato: apri qualche schermata.",
+  "Untick what's wrong, then apply. It's one step in Changes to your games, with Undo; the games you move this way stay where you put them.": "Togli la spunta a ciò che è sbagliato, poi applica. È un passo in Modifiche ai tuoi giochi, con Annulla; i giochi spostati così restano dove li metti.",
+  "Nothing ticked": "Niente di spuntato", "Pick or type a multiverse": "Scegli o scrivi un multiverso", "Pick the multiverse to merge into": "Scegli il multiverso a cui unirlo", "Type the new name first": "Prima scrivi il nuovo nome",
+  "Tap again to open it up": "Tocca di nuovo per aprirlo", "Tap again to make it a game of its own": "Tocca di nuovo per renderlo un gioco a sé",
+})
+P += [
+  (rf"{N} things look wrong\. Each fix is one step in Changes to your games, with Undo\.", "$1 cose sembrano sbagliate. Ogni correzione è un passo in Modifiche ai tuoi giochi, con Annulla."),
+  (rf"Fill them in \({N}\)", "Compilali ($1)"), (rf"Apply {N}", "Applica $1"), (rf"{N} proposals", "$1 proposte"),
+  (r"Not a version of (.+): make it a game of its own", "Non è una versione di $1: rendila un gioco a sé"),
+  (r"Open up (.+)", "Apri $1"), (r"Merge <b>(.+)</b> \(({N})\) into <b>(.+)</b>".replace("({N})", r"(\d+)"), "Unisci <b>$1</b> ($2) a <b>$3</b>"),
+  (rf"{N} episodes · (.+) left in the {N} series you're watching", "$1 episodi · $2 rimanenti nelle $3 serie che stai guardando"),
+  (rf"{N} episodes left in the {N} series you're watching", "$1 episodi rimanenti nelle $2 serie che stai guardando"),
+  (r"Now: (.+)\. Where you put it, it stays: no rule, scan or list merge moves it again\.", "Ora: $1. Dove lo metti, resta: nessuna regola, ricerca o unione della lista lo sposta più."),
+]
+P += [(rf" {N} games have no release date or platform yet \(at the end\)\.", " $1 giochi non hanno ancora una data d'uscita (in fondo).")]
+D.update({ "No release date": "Senza data d'uscita" })

@@ -95,12 +95,14 @@
     function dupes() {
       if (!on("dupes")) return;
       const libPairs = S.L.findDuplicates(S.lib, {}).filter(p => p.why === "same IMDb id" || p.why === "same TMDB id");
-      const gPairs = S.feat("games") ? S.GC.findDuplicates(S.games, {}).filter(p => p.why === "same Steam game") : [];
+      // 0.8.4: one Steam app is not proof: two games named alike got the same app by mistake (Doom 1993 and 2016); only
+      // the same game by name and no two IMDb pages
+      const gPairs = S.feat("games") ? S.GC.findDuplicates(S.games, {}).filter(p => p.why === "same Steam game" && !(p.a.imdb && p.b.imdb && p.a.imdb !== p.b.imdb) && S.GC.storyKey(p.a.title) === S.GC.storyKey(p.b.title)) : [];
       if (!libPairs.length && !gPairs.length) return;
       try { S.snapshot("before Saga merged exact duplicates by itself"); } catch (e) { return; } // no copy, no merge
       const names = [];
       for (const p of libPairs) { if (!S.lib.get(p.a.id) || !S.lib.get(p.b.id)) continue; S.L.mergeItems(S.lib, p.a, p.b); names.push(p.a.title); }
-      for (const p of gPairs) { if (!S.games.get(p.a.id) || !S.games.get(p.b.id)) continue; S.GC.mergeGames(S.games, p.a, p.b); names.push(p.a.title); }
+      if (gPairs.length) S.games.batch(`Exact duplicates merged: ${gPairs.length}`, () => { for (const p of gPairs) { if (!S.games.get(p.a.id) || !S.games.get(p.b.id)) continue; S.GC.mergeGames(S.games, p.a, p.b); names.push(p.a.title); } });
       if (names.length) { S.libSave(); S.games.save(); S.changed("games"); log("dupes", `Merged duplicates: ${names.slice(0, 6).join(", ")}${names.length > 6 ? ` and ${names.length - 6} more` : ""}`); }
     }
 

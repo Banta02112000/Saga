@@ -62,7 +62,7 @@
         ${ui.view === "grid" ? `<select data-gsort="1" aria-label="Sort">${[["release", "Release (oldest)"], ["newest", "Release (newest)"], ["remake", "Remake release"], ["recent", "Recently played"], ["played", "Most played"], ["title", "Title"], ["rating", "Rating"], ["deal", "Best deal"], ["short", "Shortest"], ["price", "Price"]].map(([k, l]) => `<option value="${k}" ${ui.sort === k ? "selected" : ""}>${l}</option>`).join("")}</select>` : ""}
         <button class="iconbtn" data-action="gadd" aria-label="Add a game">${K.icon("plus")}</button></div>
       ${ui.view !== "stats" ? strip() : ""}
-      ${ui.view === "canon" ? renderCanon() : ui.view === "stats" ? renderStats() : ui.view === "grid" ? `<div class="chips" style="margin-bottom:14px">${f.map(([k, l, n]) => `<button class="chip" data-action="gfilter" data-v="${k}" aria-pressed="${ui.f === k}">${l}${n != null ? ` <span class="muted">${n}</span>` : ""}</button>`).join("")}</div>
+      ${ui.view === "check" ? renderCheck() : ui.view === "canon" ? renderCanon() : ui.view === "stats" ? renderStats() : ui.view === "grid" ? `<div class="chips" style="margin-bottom:14px">${f.map(([k, l, n]) => `<button class="chip" data-action="gfilter" data-v="${k}" aria-pressed="${ui.f === k}">${l}${n != null ? ` <span class="muted">${n}</span>` : ""}</button>`).join("")}</div>
         ${list.length ? K.grid(list.slice(0, ui.lim).map(g => tileOf(g))) : `<p class="muted">Nothing here.</p>`}
         ${list.length > ui.lim ? `<button class="btn block automore" style="margin-top:16px" data-action="gmore">Show more (${list.length - ui.lim})</button>` : ""}
         <p class="small muted" style="margin-top:16px">${c.all} games · ${c.done} finished · ${c.plays} playthroughs</p>` : renderMv()}`;
@@ -149,14 +149,15 @@
     const rail = gs => { const n = new Map(); for (const g of gs) n.set(G.norm(g.title), (n.get(G.norm(g.title)) || 0) + 1);
       return K.rail(gs.map(g => tileOf(g, n.get(G.norm(g.title)) > 1 ? [g.platform, String(g.date || "").slice(0, 4)].filter(Boolean).join(" · ") : ""))); };
     const LIM = 24, MVL = ui.mvLim || 12; // 0.8.1: fewer tiles at once (the page laid out thousands of posters); more as you scroll
-    return `<div class="chips" style="margin-bottom:10px">${chip("remake", "By newest version (remakes, remasters)")}${chip("date", "By original release")}${chip("size", "Biggest first")}</div>` + mvs.slice(0, MVL).map(m => {
+    return `<div class="chips" style="margin-bottom:10px">${chip("remake", "By newest version (remakes, remasters)")}${chip("date", "By original release")}${chip("size", "Biggest first")}</div>
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin:0 0 12px"><button class="btn small" data-action="gaisort">${K.icon("sync")}Sort my games with AI</button><button class="btn quiet small" data-action="ghist">${K.icon("list")}Changes to your games</button><button class="btn quiet small" data-action="gcheck">${K.icon("search")}Check your games</button></div>` + mvs.slice(0, MVL).map(m => {
       const isOpen = !!open[m.name] || (q && !G.norm(m.name).includes(q)), many = m.series.length > 1;
       const games = q && !G.norm(m.name).includes(q) ? m.all.filter(g => G.norm(g.title).includes(q) || G.norm(g.franchise).includes(q)) : m.all;
       return `<section>
       ${K.banner({ name: m.name, small: true, imgs: [...new Set(m.all.map(cover).filter(Boolean))], pct: 100 * m.done / Math.max(1, m.total), line: `${many ? `${m.series.length} series · ` : ""}${m.done} of ${m.total} finished`,
-        right: m.standalone ? `<span class="count">${m.done}/${m.total}</span>` : `<span class="count">${m.done}/${m.total}</span><button class="iconbtn" data-action="gmvrefresh" data-mv="${esc(m.name)}" aria-label="Refresh ${esc(m.name)}" title="Refresh: check its games, find missing ones">${K.icon("sync")}</button>` })}
+        right: m.standalone ? `<span class="count">${m.done}/${m.total}</span>` : `<span class="count">${m.done}/${m.total}</span><button class="iconbtn" data-action="gmvmenu" data-mv="${esc(m.name)}" aria-label="Change ${esc(m.name)}: rename, merge, open up" title="Rename, merge, open up">${K.icon("edit")}</button><button class="iconbtn" data-action="gmvrefresh" data-mv="${esc(m.name)}" aria-label="Refresh ${esc(m.name)}" title="Refresh: check its games, find missing ones">${K.icon("sync")}</button>` })}
       ${many ? `<div class="row" style="margin:-4px 0 8px"><button class="chip" data-action="gmvopen" data-mv="${esc(m.name)}" aria-pressed="${isOpen}">${isOpen ? "All in one row" : `Show its ${m.series.length} series`}</button></div>` : ""}
-      ${isOpen && many ? m.series.map(sr => { const gs = sr.games.filter(g => games.includes(g)); return gs.length ? `<div class="small muted" style="margin:0 0 8px"><b>${esc(sr.name)}</b> · ${gs.filter(g => g.status === "done").length}/${gs.length}</div>${rail(gs)}` : ""; }).filter(Boolean).join('<div style="height:12px"></div>')
+      ${isOpen && many ? m.series.map(sr => { const gs = sr.games.filter(g => games.includes(g)); return gs.length ? `<div class="small muted row" style="margin:0 0 8px;gap:8px"><span class="grow"><b>${esc(sr.name)}</b> · ${gs.filter(g => g.status === "done").length}/${gs.length}</span>${sr.other || words(sr.name) === words(m.name) ? "" : `<button class="btn quiet small" data-action="gsplit" data-mv="${esc(m.name)}" data-s="${esc(sr.name)}">Make it its own multiverse</button>`}</div>${rail(gs)}` : ""; }).filter(Boolean).join('<div style="height:12px"></div>')
         : rail(games.slice(0, open["+" + m.name] ? 9999 : LIM)) + (games.length > LIM && !open["+" + m.name] ? `<button class="btn quiet small" data-action="gmvall" data-mv="${esc(m.name)}">Show all ${games.length}</button>` : "")}</section>`;
     }).join("") + (mvs.length > MVL ? `<button class="btn block automore" data-action="gmvmore">Show more</button>` : "") + (mvs.length ? "" : `<p class="muted">Nothing matches.</p>`);
   }
@@ -206,6 +207,8 @@
       <div class="seg2" style="grid-template-columns:repeat(3,1fr);margin:6px 0 12px">${[["", "Not played"], ["playing", "Playing"], ["done", "Finished"]].map(([k, l]) => `<button data-action="gverst" data-i="${i}" data-v="${k}" aria-pressed="${st === k}">${l}</button>`).join("")}</div>
       <div class="listcard">${[["Release", v.date ? dl(v.date) : ""], ["Platform", v.platform], ["Finished", (v.plays || []).length ? v.plays.map(d => K.when(d, Saga.lang())).join(", ") : ""], ["Your rating", v.rating ? `★ ${v.rating}` : ""]].filter(x => x[1]).map(([k, x]) => `<div class="row small" style="min-height:38px;border-bottom:1px solid var(--line)"><span class="muted" style="width:110px">${esc(k)}</span><span class="grow">${esc(x)}</span></div>`).join("")}</div>
       <p class="small muted">Finishing any version counts the whole game as finished.</p>
+      <div class="chips" style="margin:4px 0 10px">${["remake", "remaster", "re-release"].map(k => `<button class="chip" data-action="gverkind" data-i="${i}" data-v="${k}" aria-pressed="${(v.kind || "") === k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join("")}</div>
+      <button class="sheetbtn" data-action="gverdetach" data-i="${i}">${K.icon("x")}Not a version of ${esc(g.title)}: make it a game of its own</button>
       ${links.map(([n, u]) => `<button class="sheetbtn" data-action="open" data-url="${esc(u)}">${K.icon("open")}${esc(n)}</button>`).join("")}
       <button class="sheetbtn" data-action="gverback" data-id="${esc(g.id)}">${K.icon("chev")}Back to ${esc(g.title)}</button>`, "gsheet", g.id);
   }
@@ -253,6 +256,7 @@
       ${G.storeLinks(g).length ? "<h4>Where to get it</h4>" : ""}${G.storeLinks(g).map(([n, u]) => `<button class="sheetbtn" data-action="open" data-url="${esc(u)}">${K.icon("open")}${esc(n)}</button>`).join("")}
       <div style="margin-top:8px"><button class="sheetbtn" data-action="mlistadd" data-k="game:${esc(g.id)}">${K.icon("plus")}Add to a list</button><button class="sheetbtn" data-action="gsync1">${K.icon("sync")}Sync this game (Steam details, date, store prices)</button>
       <button class="sheetbtn" data-action="gedit">${K.icon("edit")}Edit details</button>
+      <button class="sheetbtn" data-action="gmove">${K.icon("list")}Move to another multiverse or series${g.fManual ? " (you placed it)" : ""}</button>
       ${g.steam ? "" : `<button class="sheetbtn" data-action="glink">${K.icon("sync")}Find on Steam (cover, price, date)</button>`}
       <button class="sheetbtn" data-action="ginfo" data-id="${esc(g.id)}">${K.icon("sync")}Fill missing details with AI (release, platform, remake, HLTB)</button>
       <button class="sheetbtn" data-action="glink">${K.icon("list")}Link: its remake, or the same game twice</button>
@@ -290,7 +294,7 @@
         const base = L.get(ui.linkFor), other = L.get(el.dataset.id);
         if (!base || !other) return true;
         const how = el.dataset.how;
-        const keep = how === "remake" ? G.linkRemake(L, base, other) : how === "original" ? G.linkRemake(L, other, base) : G.mergeInto(L, base, other);
+        const keep = how === "remake" ? L.attachVersion(base, other) : how === "original" ? L.attachVersion(other, base) : L.batch(`${other.title} merged into ${base.title}`, () => G.mergeInto(L, base, other));
         save(); K.toast(how === "same" ? `${other.title} merged into ${base.title}` : `${keep.title}: remake ${keep.remake.title}`); open(keep.id); Saga.render(); return true; }
       case "gunremake": if (g) { const r = g.remake; g.remake = null; g.hoursRemake = null; save(); K.toast(`${r && r.title} is no longer this game's remake`); open(g.id); } return true;
       case "gstudio": Saga.sheet(studioHtml(el.dataset.dev)); return true;
@@ -304,6 +308,30 @@
       case "gver": openVersion(g, +el.dataset.i); return true;
       case "gverst": { const nx = G.setVersionStatus(lib(), g, +el.dataset.i, el.dataset.v); K.toast(el.dataset.v === "done" ? `Finished${g.status === "done" ? ": the whole game counts as finished" : ""}${nx ? ` · Up next: ${nx.title}` : ""}` : "Saved"); openVersion(g, +el.dataset.i); Saga.render(); return true; }
       case "gverback": reopen(); return true;
+      // ---- 0.8.4: grouping tools (what you set stays)
+      case "gverkind": if (g) { L.setVersionKind(g, +el.dataset.i, el.dataset.v); save(); openVersion(g, +el.dataset.i); } return true;
+      case "gverdetach": if (g) { if (!K.confirmTap(el, "Tap again to make it a game of its own")) return true; const n = L.detachVersion(g, +el.dataset.i); save(); K.toast(`${n.title} is a game of its own again (Changes › Undo)`); open(g.id); Saga.render(); } return true;
+      case "gmove": if (g) Saga.sheet(moveHtml(g), "gsheet", g.id); return true;
+      case "gmovedo": if (g) { const mv = (document.querySelector("#gmMv") || {}).value, sr = (document.querySelector("#gmSr") || {}).value; if (!String(mv || "").trim()) { K.toast("Pick or type a multiverse"); return true; } L.moveGame(g, mv, sr); save(); K.toast(`${g.title}: ${mv}${sr && sr !== mv ? " › " + sr : ""}. It stays there.`); open(g.id); Saga.render(); } return true;
+      case "gmvmenu": Saga.sheet(mvMenuHtml(el.dataset.mv)); return true;
+      case "gmvrename": { const to = (document.querySelector("#gmvName") || {}).value; const n = L.renameMv(el.dataset.mv, to); save(); Saga.close(); K.toast(n ? `${el.dataset.mv} is now ${to}` : "Type the new name first"); Saga.render(); return true; }
+      case "gmvmerge": { const to = (document.querySelector("#gmvInto") || {}).value; if (!to) { K.toast("Pick the multiverse to merge into"); return true; } const n = L.mergeMv(el.dataset.mv, to); save(); Saga.close(); K.toast(`${G.fmtN ? G.fmtN(n) : n} games of ${el.dataset.mv} are now in ${to}`); Saga.render(); return true; }
+      case "gmvopenup": { if (!K.confirmTap(el, "Tap again to open it up")) return true; const n = L.openUpMv(el.dataset.mv); save(); Saga.close(); K.toast(`${el.dataset.mv} opened up: ${n} games now in their own series' multiverses (Changes › Undo)`); Saga.render(); return true; }
+      case "gsplit": { const n = L.splitSeries(el.dataset.mv, el.dataset.s); save(); K.toast(`${el.dataset.s} is its own multiverse now (${n} games)`); Saga.render(); return true; }
+      case "ghist": Saga.sheet(histHtml()); return true;
+      case "gaisort": Saga.gameAiSort(); return true;
+      case "gcunsteam": { const x = L.get(el.dataset.id); if (x) { L.unlinkSteam(x); save(); Saga.render(); } return true; }
+      case "gcfixsteam": Saga.fixSteam(); return true;
+      case "gcmerge": { const a2 = L.get(el.dataset.a), b2 = L.get(el.dataset.b); if (a2 && b2) { L.batch(`${b2.title} merged into ${a2.title}`, () => G.mergeInto(L, a2, b2)); save(); K.toast("Merged (Changes › Undo)"); Saga.render(); } return true; }
+      case "gcnotsame": { const a2 = L.get(el.dataset.a), b2 = L.get(el.dataset.b); if (a2 && b2) { L.notSame(a2, b2); Saga.render(); } return true; }
+      case "gcdropver": { const x = L.get(el.dataset.id); if (x) { L.dropVersion(x, +el.dataset.i); save(); Saga.render(); } return true; }
+      case "gcswap": { const x = L.get(el.dataset.id); if (x) { L.swapOriginal(x, +el.dataset.i); save(); Saga.render(); } return true; }
+      case "gcdetach": { const x = L.get(el.dataset.id); if (x) { L.detachVersion(x, +el.dataset.i); save(); Saga.render(); } return true; }
+      case "gctidy": { const r = L.tidy(); save(); K.toast(`${r.length} tidied`); Saga.render(); return true; }
+      case "gcinfo": Saga.gameInfo(L.check().noInfo.map(x => x.id)); return true;
+      case "gcheck": ui.view = "check"; Saga.render(); return true;
+      case "ghistundo": { const r = L.undoBatch(el.dataset.b, el.dataset.g || null); save(); K.toast(`Undone: ${r.back} back${r.kept ? `, ${r.kept} kept (you changed them since)` : ""}`); Saga.sheet(histHtml(el.dataset.b)); Saga.render(); return true; }
+      case "ghistopen": Saga.sheet(histHtml(el.dataset.b)); return true;
       case "gcanoncheck": Saga.gameCanonCheck(); return true;
       case "gstory": { g.story = g.story === false ? null : false; lib().save(); ui.cMemo = null; reopen(); return true; }
       case "ginfoone": { const g = lib().get(el.dataset.id); if (g) { g.aiAt = 0; Saga.gameInfo([g.id]); } return true; }
@@ -401,6 +429,50 @@
     if (el.dataset.gnext && g) { g.next = el.checked; save(); Saga.render(); return true; }
     if (el.dataset.gtarget && g) { const v = parseFloat(String(el.value).replace(",", ".")); g.target = isFinite(v) ? v : null; save(); return true; }
     return false;
+  }
+  // ---- 0.8.4: Check your games
+  function renderCheck() {
+    const r = lib().check(), y = g => [G.yearOf(g), g.platform].filter(Boolean).join(" · ");
+    const row = (g, extra, btns) => `<div class="item"><div class="grow" style="min-width:0" data-action="gopen" data-id="${esc(g.id)}" role="button"><b class="ell">${esc(g.title)}</b><div class="small muted">${esc([y(g), extra].filter(Boolean).join(" · "))}</div></div>${btns || ""}</div>`;
+    const sec = (title, n, why, body, all) => n ? `<h4 style="margin-top:18px">${title} <span class="muted small">· ${n}</span></h4><p class="small muted" style="margin:0 0 8px">${why}</p>${all || ""}<div class="listcard">${body}</div>` : "";
+    return `<div class="row" style="margin:0 0 6px"><button class="btn quiet small" data-action="gview" data-v="mv">${K.icon("back")}Franchises</button></div>
+      <h2 style="margin:6px 0">Check your games</h2>
+      <p class="small muted">${r.total ? `${r.total} things look wrong. Each fix is one step in Changes to your games, with Undo.` : "Nothing looks wrong."}${r.noInfo.length ? ` ${r.noInfo.length} games have no release date yet (at the end).` : ""}</p>
+      ${sec("One Steam game on two of yours", r.steam.length, "They show the same cover and price. Steam's own name and release date say which one it is.", r.steam.map(x => x.games.map(g => row(g, `Steam ${x.id}`, `<button class="btn quiet small" data-action="gcunsteam" data-id="${esc(g.id)}">Not this one</button>`)).join("")).join('<div style="height:6px"></div>'), `<button class="btn small" data-action="gcfixsteam" style="margin-bottom:8px">${K.icon("sync")}Ask Steam for all of them</button>`)}
+      ${sec("Possible copies", r.copies.length, "The same name and year, and nothing says they're two games.", r.copies.slice(0, 80).map(x => `<div style="padding:6px 0;border-bottom:1px solid var(--line)">${row(x.a, x.a.src)}${row(x.b, x.b.src)}<div class="row" style="gap:6px;padding:0 12px 6px"><button class="btn small" data-action="gcmerge" data-a="${esc(x.a.id)}" data-b="${esc(x.b.id)}">Merge them</button><button class="btn quiet small" data-action="gcnotsame" data-a="${esc(x.a.id)}" data-b="${esc(x.b.id)}">Two different games</button></div></div>`).join(""))}
+      ${sec("Versions that look wrong", r.versions.length, "A remake older than its original, or the same version listed twice.", r.versions.map(x => row(x.g, `${x.g.versions[x.i].title} (${String(x.g.versions[x.i].date || "").slice(0, 4)}): ${x.why}`, x.why === "listed twice" ? `<button class="btn quiet small" data-action="gcdropver" data-id="${esc(x.g.id)}" data-i="${x.i}">Remove the extra</button>` : `<button class="btn quiet small" data-action="gcswap" data-id="${esc(x.g.id)}" data-i="${x.i}">Make it the original</button><button class="btn quiet small" data-action="gcdetach" data-id="${esc(x.g.id)}" data-i="${x.i}">Not a version</button>`)).join(""))}
+      ${sec("Names that look broken", r.names.length, "Accents read in the wrong encoding, a stray backslash or a placeholder series from an import.", r.names.slice(0, 60).map(g => row(g, [g.franchise, g.multiverse].filter(Boolean).join(" › "))).join(""), `<button class="btn small" data-action="gctidy" style="margin-bottom:8px">Tidy them all</button>`)}
+      ${sec("No release date", r.noInfo.length, "Filled from your prompt with the AI (or copy and paste).", r.noInfo.slice(0, 40).map(g => row(g, "no date")).join("") + (r.noInfo.length > 40 ? `<p class="small muted" style="padding:6px 12px">…and ${r.noInfo.length - 40} more</p>` : ""), `<button class="btn small" data-action="gcinfo" style="margin-bottom:8px">${K.icon("sync")}Fill them in (${r.noInfo.length})</button>`)}`;
+  }
+  // ---- 0.8.4: grouping tools
+  const words = t => G.words(t);
+  function moveHtml(g) {
+    const mvs = lib().multiverses("size").filter(m => !m.standalone);
+    return `<div class="kicker">Move</div><h2 style="margin:4px 0 6px">${esc(g.title)}</h2>
+      <p class="small muted">Now: ${esc(g.multiverse || g.franchise || "no multiverse")}${g.franchise && g.franchise !== g.multiverse ? " › " + esc(g.franchise) : ""}. Where you put it, it stays: no rule, scan or list merge moves it again.</p>
+      <label class="field"><span>Multiverse</span><input id="gmMv" list="gmMvL" value="${esc(g.multiverse || "")}" autocomplete="off"></label>
+      <datalist id="gmMvL">${mvs.map(m => `<option value="${esc(m.name)}">`).join("")}</datalist>
+      <label class="field"><span>Series inside it (empty: the multiverse itself)</span><input id="gmSr" list="gmSrL" value="${esc(g.franchise && g.franchise !== g.multiverse ? g.franchise : "")}" autocomplete="off"></label>
+      <datalist id="gmSrL">${[...new Set(mvs.flatMap(m => m.series.map(s => s.name)))].slice(0, 400).map(n => `<option value="${esc(n)}">`).join("")}</datalist>
+      <button class="btn block" data-action="gmovedo">${K.icon("check")}Move it</button>
+      <button class="sheetbtn" data-action="gopen" data-id="${esc(g.id)}">${K.icon("chev")}Back to ${esc(g.title)}</button>`;
+  }
+  function mvMenuHtml(name) {
+    const all = lib().multiverses("size"), m = all.find(x => x.name === name); if (!m) return "";
+    return `<div class="kicker">Multiverse</div><h2 style="margin:4px 0 10px">${esc(name)} <span class="muted small">· ${m.total} games, ${m.series.length} series</span></h2>
+      <label class="field"><span>Rename</span><input id="gmvName" value="${esc(name)}"></label><button class="btn small" data-action="gmvrename" data-mv="${esc(name)}">Rename</button>
+      <label class="field" style="margin-top:14px"><span>Merge into another multiverse (its series stay as series)</span><input id="gmvInto" list="gmvIntoL" placeholder="Pick or type"></label>
+      <datalist id="gmvIntoL">${all.filter(x => !x.standalone && x.name !== name).map(x => `<option value="${esc(x.name)}">`).join("")}</datalist><button class="btn small" data-action="gmvmerge" data-mv="${esc(name)}">Merge</button>
+      ${m.series.length > 1 ? `<h4 style="margin-top:16px">Open it up</h4><p class="small muted">Each of its ${m.series.length} series (${esc(m.series.slice(0, 6).map(s => s.name).join(", "))}${m.series.length > 6 ? "…" : ""}) becomes a multiverse of its own.</p><button class="btn small" data-action="gmvopenup" data-mv="${esc(name)}">Open up ${esc(name)}</button>` : ""}
+      <p class="small muted" style="margin-top:14px">Everything here is one step in Changes to your games, with Undo.</p>`;
+  }
+  function histHtml(open) {
+    const bs = lib().meta.batches || [];
+    if (!bs.length) return `<div class="kicker">Changes to your games</div><p class="muted">Nothing yet. Every regroup, merge, Steam fix or move you make shows here, with Undo.</p>`;
+    const L = Saga.lang();
+    return `<div class="kicker">Changes to your games</div><p class="small muted">The last ${bs.length} changes Saga or you made to many games at once. Undo puts back what it changed; a game you changed again since keeps your later change.</p>
+      ${bs.map(b => `<div class="listcard" style="margin-bottom:8px"><div class="item" data-action="ghistopen" data-b="${b.id}" role="button"><div class="grow" style="min-width:0"><b>${esc(b.what)}</b><div class="small muted">${esc(K.when(new Date(b.at).toISOString().slice(0, 10), L))} · ${b.items.length} game${b.items.length === 1 ? "" : "s"}${b.undone ? " · undone" : ""}</div></div>${b.undone ? "" : `<button class="btn quiet small" data-action="ghistundo" data-b="${b.id}">Undo</button>`}</div>
+        ${open === b.id ? b.items.slice(0, 200).map(it => `<div class="row small" style="padding:6px 12px;border-top:1px solid var(--line)"><span class="grow">${esc(it.t || it.id)} <span class="muted">${it.k === "removed" ? "merged away" : it.k === "added" ? "added" : esc(Object.keys(it.now || {}).filter(f => !/^(_|fGuess|fCanon|fManual|fImported)/.test(f)).slice(0, 3).map(f => f === "multiverse" || f === "franchise" ? `${f}: ${it.was[f] || "—"} → ${it.now[f] || "—"}` : f).join(" · "))}</span></span>${it.undone || b.undone ? "" : `<button class="btn quiet small" data-action="ghistundo" data-b="${b.id}" data-g="${esc(it.id)}">Undo</button>`}</div>`).join("") + (b.items.length > 200 ? `<p class="small muted" style="padding:6px 12px">…and ${b.items.length - 200} more (Undo above covers them all)</p>` : "") : ""}</div>`).join("")}`;
   }
   function linkHtml(g) {
     return `<div class="kicker">Link to ${esc(g.title)}</div><h3 style="margin:4px 0 8px">Its remake, or the same game</h3>

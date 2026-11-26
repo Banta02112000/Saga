@@ -72,6 +72,56 @@
     toJSON() { return { app: "games", v: 1, games: this.games, removed: this.removed, settings: this.settings, meta: this.meta }; }
     save() { this._nm = null; this.ver++; this._idx = null; this._fi = null; if (this.persist) { if (this.persist.saveLazy) this.persist.saveLazy(); else this.persist.save(JSON.stringify(this.toJSON())); } }
     get(id) { return this.games.find(g => g.id === id) || null; }
+    // 0.8.4: every change Saga (or you, from the grouping tools) makes to many games at once is one batch you can see
+    // and undo: History of your games. Only what changed is kept (a field's old and new value; a removed game whole).
+    // fn may be async. → fn's result
+    batch(what, fn) {
+      const before = new Map(this.games.map(g => [g.id, JSON.stringify(g)]));
+      const finish = r => {
+        const now = new Map(this.games.map(g => [g.id, g])), items = [];
+        for (const [id, js] of before) {
+          const g = now.get(id), was = JSON.parse(js);
+          if (!g) { items.push({ id, t: was.title, k: "removed", was }); continue; }
+          const nj = JSON.stringify(g); if (nj === js) continue;
+          const w = {}, n = {}; for (const f of new Set(Object.keys(was).concat(Object.keys(g)))) if (JSON.stringify(was[f]) !== JSON.stringify(g[f])) { w[f] = was[f] === undefined ? null : was[f]; n[f] = g[f] === undefined ? null : g[f]; }
+          items.push({ id, t: g.title, k: "changed", was: w, now: n });
+        }
+        for (const [id, g] of now) if (!before.has(id)) items.push({ id, t: g.title, k: "added" });
+        if (items.length) {
+          const label = typeof what === "function" ? what(r, items) : what;
+          const b = this.meta.batches = this.meta.batches || [];
+          b.unshift({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), at: Date.now(), what: label, items });
+          // keep the last 30, and not more than ~400 KB of them
+          while (b.length > 30 || (b.length > 1 && JSON.stringify(b).length > 1500000)) b.pop(); // the newest always stays
+          this.save();
+        }
+        return r;
+      };
+      const r = fn();
+      return r && typeof r.then === "function" ? r.then(finish) : finish(r);
+    }
+    // undo a batch, or one game of it; a game you changed again since keeps your later change. → { back, kept }
+    undoBatch(bid, onlyId) {
+      const b = (this.meta.batches || []).find(x => x.id === bid); if (!b) return { back: 0, kept: 0 };
+      let back = 0, kept = 0;
+      for (const it of b.items) {
+        if (onlyId && it.id !== onlyId) continue;
+        if (it.undone) continue;
+        const g = this.get(it.id);
+        if (it.k === "removed") { if (!g) { this.games.push(blank(it.was)); back++; } else kept++; }
+        else if (it.k === "added") { if (g) { this.games = this.games.filter(x => x !== g); back++; } }
+        else if (g) {
+          const same = Object.keys(it.now).every(f => JSON.stringify(g[f] === undefined ? null : g[f]) === JSON.stringify(it.now[f]));
+          if (!same) { kept++; continue; }
+          for (const f of Object.keys(it.was)) { if (it.was[f] === null) delete g[f]; else g[f] = JSON.parse(JSON.stringify(it.was[f])); }
+          back++;
+        } else kept++;
+        it.undone = true;
+      }
+      if (b.items.every(x => x.undone)) b.undone = true;
+      this._fi = null; this.save();
+      return { back, kept };
+    }
     // Look-ups go through maps (steam id, IMDb id, title), rebuilt whenever the list changed: a 1,000-game list
     // checked against a 10,000-title sync no longer scans every game for every row.
     _ix() {
@@ -231,11 +281,15 @@
     // 0.7.6: remakes, remasters and re-releases bundled with their original (one entry, the versions listed in it):
     // when the title is the same story with an edition word (Remastered, HD, Definitive Edition…), or when the
     // original's details name it as its remake (from your prompt). Returns the bundled titles.
-    bundleVersions(dry = false) {
+    bundleVersions(dry) {
+      if (dry) return this._bundle(true);
+      return this.batch((r, items) => `Joined ${r.length} remake${r.length === 1 ? "" : "s"} and versions to their original`, () => this._bundle(false));
+    }
+    _bundle(dry) {
       const out = [], vis = this.visible(), seen = new Set();
       const byKey = new Map();
       for (const g of vis) { const k = `${norm(g.multiverse || g.franchise || "")}|${storyKey(g.title)}`; if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(g); }
-      const join = (base, rem) => { if (!this.games.includes(base) || !this.games.includes(rem) || base === rem || seen.has(rem)) return; seen.add(rem); if (!dry) linkRemake(this, base, rem); out.push(`${rem.title} → ${base.title}`); };
+      const join = (base, rem) => { if (!this.games.includes(base) || !this.games.includes(rem) || base === rem || seen.has(rem) || (base.unbundled || []).includes(norm(rem.title)) || (rem.date && base.date && rem.date < base.date)) return; /* 0.8.4: a version is never older than its original */ seen.add(rem); if (!dry) linkRemake(this, base, rem); out.push(`${rem.title} → ${base.title}`); };
       for (const list of byKey.values()) {
         if (list.length < 2) continue;
         list.sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999"));
@@ -317,6 +371,11 @@
     // canon scan's series as its sub-series; the rest keep what the canon scans said. Then exact copies of a game
     // (same name, same year: "Marvel's Spider-Man 2" twice) are merged. Returns what moved.
     resolveFranchises() {
+      let out = [];
+      this.batch((r, items) => `Regrouped ${items.length} game${items.length === 1 ? "" : "s"}`, () => (out = this._resolve()));
+      return out;
+    }
+    _resolve() {
       const vis = this.visible(), out = [];
       const byStory = new Map(); for (const g of vis) if (trustedGame(g)) byStory.set(storyKey(g.title), g);
       for (const g of vis) {
@@ -362,7 +421,7 @@
     // "Doom Eternal" under Doom. Only when a multiverse is named just that (no "Dead" family from Dead Space + Dead
     // Rising). The old multiverse stays as a sub-series when it had 2+ games.
     familyMerge() {
-      const out = [], vis = this.visible(), listed = g => !!(g.fImported || g.src === "list");
+      const out = [], vis = this.visible(), listed = g => !!(g.fImported || g.fManual || g.src === "list");
       const fw = t => words(String(t || "").replace(/['’]s\b/g, "")); // Kirby's → kirby
       const groups = new Map();
       for (const g of vis) { const m = g.multiverse || g.franchise; if (!m) continue; const k = fw(m); if (!groups.has(k)) groups.set(k, { k, names: new Map(), games: [] }); const x = groups.get(k); x.games.push(g); x.names.set(m, (x.names.get(m) || 0) + 1); }
@@ -397,7 +456,7 @@
       const segs = t => String(t || "").split(/\s*[:–—]\s+|\s+-\s+/).map(words).filter(Boolean);
       // a one-word name counts at the start of a title or after ":"; a big one (20+ games: Mario, Sonic, Kirby) anywhere
       const names = (title, w, n) => w.includes(" ") || n >= 20 ? has(words(title), w) : segs(title).some(x => x === w || x.startsWith(w + " "));
-      const listed = g => !!(g.fImported || g.src === "list");
+      const listed = g => !!(g.fImported || g.fManual || g.src === "list");
       for (const g of vis) {
         if (listed(g)) continue;
         const own = mvOf(g), n0 = size.get(own) || 0;
@@ -414,13 +473,100 @@
       }
       return out;
     }
+    // ---- 0.8.4: your grouping tools. What you set is final: no rule, scan or list merge moves those games again.
+    mvGames(name) { const k = words(name); return this.visible().filter(g => words(g.multiverse || g.franchise) === k); }
+    seriesOf(mv, series) { const m = this.multiverses("date").find(x => words(x.name) === words(mv)); const s = m && m.series.find(x => words(x.name) === words(series)); return s ? s.games : []; }
+    moveGame(g, mv, series) {
+      mv = String(mv || "").trim(); if (!g || !mv) return false;
+      return this.batch(`Moved ${g.title} to ${mv}${series && series !== mv ? " › " + series : ""}`, () => this._move(g, mv, series));
+    }
+    _move(g, mv, series) { g.multiverse = mv; g.franchise = String(series || "").trim() || mv; g.fManual = true; delete g.fGuess; delete g.fCanon; this._ver = (this._ver || 0) + 1; return true; }
+    renameMv(from, to) {
+      to = String(to || "").trim(); const gs = this.mvGames(from); if (!to || !gs.length) return 0;
+      return this.batch(`Renamed ${from} to ${to}`, () => { for (const g of gs) { if (words(g.franchise) === words(from)) g.franchise = to; g.multiverse = to; g.fManual = true; delete g.fGuess; delete g.fCanon; } this._ver = (this._ver || 0) + 1; return gs.length; });
+    }
+    mergeMv(from, into) {
+      const to = (this.mvGames(into)[0] || {}).multiverse || into; if (!this.mvGames(from).length || words(from) === words(into)) return 0;
+      return this.batch(`Merged ${from} into ${to}`, () => this._mergeMv(from, into));
+    }
+    _mergeMv(from, into) {
+      const gs = this.mvGames(from), to = (this.mvGames(into)[0] || {}).multiverse || into; if (!gs.length || words(from) === words(into)) return 0;
+      for (const g of gs) { if (!g.franchise || words(g.franchise) === words(to)) g.franchise = from; g.multiverse = to; g.fManual = true; delete g.fGuess; delete g.fCanon; }
+      this._ver = (this._ver || 0) + 1; return gs.length;
+    }
+    // 0.8.4: the AI's proposals you approved, as one step: [{ k: "merge", from, to } | { k: "move", id, to }]
+    applyProposals(list) {
+      return this.batch(r => `AI sort: ${r} change${r === 1 ? "" : "s"} you approved`, () => { let n = 0; for (const p of list) { if (p.k === "merge" && this._mergeMv(p.from, p.to)) n++; else if (p.k === "move") { const g = this.get(p.id); if (g && this._move(g, (this.mvGames(p.to)[0] || {}).multiverse || p.to, null)) n++; } } return n; });
+    }
+    // every series of a multiverse becomes a multiverse of its own (Super Smash → Mario, Zelda, Pokémon…)
+    openUpMv(name) {
+      const m = this.multiverses("date").find(x => words(x.name) === words(name)); if (!m) return 0;
+      return this.batch(`Opened up ${m.name} into ${m.series.length} multiverses`, () => { let n = 0; for (const s of m.series) for (const g of s.games) { const to = s.other ? m.name : s.name; g.multiverse = to; if (!g.franchise || words(g.franchise) === words(m.name)) g.franchise = to; g.fManual = true; delete g.fGuess; delete g.fCanon; n++; } this._ver = (this._ver || 0) + 1; return n; });
+    }
+    splitSeries(mv, series) {
+      const gs = this.seriesOf(mv, series); if (!gs.length) return 0;
+      return this.batch(`${series} split off from ${mv}`, () => { for (const g of gs) { g.multiverse = series; g.franchise = series; g.fManual = true; delete g.fGuess; delete g.fCanon; } this._ver = (this._ver || 0) + 1; return gs.length; });
+    }
+    // a version that isn't one: it becomes a game of its own again (and is never joined back)
+    detachVersion(g, i) {
+      const v = g && (g.versions || [])[i]; if (!v) return null;
+      return this.batch(`${v.title} taken out of ${g.title}`, () => {
+        const n = blank({ id: "v" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title: v.title, date: v.date || "", platform: v.platform || "", status: v.status === "done" || v.status === "playing" ? v.status : "backlog",
+          plays: (v.plays || []).slice(), rating: v.rating || 0, steam: v.steam || null, imdb: v.imdb || null, cover: v.cover || "", src: "manual", franchise: g.franchise, multiverse: g.multiverse, fManual: true, added: Date.now() });
+        g.versions.splice(i, 1);
+        if (g.remake && norm(g.remake.title) === norm(v.title)) { if (g.versions.length) { g.remake = Object.assign({}, g.versions[g.versions.length - 1]); delete g.remake.kind; } else delete g.remake; }
+        g.unbundled = [...new Set((g.unbundled || []).concat([norm(v.title)]))];
+        verDate(g); this.games.push(n); this._fi = null; return n;
+      });
+    }
+    attachVersion(base, other) {
+      if (!base || !other || base === other) return null;
+      return this.batch(`${other.title} joined to ${base.title} as a version`, () => { base.unbundled = (base.unbundled || []).filter(t => t !== norm(other.title)); return linkRemake(this, base, other); });
+    }
+    setVersionKind(g, i, kind) { const v = g && (g.versions || [])[i]; if (!v || !["remake", "remaster", "re-release"].includes(kind)) return false; v.kind = kind; this.save(); return true; }
+    // ---- 0.8.4: Check your games: what looks wrong, each with its fix. → { steam, noInfo, names, copies, versions }
+    check() {
+      const vis = this.visible(), notSame = this.meta.notSame || {};
+      const bySteam = new Map(); for (const g of this.games) if (g.steam) { if (!bySteam.has(g.steam)) bySteam.set(g.steam, []); bySteam.get(g.steam).push(g); }
+      // a game and its remaster on one app is right (they should be one game: Versions); only different games count
+      const steam = [...bySteam.entries()].filter(([, l]) => l.length > 1 && new Set(l.map(g => storyKey(g.title))).size > 1).map(([id, l]) => ({ id, games: l }));
+      const noInfo = vis.filter(g => !g.date && !g.dateText); // the platform is often unknown from IMDb: not counted
+      const PH = /^\s*(unsorted|other|none|n\/?a|-|\?|\\|-\\|—)?\s*$/i;
+      const names = vis.filter(g => /Ã.|Â./.test(g.title + (g.franchise || "") + (g.multiverse || "")) || /\\$/.test(g.franchise || "") || /\\$/.test(g.multiverse || "") || (g.multiverse != null && g.multiverse !== "" && PH.test(g.multiverse)));
+      const byKey = new Map(); for (const g of vis) { const k = looseKey(g.title); if (!k) continue; if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(g); }
+      const copies = [];
+      for (const l of byKey.values()) for (let i = 0; i < l.length; i++) for (let j = i + 1; j < l.length; j++) {
+        const a = l[i], b = l[j], ya = yearOf(a), yb = yearOf(b);
+        if (a.imdb && b.imdb && a.imdb !== b.imdb) continue;
+        if (ya && yb && Math.abs(ya - yb) > 1) continue;
+        if (a.platform && b.platform && norm(a.platform) !== norm(b.platform) && (a.src === "list" || b.src === "list")) continue;
+        if (notSame[[a.id, b.id].sort().join("|")]) continue;
+        copies.push({ a, b });
+      }
+      const versions = [];
+      for (const g of vis) (g.versions || []).forEach((v, i) => { if (v.date && g.date && v.date < g.date) versions.push({ g, i, why: "older than the original" }); else if ((g.versions || []).some((w, j) => j < i && norm(w.title) === norm(v.title) && (w.date || "") === (v.date || ""))) versions.push({ g, i, why: "listed twice" }); });
+      return { steam, noInfo, names, copies, versions, total: steam.length + names.length + copies.length + versions.length };
+    }
+    unlinkSteam(g) { return this.batch(`${g.title}: Steam link removed`, () => { const id = g.steam; delete g.steam; delete g.price; delete g.steamMins; delete g.steam2w; if (g.cover && g.cover.includes(`/apps/${id}/`)) delete g.cover; (this.meta.noSteam = this.meta.noSteam || {})[g.id] = Date.now(); return true; }); }
+    notSame(a, b) { (this.meta.notSame = this.meta.notSame || {})[[a.id, b.id].sort().join("|")] = 1; this.save(); }
+    // the version is the older game: it becomes the original, the one you had becomes its version
+    swapOriginal(g, i) {
+      const v = (g.versions || [])[i]; if (!v) return null;
+      return this.batch(`${v.title} (${String(v.date).slice(0, 4)}) made the original of ${g.title}`, () => {
+        const n = blank({ id: "v" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title: v.title, date: v.date || "", platform: v.platform || "", status: v.status === "done" || v.status === "playing" ? v.status : "backlog", plays: (v.plays || []).slice(), rating: v.rating || 0, steam: v.steam || null, imdb: v.imdb || null, cover: v.cover || "", src: g.src, franchise: g.franchise, multiverse: g.multiverse, fManual: g.fManual, fImported: g.fImported, added: Date.now() });
+        g.versions.splice(i, 1); if (g.remake && norm(g.remake.title) === norm(v.title)) delete g.remake;
+        this.games.push(n); this._fi = null; return linkRemake(this, n, g);
+      });
+    }
+    dropVersion(g, i) { const v = (g.versions || [])[i]; if (!v) return false; return this.batch(`${v.title}: extra version entry removed from ${g.title}`, () => { g.versions.splice(i, 1); verDate(g); return true; }); }
+    tidy() { return this.batch((r) => `Names tidied: ${r.length}`, () => this.tidyNames()); }
     // the same game twice (not two games of your list: those are different platforms on purpose)
     mergeCopies() {
       const by = new Map(), out = [];
       for (const g of this.visible()) { const k = looseKey(g.title); if (!k) continue; if (!by.has(k)) by.set(k, []); by.get(k).push(g); }
       for (const list of by.values()) {
         if (list.length < 2) continue;
-        const listed = g => !!(g.fImported || g.src === "list");
+        const listed = g => !!(g.fImported || g.fManual || g.src === "list");
         list.sort((p, q) => (listed(q) ? 1 : 0) - (listed(p) ? 1 : 0) || (p.added || 0) - (q.added || 0));
         for (const extra of list.filter(g => !listed(g))) {
           if (!this.games.includes(extra)) continue;
@@ -467,7 +613,7 @@
     return d;
   }
   // a game whose series came from your list (not guessed from its title, not given by a canon scan)
-  const trustedGame = g => !!(g.fImported || g.src === "list" || (g.franchise && !g.fCanon && !g.fGuess && !(g.franchise === franchiseGuess(g.title) && (g.multiverse || g.franchise) === g.franchise)));
+  const trustedGame = g => !!(g.fImported || g.fManual || g.src === "list" || (g.franchise && !g.fCanon && !g.fGuess && !(g.franchise === franchiseGuess(g.title) && (g.multiverse || g.franchise) === g.franchise)));
   // ---- 0.7.9: one place per series. Words of a name ("Marvel's Spider-Man 2" → "marvel spider man 2"), so a series
   // name can be found inside any title, at word boundaries ("Total War: Warhammer III" contains "warhammer").
   const ROMAN = { ii: "2", iii: "3", iv: "4", vi: "6", vii: "7", viii: "8", ix: "9", xi: "11", xii: "12", xiii: "13" };
@@ -616,7 +762,10 @@
   // 0.8.2: games that ended up with the same Steam app (Doom 1993 and Doom 2016; Mega Man and Mega Man 11): Steam's own
   // name and release date say which one it is; the others lose the link, its price and its cover, and get a new link
   // later only when one matches exactly. → [{ steam, kept, cleared: [titles] }]
-  async function fixSharedSteam(lib, http, sleep = ms => new Promise(r => setTimeout(r, ms))) {
+  function fixSharedSteam(lib, http, sleep) {
+    return lib.batch(r => `Steam links fixed: ${r.map(x => x.cleared.join(", ")).join("; ")} unlinked`, () => fixSharedSteam0(lib, http, sleep === undefined ? ms => new Promise(r => setTimeout(r, ms)) : sleep));
+  }
+  async function fixSharedSteam0(lib, http, sleep) {
     const by = new Map(), out = [];
     for (const g of lib.games) if (g.steam) { if (!by.has(g.steam)) by.set(g.steam, []); by.get(g.steam).push(g); }
     const groups = [...by.entries()].filter(([, l]) => l.length > 1);
@@ -1304,18 +1453,53 @@ ${rows.map(c => `${c.title} (${c.year || "?"}) — ${c.franchise || ""}`).join("
       games: lib.visible().map(g => ({ id: g.id, t: g.title, f: g.franchise, m: g.multiverse, done: g.status === "done", date: g.date })) };
   }
 
+  // 0.8.4: "Sort my games with AI": the AI sees every multiverse (with a few of its games) and the standalone games, and
+  // proposes merges and moves; nothing changes until you approve. → prompts (one per batch of groups)
+  function aiSortPrompts(lib, per = 70) {
+    const mvs = lib.multiverses("size"), groups = mvs.filter(m => !m.standalone), solo = (mvs.find(m => m.standalone) || { all: [] }).all;
+    const names = groups.map(m => m.name).join("; ");
+    const lines = groups.map(m => `${m.name} (${m.total}): ${m.all.slice(0, 4).map(g => g.title).join("; ")}`).concat(solo.map(g => `Standalone: ${g.title}`));
+    const out = [];
+    for (let i = 0; i < lines.length; i += per) out.push(`These are the groups (multiverses) of a video game collection, each with a few of its games, and games that are in no group yet ("Standalone").
+Some groups are one franchise under two names ("Zelda" and "The Legend of Zelda"), a franchise under its Japanese name ("Ryu ga Gotoku" is Yakuza), or a spin-off that belongs in a bigger franchise; some standalone games belong to a group.
+Answer one line per change, nothing else:
+MERGE: <group name exactly as written> => <group name exactly as written>
+MOVE: <standalone game title exactly as written> => <group name exactly as written>
+Only for the same franchise or story world. Never merge different franchises because they share a publisher, a studio, a genre or a crossover guest character. If nothing should change, answer NONE.
+All groups: ${names}
+
+${lines.slice(i, i + per).join("\n")}`);
+    return out;
+  }
+  function parseAiSort(lib, text) {
+    const mvs = lib.multiverses("size"), byName = new Map(mvs.filter(m => !m.standalone).map(m => [words(m.name), m.name]));
+    const solo = (mvs.find(m => m.standalone) || { all: [] }).all, byTitle = new Map(solo.map(g => [words(g.title), g]));
+    const out = [], seen = new Set();
+    for (const raw of String(text || "").split(/\r?\n/)) {
+      const l = raw.replace(/^[\s*•\-–\d.)]+/, "").replace(/\*\*/g, "").trim();
+      const m = l.match(/^(MERGE|MOVE)\s*:\s*(.+?)\s*(?:=>|→|->)\s*(.+)$/i); if (!m) continue;
+      const a = m[2].replace(/^["“]|["”]$/g, "").replace(/\s*\(\d+\)$/, "").trim(), b = m[3].replace(/^["“]|["”]$/g, "").replace(/\s*\(\d+\)$/, "").trim();
+      const to = byName.get(words(b)); if (!to) continue;
+      if (/merge/i.test(m[1])) { const from = byName.get(words(a)); if (!from || from === to || seen.has("m" + from)) continue; seen.add("m" + from); out.push({ k: "merge", from, to, n: (mvs.find(x => x.name === from) || {}).total || 0 }); }
+      else { const g = byTitle.get(words(a.replace(/^Standalone:\s*/i, ""))); if (!g || seen.has("g" + g.id)) continue; seen.add("g" + g.id); out.push({ k: "move", id: g.id, title: g.title, to }); }
+    }
+    return out;
+  }
   // 0.8.3: your games list (the spreadsheet) merged into what you have from IMDb, Steam and the canon scans: a game of
   // the list you have takes its series, multiverse, platform and remake from it; one you don't have is added (Backlog);
   // a remake the list names is joined to its original (one game, the remake under Versions, the original's date).
   // A remake cell holding a date (a slid column) is not a remake. → { added, linked, remakes }
   const DATEISH = /^(january|february|march|april|may|june|july|august|september|october|november|december)\b|^\d{1,4}([\/.-]|$)/i;
   function mergeList(lib, mine) {
+    return lib.batch(r => `Your games list merged: ${r.added} added, ${r.linked} given your series, ${r.remakes} remakes listed`, () => mergeList0(lib, mine));
+  }
+  function mergeList0(lib, mine) {
     const rows = fromOld({}, mine);
     let added = 0, linked = 0, remakes = 0;
-    const listed = g => !!(g.fImported || g.src === "list");
+    const listed = g => !!(g.fImported || g.fManual || g.src === "list");
     for (const r of rows) {
       if (!r.title || lib.removed[norm(r.title)]) continue;
-      if (r.remake && (DATEISH.test(r.remake.title) || NA(r.remake.title))) r.remake = null;
+      if (r.remake && (DATEISH.test(r.remake.title) || NA(r.remake.title) || (r.remake.date && r.date && r.remake.date < r.date))) r.remake = null; // 0.8.4: nor one older than the game
       if (!r.multiverse || !r.franchise) { const m = cleanSeries(r.multiverse || r.franchise); r.franchise = cleanSeries(r.franchise) || m; r.multiverse = m || r.franchise; }
       const y = yearOf(r);
       let g = lib.find({ title: r.title, date: r.date });
@@ -1324,7 +1508,7 @@ ${rows.map(c => `${c.title} (${c.year || "?"}) — ${c.franchise || ""}`).join("
       // already a version of another game (the remake row of an original you have)
       if (!g && lib.games.some(x => (x.versions || []).some(v => norm(v.title) === norm(r.title) && (!y || !v.date || Math.abs(+String(v.date).slice(0, 4) - y) <= 1)))) continue;
       if (g) {
-        if (!listed(g) || g.franchise !== r.franchise || g.multiverse !== r.multiverse) { g.franchise = r.franchise || g.franchise; g.multiverse = r.multiverse || g.multiverse; g.fImported = true; delete g.fCanon; delete g.fGuess; linked++; }
+        if (!g.fManual && (!listed(g) || g.franchise !== r.franchise || g.multiverse !== r.multiverse)) { g.franchise = r.franchise || g.franchise; g.multiverse = r.multiverse || g.multiverse; g.fImported = true; delete g.fCanon; delete g.fGuess; linked++; }
         for (const k of ["platform", "dateText", "hours", "hoursRemake", "owned"]) if (!g[k] && r[k]) g[k] = r[k];
         if (!g.date && r.date) g.date = r.date;
         if (r.remake && !(g.versions || []).some(v => norm(v.title) === norm(r.remake.title)) && norm(r.remake.title) !== norm(g.title)) {
@@ -1338,7 +1522,7 @@ ${rows.map(c => `${c.title} (${c.year || "?"}) — ${c.franchise || ""}`).join("
     }
     lib._fi = null; lib._ver = (lib._ver || 0) + 1;
     // remakes you have as games of their own join their original
-    const joined = lib.bundleVersions(false).length;
+    const joined = lib._bundle(false).length;
     lib.save();
     return { added, linked, remakes, joined };
   }
@@ -1360,7 +1544,7 @@ ${rows.map(c => `${c.title} (${c.year || "?"}) — ${c.franchise || ""}`).join("
     if (n) { lib._ver = (lib._ver || 0) + 1; lib.save(); }
     return n;
   }
-  const API = { mergeList, repairFromList, cleanSeries, seriesStem, looseKey, words, setVersionStatus, versionDone, missingRows, canonCheckPrompt, applyCanonCheck, checkKey, storyKey, hasEdition, verDate, versionKind, MY_INFO_PROMPT, infoPromptOne, parseInfoText, imdbCheckMissing, timePlayed, hrs, sourceOf, wordDate, longDate, infoPrompt, parseInfo, applyInfo, steamPlay, backlogHours, findDuplicates, mergeGames, linkRemake, mergeInto, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
+  const API = { aiSortPrompts, parseAiSort, mergeList, repairFromList, cleanSeries, seriesStem, looseKey, words, setVersionStatus, versionDone, missingRows, canonCheckPrompt, applyCanonCheck, checkKey, storyKey, hasEdition, verDate, versionKind, MY_INFO_PROMPT, infoPromptOne, parseInfoText, imdbCheckMissing, timePlayed, hrs, sourceOf, wordDate, longDate, infoPrompt, parseInfo, applyInfo, steamPlay, backlogHours, findDuplicates, mergeGames, linkRemake, mergeInto, itadCall, itadIds, itadOverview, itadSubs, itadBundles, itadWaitSync, itadAuthUrl, itadToken, priceWatch, readXlsx, fromSheet, sheetDate, steamExtras, imdbGameSearch, STATUSES, LABEL, norm, isoOf, blank, Games, setStatus, logPlay, removePlay, logSession, playedMins, stats, franchiseGuess, fromOld, hasOld, COVER, HEADER,
     steamSearch, linkSteam, fixSharedSteam, steamPrices, storePrices, steamDates, importRows, fromImdb, storeLinks, indexFor, yearOf, NA };
   if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
   root.GamesCore = API;

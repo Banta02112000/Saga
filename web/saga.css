@@ -463,3 +463,7 @@ main > .setpage { grid-column: 1 / -1; min-width: 0; }
 .rowarrows .iconbtn[data-dir="-1"] { left: -6px; } .rowarrows .iconbtn[data-dir="1"] { right: -6px; }
 .rowarrows .iconbtn[hidden] { display: none; }
 @media (pointer: fine) { .rail, .chips { cursor: grab; } .rail.dragging, .chips.dragging { cursor: grabbing; user-select: none; } .rail.dragging * { pointer-events: none; } }
+
+/* 0.8.4: a button at the end of a row never squeezes the title */
+.item > .btn, .item > button.btn { flex-shrink: 0; }
+.item .grow > b.ell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

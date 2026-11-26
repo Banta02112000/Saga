@@ -46,5 +46,7 @@
       <div class="mvtext">${o.kicker ? `<div class="kicker">${esc(o.kicker)}</div>` : ""}<h2>${esc(o.name)}</h2>${o.line ? `<div class="small">${o.line}</div>` : ""}</div>
       ${o.pct != null ? `<div class="mvbar"><i style="width:${pct}%"></i></div>` : ""}${o.right ? `<div class="mvright">${o.right}</div>` : ""}</div>`;
   }
-  window.Kit = { banner, esc, hue, poster, tile, rail, grid, head, sheetHero, stars, when, iso, mods: {}, toast: () => {}, icon: () => "", sheet: () => {}, close: () => {} };
+  // 0.8.4: a button that needs a second tap: the first one changes its text; → true on the second
+  function confirmTap(el, text) { if (el.dataset.sure) return true; el.dataset.sure = "1"; el.dataset.was = el.innerHTML; el.textContent = text; setTimeout(() => { if (el.isConnected && el.dataset.sure) { delete el.dataset.sure; el.innerHTML = el.dataset.was; } }, 5000); return false; }
+  window.Kit = { confirmTap, banner, esc, hue, poster, tile, rail, grid, head, sheetHero, stars, when, iso, mods: {}, toast: () => {}, icon: () => "", sheet: () => {}, close: () => {} };
 })();
